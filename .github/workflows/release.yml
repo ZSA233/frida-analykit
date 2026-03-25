@@ -1,0 +1,73 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Validate tag version
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          PY_VERSION=$(python - <<'PY'
+          import re
+          from pathlib import Path
+          text = Path("src/frida_analykit/_version.py").read_text()
+          print(re.search(r'__version__ = "(.*)"', text).group(1))
+          PY
+          )
+          NODE_VERSION=$(node -p "require('./packages/frida-analykit-agent/package.json').version")
+          test "$TAG_VERSION" = "$PY_VERSION"
+          test "$TAG_VERSION" = "$NODE_VERSION"
+
+      - name: Sync Python environment
+        run: uv sync --extra repl --dev
+
+      - name: Install runtime package dependencies
+        run: npm --prefix packages/frida-analykit-agent install
+
+      - name: Run tests
+        env:
+          npm_config_cache: ${{ runner.temp }}/npm-cache
+        run: |
+          uv run pytest -q -m "not smoke and not scaffold"
+          npm --prefix packages/frida-analykit-agent run check
+
+      - name: Pack npm runtime artifact
+        env:
+          npm_config_cache: ${{ runner.temp }}/npm-cache
+        run: npm pack ./packages/frida-analykit-agent
+
+      - name: Publish npm runtime to npmjs
+        working-directory: packages/frida-analykit-agent
+        run: npm publish --access public
+
+      - name: Build Python artifacts
+        run: uv build
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*
+            *.tgz

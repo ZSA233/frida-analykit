@@ -1,9 +1,0 @@
-click==8.1.8
-colorama==0.4.6
-frida==16.6.6
-frida_tools==13.6.0
-pexpect==4.9.0
-prompt_toolkit==3.0.48
-ptpython==3.0.29
-pydantic==2.10.6
-ruamel.yaml==0.18.10

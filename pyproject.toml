@@ -1,0 +1,80 @@
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "frida-analykit"
+dynamic = ["version"]
+description = "Python CLI orchestration and agent scaffolding for Frida workflows."
+readme = "README_EN.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [
+  { name = "ZSA233" }
+]
+dependencies = [
+  "click>=8.1.8,<9",
+  "colorama>=0.4.6,<0.5",
+  "frida>=16.6.6,<18",
+  "pexpect>=4.9.0,<5",
+  "pydantic>=2.10.6,<3",
+  "ruamel.yaml>=0.18.10,<0.19"
+]
+
+[project.optional-dependencies]
+repl = [
+  "prompt_toolkit>=3.0.48,<4",
+  "ptpython>=3.0.29,<4"
+]
+
+[project.scripts]
+frida-analykit = "frida_analykit.cli:main"
+
+[tool.hatch.version]
+path = "src/frida_analykit/_version.py"
+
+[tool.hatch.build]
+include = [
+  "src/frida_analykit/**/*.py",
+  "src/frida_analykit/resources/**/*",
+  "packages/frida-analykit-agent/**/*",
+  "LICENSE",
+  "README.md",
+  "README_EN.md",
+  "AGENTS.MD",
+  "Makefile",
+  "package.json",
+  "tsconfig.json"
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/frida_analykit"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/src",
+  "/packages",
+  "/tests",
+  "/.github",
+  "/LICENSE",
+  "/README.md",
+  "/README_EN.md",
+  "/AGENTS.MD",
+  "/Makefile",
+  "/package.json",
+  "/pyproject.toml",
+  "/tsconfig.json"
+]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+testpaths = ["tests"]
+markers = [
+  "smoke: requires a local Frida attachment target",
+  "scaffold: requires npm install/build tooling"
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=8.3.5,<9"
+]

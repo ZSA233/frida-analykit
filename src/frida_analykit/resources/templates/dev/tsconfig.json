@@ -1,0 +1,20 @@
+{
+    "compilerOptions": {
+        "module": "es2022",
+        "moduleResolution": "bundler",
+        "target": "es2021",
+        "lib": [
+            "es2021"
+        ],
+        "types": [
+            "frida-gum",
+            "node"
+        ],
+        "allowJs": true,
+        "noEmit": true,
+        "strict": true,
+        "esModuleInterop": true,
+        "allowSyntheticDefaultImports": true,
+        "skipLibCheck": true
+    }
+}

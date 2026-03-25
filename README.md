@@ -3,148 +3,194 @@
 [![GitHub Stars](https://img.shields.io/github/stars/zsa233/frida-analykit)](https://github.com/zsa233/frida-analykit/stargazers)
 [![License](https://img.shields.io/github/license/zsa233/frida-analykit)](LICENSE)
 
-
 🌍 语言: 中文 | [English](README_EN.md)
 
+Frida-Analykit v2 是一个双产物仓库：
 
-## 简介
+- Python CLI：负责 `frida-server` 启动、设备连接、日志与二进制数据落盘、REPL、脚手架生成。
+- npm runtime：提供给用户自定义 TypeScript agent 使用的公共 runtime，包名为 `@zsa233/frida-analykit-agent`。
 
-**⚠目前仅支持arm64**
+## 当前兼容策略
 
-> frida分析工具，用于在注入调试过程快速构建基础工具方法，以便专注于实际问题的解决。
-
-1. 使用`python`来rpc代理`js`层的所有输入和输出
-    - 使用`JsHandle`来代理`js`的变量，实现间接的`python-REPL`来近似`js-REPL`进行调试。
-    - 解决原生的js日志输出和`js-REPL`抢夺控制台输入的重叠输出问题。
-    - 解决当日志/数据输出时归档和分析时繁琐的手动文件拉取操作。
-
-2. 使用`frida-compile`来支持模块化开发
-
-3. 针对通用而非特殊场景设计和实现的工具方法
-
-
-## 工具套件
-
-| 名称 | 可用性 | 备注 |
-|:---------|:-----:|:-----|
-| nettools | √     | 抓包辅助 |
-| elftools | √     | .so解析辅助; symbol-attach(TODO) |
-| jnitools | TODO  | jni辅助; jni_java(TODO) |
-| dextools | TODO  | dex辅助 |
-
-
-## 用法
-
-**该工具建议`fork`自己的项目用于自定义修改或`git clone`的方式来使用**
-
-以下步骤将构建如下层级目录结构
-```md
-myproj
-├── frida-analykit/
-│   ├── agent/
-│   ├── script/
-│   ├── templates/
-│   ├── gen.py
-│   ├── main.py
-│   └── ...
-│
-├── config.yml
-├── index.ts
-├── ptpython_spawn.sh
-├── package.json
-└── ...
-
-```
-
-
-1. 拉取脚本
-```sh
-# (单项目建议) 在工作目录下直接git clone：
-# (多项目建议) 使用软连接的方式连接到当前工作目录
-# 工作路径：myproj
-git clone https://github.com/ZSA233/frida-analykit.git
-
-```
-
-2. 生成工作环境
+- 兼容轨道：`16.6.x` 与 `17.x`
+- 当前检查版本：`16.6.6` 与 `17.8.2`
+- 使用前可运行：
 
 ```sh
-# 在这之前选定自己想要指定的全局或者pyenv环境来安装依赖.
-# pip install -r requirements.txt
-
-# 生成环境文件（在当前目录生成index.ts, config.yml, ptpython_spaw.sh等帮助脚本和配置）
-python frida-analykit/gen.py dev
-
+frida-analykit doctor
 ```
 
-3. 配置config.yml
-> 配置文件: `config.yml`
+## 安装 Python CLI
+
+Python 包只通过 GitHub 仓库 / GitHub Release 分发，不发布到 PyPI。
+
+推荐直接用 `uv` 安装命令行：
+
+```sh
+uv tool install "git+https://github.com/ZSA233/frida-analykit@v2.0.0"
+```
+
+如果你更希望锁定到某个 release wheel，也可以直接安装 release 附件。
+
+## 用法 1：直接把它当成 CLI 工具
+
+准备一个 `config.yml`：
 
 ```yml
-
-# 目标包名（必填
-app: 
-# frida-compile 自动生成的 代理脚本
-jsfile: _agent.js
-
+app: com.example.demo
+jsfile: ./_agent.js
 
 server:
-  # frida-server在目标调试设备上面的bin路径
   servername: /data/local/tmp/frida-server
-  # adb forward 映射到本机的流量地址端口
-  host: 127.0.0.1:6666
-  # 多设备时候需要指定的device_id（使用adb devices确定）
-  device: aaaaaaaa
+  host: 127.0.0.1:27042
+  device:
 
 agent:
-  # 任何从js脚本中使用send来传输data，未注册处理器的类型都会默认保存在这个目录下
-  datadir: ./data/
-  stdout: ./logs/outerr.log
-  stderr: ./logs/outerr.log
-
+  datadir: ./data
+  stdout: ./logs/stdout.log
+  stderr: ./logs/stderr.log
 
 script:
   nettools:
-    ssl_log_secret: ./data/nettools/sslkey/
-
+    ssl_log_secret: ./data/nettools/sslkey
 ```
 
-
-4. 启动frida-compile文件监听编译
-```sh
-# 执行下面命令行来监听index.ts脚本的修改变动以实时编译生成_agent.js
-npm run watch
-```
-
-5. 启动frida-server服务
-```sh
-python frida-analykit/main.py bootup-server
-```
-
-6. 运行脚本
+常用命令：
 
 ```sh
-# 按照
-# 1. 使用repl来启动spawn/attach注入
-./ptpython_spawn.sh
-./ptpython_attach.sh
+# 远端 frida-server 启动
+frida-analykit server boot --config config.yml
 
-# 2. 脚本直接运行
-python frida-analykit/main.py spawn
+# 先编译 index.ts -> _agent.js
+frida-analykit build --config config.yml
 
+# spawn 模式
+frida-analykit spawn --config config.yml
+
+# attach 模式
+frida-analykit attach --config config.yml --pid 12345
+
+# 带 REPL
+frida-analykit attach --config config.yml --build --repl
+
+# 持续监听 index.ts 变动，但不会自动热重载已加载 session
+frida-analykit attach --config config.yml --watch --repl
 ```
 
+说明：
 
-## 平台
+- `spawn` / `attach` 默认保持会话存活，适合持续收集日志和 data payload。
+- `--repl` 会打开 `ptpython`，可以直接拿到 `device`、`session`、`script` 等对象。
+- `server.host` 除了 `host:port`，也支持 `local` 和 `usb` 这类本地/USB 设备简写。
 
-| 平台 | 是否兼容 |
-|:---:|:----:|
-| win | 支持wsl |
-| linux | √ |
-| macos | √ |
+## 用法 2：生成自定义 TypeScript agent 工作区
 
+这是 v2 的主线开发模式。Python CLI 负责注入与日志归档，用户在独立工作区里只维护自己的 TS agent。
+
+### 1. 生成工作区
+
+```sh
+frida-analykit gen dev --work-dir ./my-agent
+```
+
+生成后目录类似：
+
+```text
+my-agent/
+├── README.md
+├── config.yml
+├── index.ts
+├── package.json
+└── tsconfig.json
+```
+
+### 2. 安装依赖
+
+```sh
+cd my-agent
+npm install
+```
+
+默认生成的 `package.json` 会直接依赖 npmjs 上对应版本的 `@zsa233/frida-analykit-agent`，只需要普通的 `npm install`，不需要 `.npmrc` 或额外 token。
+
+### 3. 自定义你的 agent
+
+默认 `index.ts` 会把 runtime 的 RPC 层装进去：
+
+```ts
+import "@zsa233/frida-analykit-agent/rpc"
+```
+
+你可以继续扩展：
+
+```ts
+import "@zsa233/frida-analykit-agent/rpc"
+import { help, proc, SSLTools } from "@zsa233/frida-analykit-agent"
+
+console.log("pid =", Process.id)
+console.log("api level =", help.androidGetApiLevel())
+console.log("maps =", proc.mapCache.length)
+SSLTools.guess().forEach((item) => console.log(item))
+```
+
+### 4. 让 CLI 触发编译并运行
+
+```sh
+# 一次性编译
+frida-analykit build --config ./config.yml
+
+# 编译后注入
+frida-analykit attach --config ./config.yml --build --repl
+
+# 持续监听 index.ts 并在首个成功构建后注入
+frida-analykit attach --config ./config.yml --watch --repl
+```
+
+CLI 会复用工作区中的 `npm run build` / `npm run watch`。如果你更习惯手动调试，也仍然可以直接执行这两个 npm scripts。
+
+然后用同一个 Python CLI 去运行：
+
+```sh
+frida-analykit attach --config ./config.yml --build --repl
+```
+
+## 配置说明
+
+`config.yml` 顶层结构保持为：
+
+- `app`: 目标包名，`spawn` 时必须提供；`attach` 时可作为 PID 自动解析依据
+- `jsfile`: 编译产物 `_agent.js` 路径
+- `server`: 设备与 `frida-server` 连接信息
+- `agent`: Python 侧日志/二进制数据输出目录
+- `script`: agent 侧扩展配置，目前主要是 `nettools.ssl_log_secret`
+
+## 发布与仓库结构
+
+- Python 包：GitHub Release
+- npm runtime：npmjs
+- 版本：Python 与 npm 共用同一个版本号
+
+仓库中的关键目录：
+
+```text
+src/frida_analykit/                # Python CLI 与运行时编排
+packages/frida-analykit-agent/     # npm runtime
+tests/                             # Python tests
+.github/workflows/                 # CI / release
+```
+
+## 从 v1 迁移到 v2
+
+v2 是破坏性升级，旧入口不再是官方接口。
+
+| v1 | v2 |
+|:---|:---|
+| `python frida-analykit/main.py ...` | `frida-analykit ...` |
+| `python frida-analykit/gen.py dev` | `frida-analykit gen dev` |
+| `ptpython_spawn.sh` / `ptpython_attach.sh` | `--repl` |
+| repo 相对导入 `./frida-analykit/script/...` | npm 包 `@zsa233/frida-analykit-agent` |
+| `requirements.txt` | `pyproject.toml` + `uv.lock` |
 
 ## 例子
 
-[android-reverse-examples](https://github.com/ZSA233/android-reverse-examples)
-
+- [android-reverse-examples](https://github.com/ZSA233/android-reverse-examples)

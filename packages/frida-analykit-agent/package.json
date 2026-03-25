@@ -1,0 +1,41 @@
+{
+  "name": "@zsa233/frida-analykit-agent",
+  "version": "2.0.0",
+  "description": "Frida agent runtime for frida-analykit",
+  "keywords": [
+    "frida",
+    "reverse-engineering",
+    "instrumentation",
+    "typescript"
+  ],
+  "homepage": "https://github.com/ZSA233/frida-analykit#readme",
+  "bugs": {
+    "url": "https://github.com/ZSA233/frida-analykit/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ZSA233/frida-analykit.git",
+    "directory": "packages/frida-analykit-agent"
+  },
+  "type": "module",
+  "files": [
+    "src/**/*",
+    "README.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": "./src/index.ts",
+    "./rpc": "./src/rpc.ts",
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "check": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "frida-java-bridge": "^7.0.8"
+  },
+  "devDependencies": {
+    "@types/frida-gum": "^18.7.2",
+    "typescript": "^5.8.3"
+  }
+}

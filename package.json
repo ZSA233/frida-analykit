@@ -1,17 +1,15 @@
 {
-  "name": "frida-analykit",
-  "version": "1.0.0",
-  "description": "frida分析工具",
+  "name": "frida-analykit-monorepo",
+  "version": "2.0.0",
   "private": true,
-  "main": "index.ts",
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
-    "prepare": "npm run build",
-    "build": "frida-compile index.ts -o _agent.js -c",
-    "watch": "frida-compile index.ts -o _agent.js -w"
+    "agent:pack": "npm pack ./packages/frida-analykit-agent",
+    "agent:build": "npm --prefix packages/frida-analykit-agent run check"
   },
-  "devDependencies": {
-    "@types/frida-gum": "^18.7.2",
-    "@types/node": "^18.19.3",
-    "frida-compile": "^16.4.1"
+  "dependencies": {
+    "@zsa233/frida-analykit-agent": "^2.0.0"
   }
 }

@@ -1,4 +1,9 @@
-__pycache__
+__pycache__/
+.pytest_cache/
+.venv/
+build/
+dist/
 package-lock.json
-node_modules
+node_modules/
 cmodule-includes/
+*.tgz
