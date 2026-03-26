@@ -1,9 +1,8 @@
-.PHONY: sync test compat scaffold build npm-pack release-check release-preflight release-local release-install-check dev-env dev-smoke
+.PHONY: sync test compat scaffold build npm-pack release-check release-preflight release-local release-install-check dev-env dev-env-list dev-env-gen dev-env-enter dev-env-remove dev-smoke
 
 RELEASE_TAG ?=
 RC_TAG ?=
 DIST_DIR ?= dist
-DEV_ENV_ARGS ?=
 PYTHON_BIN ?= .venv/bin/python
 
 sync:
@@ -44,19 +43,42 @@ release-preflight:
 
 release-local:
 	@if [ -z "$(RELEASE_TAG)" ]; then echo "RELEASE_TAG is required" >&2; exit 1; fi
-	uv build --sdist
+	uv build --sdist --wheel
 	npm pack ./packages/frida-analykit-agent
-	@BUILD="$$(uv run python scripts/release_assets.py build-wheels --out-dir "$(DIST_DIR)" --json)"; \
-	BUILT="$$(python -c 'import json,sys; payload=json.loads(sys.argv[1]); print(payload["built_count"])' "$$BUILD")"; \
-	TOTAL="$$(python -c 'import json,sys; payload=json.loads(sys.argv[1]); print(payload["total_count"])' "$$BUILD")"; \
-	test "$$BUILT" = "$$TOTAL"
 
 release-install-check:
 	@if [ -z "$(RELEASE_TAG)" ]; then echo "RELEASE_TAG is required" >&2; exit 1; fi
 	uv run python scripts/release_assets.py install-check --tag "$(RELEASE_TAG)" --dist-dir "$(DIST_DIR)"
 
 dev-env:
-	uv run python scripts/dev_env.py prepare $(DEV_ENV_ARGS)
+	uv run python scripts/dev_env.py help
+
+dev-env-list:
+	uv run python scripts/dev_env.py list
+
+dev-env-gen:
+	@if [ -z "$(FRIDA_VERSION)" ]; then \
+		echo "Usage: make dev-env-gen FRIDA_VERSION=<version> [ENV_NAME=<name>] [NO_REPL=1]" >&2; \
+		exit 2; \
+	fi
+	uv run python scripts/dev_env.py gen \
+		--frida-version "$(FRIDA_VERSION)" \
+		$(if $(ENV_NAME),--name "$(ENV_NAME)") \
+		$(if $(NO_REPL),--no-repl)
+
+dev-env-enter:
+	@if [ -z "$(ENV_NAME)" ]; then \
+		echo "Usage: make dev-env-enter ENV_NAME=<name>" >&2; \
+		exit 2; \
+	fi
+	uv run python scripts/dev_env.py enter --name "$(ENV_NAME)"
+
+dev-env-remove:
+	@if [ -z "$(ENV_NAME)" ]; then \
+		echo "Usage: make dev-env-remove ENV_NAME=<name>" >&2; \
+		exit 2; \
+	fi
+	uv run python scripts/dev_env.py remove --name "$(ENV_NAME)"
 
 dev-smoke:
 	FRIDA_ANALYKIT_ENABLE_SMOKE=1 "$(PYTHON_BIN)" -m pytest tests/test_smoke.py -q -m smoke

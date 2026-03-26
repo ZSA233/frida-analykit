@@ -14,7 +14,7 @@ on:
         type: string
 
 concurrency:
-  group: release-assets-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -29,16 +29,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .nvmrc
-
-      - uses: astral-sh/setup-uv@v5
 
       - name: Validate dispatch tag format
         if: ${{ github.event_name == 'workflow_dispatch' }}
@@ -55,14 +45,9 @@ jobs:
               ;;
           esac
 
-      - name: Preflight release checks
-        run: make release-preflight RELEASE_TAG="$TARGET_TAG"
-
-      - name: Build local release artifacts
-        run: make release-local RELEASE_TAG="$TARGET_TAG"
-
-      - name: Verify installability
-        run: make release-install-check RELEASE_TAG="$TARGET_TAG"
+      - uses: ./.github/actions/release-bundle
+        with:
+          release_tag: ${{ env.TARGET_TAG }}
 
       - name: Upload release bundle
         uses: actions/upload-artifact@v4

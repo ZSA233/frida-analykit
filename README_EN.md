@@ -12,8 +12,9 @@ Frida-Analykit v2 is a dual-artifact repository:
 
 ## Compatibility
 
-- Python dependency range: `frida>=16.5.9,<18.0.0`
+- Python dependency range: `frida>=16.5.9,<18`
 - Tested profile pins: `16.5.9` and `17.8.2`
+- `frida-analykit doctor` classifies the current environment as `tested`, `supported but untested`, or `unsupported`
 
 Check the current environment with:
 
@@ -33,13 +34,42 @@ uv tool install "git+https://github.com/ZSA233/frida-analykit@v2.0.0"
 
 This path keeps the tag-defined range dependency from `pyproject.toml`, which is currently `frida>=16.5.9,<18`.
 
-If you prefer an exact Frida pin, install a wheel from the GitHub Release assets instead. Release wheels use the real filenames emitted by the build backend; because this project is still a pure-Python wheel today, a typical filename looks like:
+If you prefer an exact Frida pin, install into an isolated environment explicitly:
 
-```text
-frida_analykit-2.0.0+frida17.8.2-py3-none-any.whl
+```sh
+uv venv .venv-frida-17.8.2
+uv pip install --python .venv-frida-17.8.2/bin/python \
+  "frida==17.8.2" \
+  "git+https://github.com/ZSA233/frida-analykit@v2.0.0"
 ```
 
-Those wheels pin `frida==17.8.2` in package metadata. A single tool release can therefore ship multiple wheels for different stable Frida versions.
+If `frida --version` does not change after you switch environments, you are usually still hitting a global `frida-tools` binary. Managed environments install `frida`, `frida-tools`, and `frida-analykit` together so the shell command follows the selected environment.
+
+For local development, the repository helper keeps this workflow reproducible:
+
+```sh
+make dev-env
+make dev-env-list
+make dev-env-gen FRIDA_VERSION=16.5.9
+make dev-env-gen FRIDA_VERSION=16.5.9 NO_REPL=1
+make dev-env-gen FRIDA_VERSION=16.5.9 ENV_NAME=frida-16.5.9
+make dev-env-enter ENV_NAME=frida-16.5.9
+make dev-env-remove ENV_NAME=frida-16.5.9
+```
+
+The general CLI exposes the same workflow:
+
+```sh
+frida-analykit env create --frida-version 16.5.9 --name frida-16.5.9
+frida-analykit env create --frida-version 16.5.9 --no-repl
+frida-analykit env list
+frida-analykit env use frida-16.5.9
+frida-analykit env shell
+frida-analykit env remove frida-16.5.9
+frida-analykit env install-frida --version 16.5.9
+```
+
+`make dev-env` only prints help. `make dev-env-gen` installs the repo-oriented `dev + repl` dependencies by default, requires an explicit `FRIDA_VERSION`, keeps `ENV_NAME` optional, and accepts `NO_REPL=1` to skip the REPL extra. `frida-analykit env create` installs `repl` by default but does not install the repo `dev` group, and accepts `--no-repl` to skip it. `make dev-env-enter` and `frida-analykit env shell` open a child shell; `frida-analykit env use <name>` only switches the current environment pointer and does not modify the current shell. Inside the child shell you can directly run `uv pip install ...`, `python`, `frida`, and `frida-analykit`; if you want `uv run` / `uv sync` to prefer the active environment, use `--active` explicitly. Exit a child shell with `exit`. If you activate manually with `source .../bin/activate`, leave it with `deactivate`.
 
 ## Flow 1: Use It As A CLI Tool
 
@@ -170,13 +200,13 @@ The v2 YAML shape stays close to v1:
 ## Distribution And Repository Layout
 
 - Python package: GitHub Releases
-  Each GitHub Release includes one shared source archive `frida_analykit-X.Y.Z.tar.gz` plus multiple Frida-pinned wheel variants
+  Each GitHub Release includes one source archive `frida_analykit-X.Y.Z.tar.gz` and one real build wheel
 - npm runtime: npmjs
 - Versioning: Python and npm share the same version number
-- Release range config: `release/frida-builds.toml`
-  Backfill automation reads the copy frozen in the target tag instead of the latest branch
+- Support-range source of truth: the direct `frida>=...,<...` dependency in `pyproject.toml`
+- Tested-profile source of truth: `src/frida_analykit/resources/compat_profiles.json`
 - Release automation requires exactly one direct `frida>=...,<...` dependency in `pyproject.toml`; extras, markers, or duplicate `frida` entries are rejected
-- Backfill only targets tags that already have a GitHub Release; a bare git tag without a release is not scanned
+- Historical multi-wheel releases remain as historical artifacts only; new releases no longer use that distribution model
 - The first-release, RC, stable, and development validation runbook lives in `docs/release-process.md`
 
 Key directories:
@@ -184,7 +214,6 @@ Key directories:
 ```text
 src/frida_analykit/                # Python CLI and orchestration
 packages/frida-analykit-agent/     # npm runtime
-release/                           # Frida release-range config frozen per tool tag
 scripts/                           # release asset planning / build helpers
 tests/                             # Python tests
 .github/workflows/                 # CI and release automation

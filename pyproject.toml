@@ -54,7 +54,6 @@ packages = ["src/frida_analykit"]
 include = [
   "/src",
   "/packages",
-  "/release",
   "/scripts",
   "/tests",
   "/.github",

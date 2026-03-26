@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import atexit
 import os
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,13 @@ import frida
 
 from .compat import FridaCompat
 from .config import AppConfig
+from .dev_env import (
+    DevEnvError,
+    DevEnvManager,
+    render_env_summary,
+    render_install_summary,
+    render_remove_summary,
+)
 from .diagnostics import set_verbose
 from .frontend import FrontendError, WatchProcess, build_agent_bundle, load_frontend_project, start_watch
 from .scaffold import generate_dev_workspace, scaffold_summary
@@ -173,6 +181,10 @@ def _configure_verbose(verbose: bool) -> None:
     set_verbose(verbose)
 
 
+def _global_env_manager() -> DevEnvManager:
+    return DevEnvManager.for_global()
+
+
 @click.group()
 def cli() -> None:
     """Frida-Analykit v2 CLI."""
@@ -200,6 +212,92 @@ def gen_dev(work_dir: Path, force: bool, agent_package_spec: str | None, verbose
         agent_package_spec=agent_package_spec,
     )
     click.echo(scaffold_summary(created))
+
+
+@cli.group("env", invoke_without_command=True)
+@click.pass_context
+def env_group(ctx: click.Context) -> None:
+    """Manage isolated Frida environments."""
+    if ctx.invoked_subcommand is None:
+        click.echo(ctx.get_help())
+
+
+@env_group.command("create")
+@click.option("--profile", default=None, help="Create the environment from a named compatibility profile.")
+@click.option("--frida-version", default=None, help="Create the environment with an explicit Frida version.")
+@click.option("--name", default=None, help="Override the managed environment name.")
+@click.option("--no-repl", is_flag=True, help="Skip installing the optional REPL dependencies.")
+def env_create(profile: str | None, frida_version: str | None, name: str | None, no_repl: bool) -> None:
+    try:
+        env = _global_env_manager().create(
+            name=name,
+            profile=profile,
+            frida_version=frida_version,
+            with_repl=not no_repl,
+        )
+    except DevEnvError as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(render_env_summary(env, action="created"))
+
+
+@env_group.command("list")
+def env_list() -> None:
+    click.echo(_global_env_manager().render_list())
+
+
+@env_group.command("shell")
+@click.argument("name", required=False)
+def env_shell(name: str | None) -> None:
+    try:
+        _global_env_manager().enter(name)
+    except DevEnvError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+
+@env_group.command("remove")
+@click.argument("name", required=True)
+def env_remove(name: str) -> None:
+    try:
+        env = _global_env_manager().remove(name)
+    except DevEnvError as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(render_remove_summary(env))
+
+
+@env_group.command("use")
+@click.argument("name", required=True)
+def env_use(name: str) -> None:
+    try:
+        env = _global_env_manager().use(name)
+    except DevEnvError as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(f"current env: {env.name}")
+    click.echo("current shell unchanged; run `frida-analykit env shell` to enter it.")
+
+
+@env_group.command("install-frida")
+@click.option("--version", "frida_version", required=True, help="Install an exact Frida version.")
+@click.option(
+    "--python",
+    "python_path",
+    type=click.Path(path_type=Path, dir_okay=False),
+    default=None,
+    help="Target Python interpreter inside a virtual environment. Defaults to the current interpreter.",
+)
+def env_install_frida(frida_version: str, python_path: Path | None) -> None:
+    manager = _global_env_manager()
+    target_python = python_path or Path(sys.executable)
+    try:
+        payload = manager.install_frida(target_python, frida_version)
+    except DevEnvError as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(
+        render_install_summary(
+            python_path=Path(payload["python"]),
+            env_dir=Path(payload["env_dir"]),
+            frida_version=payload["frida_version"],
+        )
+    )
 
 
 @cli.group("server")
@@ -403,11 +501,11 @@ def doctor(config_path: str, verbose: bool) -> None:
     compat = FridaCompat()
     report = compat.doctor_report()
     click.echo(f"Installed Frida: {report['installed_version']}")
+    click.echo(f"Support status: {report['support_status']}")
+    click.echo(f"Supported range: {report['support_range']}")
     click.echo(f"Supported: {'yes' if report['supported'] else 'no'}")
-    if report["matched_profile"]:
-        click.echo(f"Matched profile: {report['matched_profile']}")
-    else:
-        click.echo("Matched profile: none")
+    click.echo(f"Matched profile: {report['matched_profile'] or 'none'}")
+    click.echo(f"Tested version in profile: {report['tested_version'] or 'none'}")
     click.echo("Tested compatibility profiles:")
     for profile in report["profiles"]:
         click.echo(

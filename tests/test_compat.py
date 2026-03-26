@@ -1,4 +1,4 @@
-from frida_analykit.compat import FridaCompat
+from frida_analykit.compat import FridaCompat, SupportRange, Version
 
 
 class _FakeDeviceManager:
@@ -27,16 +27,71 @@ class _FakeFrida:
 
 
 def test_doctor_matches_current_profile() -> None:
-    compat = FridaCompat(_FakeFrida())
+    compat = FridaCompat(
+        _FakeFrida(),
+        support_range=SupportRange(
+            min_inclusive=Version.parse("16.5.9"),
+            max_exclusive=Version.parse("18.0.0"),
+        ),
+    )
 
     report = compat.doctor_report()
 
     assert report["supported"] is True
+    assert report["support_status"] == "tested"
+    assert report["support_range"] == ">=16.5.9, <18.0.0"
     assert report["matched_profile"] == "current-17"
+    assert report["tested_version"] == "17.8.2"
+
+
+def test_doctor_marks_supported_but_untested_versions() -> None:
+    class _UntestedFrida(_FakeFrida):
+        __version__ = "17.8.1"
+
+    compat = FridaCompat(
+        _UntestedFrida(),
+        support_range=SupportRange(
+            min_inclusive=Version.parse("16.5.9"),
+            max_exclusive=Version.parse("18.0.0"),
+        ),
+    )
+
+    report = compat.doctor_report()
+
+    assert report["supported"] is True
+    assert report["support_status"] == "supported but untested"
+    assert report["matched_profile"] == "current-17"
+    assert report["tested_version"] == "17.8.2"
+
+
+def test_doctor_marks_unsupported_versions() -> None:
+    class _UnsupportedFrida(_FakeFrida):
+        __version__ = "18.0.0"
+
+    compat = FridaCompat(
+        _UnsupportedFrida(),
+        support_range=SupportRange(
+            min_inclusive=Version.parse("16.5.9"),
+            max_exclusive=Version.parse("18.0.0"),
+        ),
+    )
+
+    report = compat.doctor_report()
+
+    assert report["supported"] is False
+    assert report["support_status"] == "unsupported"
+    assert report["matched_profile"] is None
+    assert report["tested_version"] is None
 
 
 def test_device_resolution_supports_special_hosts() -> None:
-    compat = FridaCompat(_FakeFrida())
+    compat = FridaCompat(
+        _FakeFrida(),
+        support_range=SupportRange(
+            min_inclusive=Version.parse("16.5.9"),
+            max_exclusive=Version.parse("18.0.0"),
+        ),
+    )
 
     assert compat.get_device("local")[0] == "local"
     assert compat.get_device("usb")[0] == "usb"

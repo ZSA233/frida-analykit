@@ -12,8 +12,9 @@ Frida-Analykit v2 是一个双产物仓库：
 
 ## 当前兼容策略
 
-- Python 依赖范围：`frida>=16.5.9,<18.0.0`
+- Python 依赖范围：`frida>=16.5.9,<18`
 - 当前检查版本：`16.5.9` 与 `17.8.2`
+- `frida-analykit doctor` 会把当前环境标记为 `tested`、`supported but untested` 或 `unsupported`
 - 使用前可运行：
 
 ```sh
@@ -32,13 +33,42 @@ uv tool install "git+https://github.com/ZSA233/frida-analykit@v2.0.0"
 
 这个安装方式沿用 tag 对应源码里的范围依赖语义，也就是 `pyproject.toml` 里的 `frida>=16.5.9,<18`。
 
-如果你更希望锁定到某个精确 Frida 版本，也可以直接安装 GitHub Release 里的 wheel 附件。release wheel 会使用构建后真实生成的合法 wheel 文件名；当前这个项目仍然是纯 Python wheel，所以一个典型文件名类似：
+如果你更希望锁定到某个精确 Frida 版本，推荐在独立环境里显式安装：
 
-```text
-frida_analykit-2.0.0+frida17.8.2-py3-none-any.whl
+```sh
+uv venv .venv-frida-17.8.2
+uv pip install --python .venv-frida-17.8.2/bin/python \
+  "frida==17.8.2" \
+  "git+https://github.com/ZSA233/frida-analykit@v2.0.0"
 ```
 
-这类 wheel 的包内元数据会精确钉死 `frida==17.8.2`。同一个 tool release 下会并存多份针对不同 Frida 正式版的 wheel。
+如果当前环境里的 `frida --version` 没跟着虚拟环境切换，通常说明你命中的还是全局 `frida-tools`。受管理环境会同时安装 `frida`、`frida-tools` 和 `frida-analykit`，避免这个问题。
+
+开发阶段可以直接用仓库里的 helper：
+
+```sh
+make dev-env
+make dev-env-list
+make dev-env-gen FRIDA_VERSION=16.5.9
+make dev-env-gen FRIDA_VERSION=16.5.9 NO_REPL=1
+make dev-env-gen FRIDA_VERSION=16.5.9 ENV_NAME=frida-16.5.9
+make dev-env-enter ENV_NAME=frida-16.5.9
+make dev-env-remove ENV_NAME=frida-16.5.9
+```
+
+通用 CLI 也提供同一套环境管理：
+
+```sh
+frida-analykit env create --frida-version 16.5.9 --name frida-16.5.9
+frida-analykit env create --frida-version 16.5.9 --no-repl
+frida-analykit env list
+frida-analykit env use frida-16.5.9
+frida-analykit env shell
+frida-analykit env remove frida-16.5.9
+frida-analykit env install-frida --version 16.5.9
+```
+
+`make dev-env` 默认只显示帮助。`make dev-env-gen` 默认安装仓库开发所需的 `dev + repl` 依赖，必须显式传入 `FRIDA_VERSION`，`ENV_NAME` 可选，`NO_REPL=1` 可关闭 REPL 依赖；`frida-analykit env create` 默认安装 `repl`，但不会安装仓库的 `dev` 依赖组，可通过 `--no-repl` 关闭。`make dev-env-enter` 和 `frida-analykit env shell` 会打开一个子 shell；`frida-analykit env use <name>` 只切换 current 环境，不会修改当前 shell。进入子 shell 后可以直接执行 `uv pip install ...`、`python`、`frida`、`frida-analykit`；如果要让 `uv run` / `uv sync` 优先作用于当前激活环境，仍建议显式加 `--active`。退出子 shell 用 `exit`；如果你手动 `source .../bin/activate`，则退出时用 `deactivate`。
 
 ## 用法 1：直接把它当成 CLI 工具
 
@@ -191,13 +221,13 @@ frida-analykit attach --config ./config.yml --build --repl
 ## 发布与仓库结构
 
 - Python 包：GitHub Release
-  GitHub Release 会同时包含一份通用源码包 `frida_analykit-X.Y.Z.tar.gz`，以及多份按 Frida 正式版精确 pin 的 wheel 变体
+  每个 GitHub Release 只包含一份源码包 `frida_analykit-X.Y.Z.tar.gz` 和一份真实构建出的 wheel
 - npm runtime：npmjs
 - 版本：Python 与 npm 共用同一个版本号
-- Release 资产覆盖范围配置：`release/frida-builds.toml`
-  后续补发新 Frida 版本时，GitHub Actions 会读取目标 tag 自己冻结下来的这份配置，而不是读取最新分支
+- 支持范围真源：`pyproject.toml` 中的 `frida>=...,<...`
+- 受测 profile 真源：`src/frida_analykit/resources/compat_profiles.json`
 - Release 契约要求 `pyproject.toml` 中只有一条规范直接依赖 `frida>=...,<...`，不支持 extras、marker 或多条 `frida` 依赖
-- Backfill 只会处理已经存在 GitHub Release 的 tag；只有 git tag 但没有 GitHub Release 的版本不会被自动补发
+- 历史上的多 wheel release 资产保持原样，但后续版本不再继续维护这种分发模型
 - 首次接入、RC、stable 与开发测试流程见 `docs/release-process.md`
 
 仓库中的关键目录：
@@ -205,7 +235,6 @@ frida-analykit attach --config ./config.yml --build --repl
 ```text
 src/frida_analykit/                # Python CLI 与运行时编排
 packages/frida-analykit-agent/     # npm runtime
-release/                           # 每个 tool tag 冻结的 Frida 发布范围
 scripts/                           # release 资产规划 / 构建脚本
 tests/                             # Python tests
 .github/workflows/                 # CI / release

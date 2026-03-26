@@ -1,0 +1,32 @@
+name: Build Release Bundle
+description: Run shared release validation, build, and install-check steps
+
+inputs:
+  release_tag:
+    description: Release tag matching the current checkout version metadata
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+
+    - uses: actions/setup-node@v4
+      with:
+        node-version-file: .nvmrc
+
+    - uses: astral-sh/setup-uv@v5
+
+    - name: Preflight release checks
+      shell: bash
+      run: make release-preflight RELEASE_TAG="${{ inputs.release_tag }}"
+
+    - name: Build local release artifacts
+      shell: bash
+      run: make release-local RELEASE_TAG="${{ inputs.release_tag }}"
+
+    - name: Verify installability
+      shell: bash
+      run: make release-install-check RELEASE_TAG="${{ inputs.release_tag }}"
