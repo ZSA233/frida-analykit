@@ -6,13 +6,14 @@ from pathlib import Path
 from string import Template
 
 from ._version import __version__
+from .release_version import agent_package_spec_for_python_release
 
 
 AGENT_PACKAGE_NAME = "@zsa233/frida-analykit-agent"
 
 
 def default_agent_package_spec(version: str = __version__) -> str:
-    return f"^{version}"
+    return agent_package_spec_for_python_release(version)
 
 
 def _template_dir():

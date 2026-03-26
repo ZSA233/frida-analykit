@@ -12,8 +12,8 @@ Frida-Analykit v2 是一个双产物仓库：
 
 ## 当前兼容策略
 
-- 兼容轨道：`16.6.x` 与 `17.x`
-- 当前检查版本：`16.6.6` 与 `17.8.2`
+- Python 依赖范围：`frida>=16.5.9,<18.0.0`
+- 当前检查版本：`16.5.9` 与 `17.8.2`
 - 使用前可运行：
 
 ```sh
@@ -30,7 +30,15 @@ Python 包只通过 GitHub 仓库 / GitHub Release 分发，不发布到 PyPI。
 uv tool install "git+https://github.com/ZSA233/frida-analykit@v2.0.0"
 ```
 
-如果你更希望锁定到某个 release wheel，也可以直接安装 release 附件。
+这个安装方式沿用 tag 对应源码里的范围依赖语义，也就是 `pyproject.toml` 里的 `frida>=16.5.9,<18`。
+
+如果你更希望锁定到某个精确 Frida 版本，也可以直接安装 GitHub Release 里的 wheel 附件。release wheel 会使用构建后真实生成的合法 wheel 文件名；当前这个项目仍然是纯 Python wheel，所以一个典型文件名类似：
+
+```text
+frida_analykit-2.0.0+frida17.8.2-py3-none-any.whl
+```
+
+这类 wheel 的包内元数据会精确钉死 `frida==17.8.2`。同一个 tool release 下会并存多份针对不同 Frida 正式版的 wheel。
 
 ## 用法 1：直接把它当成 CLI 工具
 
@@ -44,6 +52,7 @@ server:
   servername: /data/local/tmp/frida-server
   host: 127.0.0.1:27042
   device:
+  version:
 
 agent:
   datadir: ./data
@@ -60,6 +69,17 @@ script:
 ```sh
 # 远端 frida-server 启动
 frida-analykit server boot --config config.yml
+
+# 查看当前 Python Frida 与设备端 frida-server 状态
+frida-analykit doctor --config config.yml
+frida-analykit doctor --config config.yml --verbose
+
+# 下载匹配版本并推送到 config.server.servername
+frida-analykit server install --config config.yml
+frida-analykit server install --config config.yml --verbose
+
+# 如需手动指定 server 版本
+frida-analykit server install --config config.yml --version 17.8.2
 
 # 先编译 index.ts -> _agent.js
 frida-analykit build --config config.yml
@@ -81,7 +101,10 @@ frida-analykit attach --config config.yml --watch --repl
 
 - `spawn` / `attach` 默认保持会话存活，适合持续收集日志和 data payload。
 - `--repl` 会打开 `ptpython`，可以直接拿到 `device`、`session`、`script` 等对象。
+- `--verbose` 会打印实际执行的 adb/npm 子进程命令、退出码和捕获到的 stdout/stderr，适合排查设备端命令判断为什么与预期不一致。
 - `server.host` 除了 `host:port`，也支持 `local` 和 `usb` 这类本地/USB 设备简写。
+- `doctor --config` 会读取 `config.yml`，检查 `server.servername` 对应的设备端文件、版本、以及当前 ABI 推导出的下载资产类型。
+- `server install` 会优先使用 `--version`，否则使用 `server.version`，再否则退回当前已安装的 Python `frida` 版本；下载文件会缓存到本机缓存目录，后续重复安装会复用。
 
 ## 用法 2：生成自定义 TypeScript agent 工作区
 
@@ -161,20 +184,29 @@ frida-analykit attach --config ./config.yml --build --repl
 - `app`: 目标包名，`spawn` 时必须提供；`attach` 时可作为 PID 自动解析依据
 - `jsfile`: 编译产物 `_agent.js` 路径
 - `server`: 设备与 `frida-server` 连接信息
+  其中 `server.version` 是可选钉死版本；不填时默认跟随当前 Python `frida` 版本
 - `agent`: Python 侧日志/二进制数据输出目录
 - `script`: agent 侧扩展配置，目前主要是 `nettools.ssl_log_secret`
 
 ## 发布与仓库结构
 
 - Python 包：GitHub Release
+  GitHub Release 会同时包含一份通用源码包 `frida_analykit-X.Y.Z.tar.gz`，以及多份按 Frida 正式版精确 pin 的 wheel 变体
 - npm runtime：npmjs
 - 版本：Python 与 npm 共用同一个版本号
+- Release 资产覆盖范围配置：`release/frida-builds.toml`
+  后续补发新 Frida 版本时，GitHub Actions 会读取目标 tag 自己冻结下来的这份配置，而不是读取最新分支
+- Release 契约要求 `pyproject.toml` 中只有一条规范直接依赖 `frida>=...,<...`，不支持 extras、marker 或多条 `frida` 依赖
+- Backfill 只会处理已经存在 GitHub Release 的 tag；只有 git tag 但没有 GitHub Release 的版本不会被自动补发
+- 首次接入、RC、stable 与开发测试流程见 `docs/release-process.md`
 
 仓库中的关键目录：
 
 ```text
 src/frida_analykit/                # Python CLI 与运行时编排
 packages/frida-analykit-agent/     # npm runtime
+release/                           # 每个 tool tag 冻结的 Frida 发布范围
+scripts/                           # release 资产规划 / 构建脚本
 tests/                             # Python tests
 .github/workflows/                 # CI / release
 ```

@@ -15,7 +15,7 @@ authors = [
 dependencies = [
   "click>=8.1.8,<9",
   "colorama>=0.4.6,<0.5",
-  "frida>=16.6.6,<18",
+  "frida>=16.5.9,<18",
   "pexpect>=4.9.0,<5",
   "pydantic>=2.10.6,<3",
   "ruamel.yaml>=0.18.10,<0.19"
@@ -54,6 +54,8 @@ packages = ["src/frida_analykit"]
 include = [
   "/src",
   "/packages",
+  "/release",
+  "/scripts",
   "/tests",
   "/.github",
   "/LICENSE",

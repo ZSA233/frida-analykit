@@ -89,7 +89,7 @@ dev = [
 requires-dist = [
     { name = "click", specifier = ">=8.1.8,<9" },
     { name = "colorama", specifier = ">=0.4.6,<0.5" },
-    { name = "frida", specifier = ">=16.6.6,<18" },
+    { name = "frida", specifier = ">=16.5.9,<18" },
     { name = "pexpect", specifier = ">=4.9.0,<5" },
     { name = "prompt-toolkit", marker = "extra == 'repl'", specifier = ">=3.0.48,<4" },
     { name = "ptpython", marker = "extra == 'repl'", specifier = ">=3.0.29,<4" },

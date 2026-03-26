@@ -13,6 +13,7 @@ class ServerConfig(BaseModel):
     device: str | None = None
     servername: str = "frida-server"
     host: str = "127.0.0.1:27042"
+    version: str | None = None
 
     @property
     def is_remote(self) -> bool:

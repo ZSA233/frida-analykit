@@ -11,14 +11,22 @@ import frida
 
 from .compat import FridaCompat
 from .config import AppConfig
+from .diagnostics import set_verbose
 from .frontend import FrontendError, WatchProcess, build_agent_bundle, load_frontend_project, start_watch
 from .scaffold import generate_dev_workspace, scaffold_summary
-from .server import boot_server
+from .server import FridaServerManager, ServerManagerError, boot_server
 from .session import SessionWrapper
 
 
 def _load_config(path: str) -> AppConfig:
     return AppConfig.from_yaml(path)
+
+
+def _load_optional_config(path: str) -> AppConfig | None:
+    candidate = Path(path).expanduser()
+    if not candidate.exists():
+        return None
+    return AppConfig.from_yaml(candidate)
 
 
 def _frontend_project_option():
@@ -27,6 +35,14 @@ def _frontend_project_option():
         type=click.Path(path_type=Path, file_okay=False, dir_okay=True),
         default=None,
         help="Override the TypeScript agent workspace root. Defaults to the config directory.",
+    )
+
+
+def _verbose_option():
+    return click.option(
+        "--verbose",
+        is_flag=True,
+        help="Print diagnostic command execution details, including subprocess commands and captured output.",
     )
 
 
@@ -153,6 +169,10 @@ def _post_attach(
     _wait_forever()
 
 
+def _configure_verbose(verbose: bool) -> None:
+    set_verbose(verbose)
+
+
 @click.group()
 def cli() -> None:
     """Frida-Analykit v2 CLI."""
@@ -171,7 +191,9 @@ def gen_group() -> None:
     default=None,
     help="Override the npm dependency spec for @zsa233/frida-analykit-agent.",
 )
-def gen_dev(work_dir: Path, force: bool, agent_package_spec: str | None) -> None:
+@_verbose_option()
+def gen_dev(work_dir: Path, force: bool, agent_package_spec: str | None, verbose: bool) -> None:
+    _configure_verbose(verbose)
     created = generate_dev_workspace(
         work_dir,
         force=force,
@@ -187,15 +209,55 @@ def server_group() -> None:
 
 @server_group.command("boot")
 @click.option("-c", "--config", "config_path", default="config.yml", show_default=True)
-def server_boot(config_path: str) -> None:
+@_verbose_option()
+def server_boot(config_path: str, verbose: bool) -> None:
+    _configure_verbose(verbose)
     boot_server(_load_config(config_path))
+
+
+@server_group.command("install")
+@click.option("-c", "--config", "config_path", default="config.yml", show_default=True)
+@click.option(
+    "--version",
+    "server_version",
+    default=None,
+    help="Override the frida-server version to download instead of using config.server.version or the installed Frida version.",
+)
+@click.option(
+    "--force-download",
+    is_flag=True,
+    help="Redownload the frida-server archive even when a cached copy is already available.",
+)
+@_verbose_option()
+def server_install(
+    config_path: str,
+    server_version: str | None,
+    force_download: bool,
+    verbose: bool,
+) -> None:
+    _configure_verbose(verbose)
+    config = _load_config(config_path)
+    try:
+        result = FridaServerManager().install_remote_server(
+            config,
+            version_override=server_version,
+            force_download=force_download,
+        )
+    except ServerManagerError as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(f"installed frida-server {result.installed_version or result.selected_version}")
+    click.echo(f"remote path: {result.remote_path}")
+    click.echo(f"device abi: {result.device_abi} ({result.asset_arch})")
+    click.echo(f"local cache: {result.local_binary}")
 
 
 @cli.command()
 @click.option("-c", "--config", "config_path", default="config.yml", show_default=True)
 @_frontend_project_option()
 @_frontend_install_option()
-def build(config_path: str, project_dir: Path | None, install: bool) -> None:
+@_verbose_option()
+def build(config_path: str, project_dir: Path | None, install: bool, verbose: bool) -> None:
+    _configure_verbose(verbose)
     config = _load_config(config_path)
     try:
         project = load_frontend_project(config, project_dir=project_dir)
@@ -209,7 +271,9 @@ def build(config_path: str, project_dir: Path | None, install: bool) -> None:
 @click.option("-c", "--config", "config_path", default="config.yml", show_default=True)
 @_frontend_project_option()
 @_frontend_install_option()
-def watch(config_path: str, project_dir: Path | None, install: bool) -> None:
+@_verbose_option()
+def watch(config_path: str, project_dir: Path | None, install: bool, verbose: bool) -> None:
+    _configure_verbose(verbose)
     config = _load_config(config_path)
     try:
         project = load_frontend_project(config, project_dir=project_dir)
@@ -234,6 +298,7 @@ def watch(config_path: str, project_dir: Path | None, install: bool) -> None:
 @_frontend_project_option()
 @_frontend_install_option()
 @click.option("--detach-on-load", is_flag=True, hidden=True)
+@_verbose_option()
 def spawn(
     config_path: str,
     repl: bool,
@@ -242,7 +307,9 @@ def spawn(
     project_dir: Path | None,
     install: bool,
     detach_on_load: bool,
+    verbose: bool,
 ) -> None:
+    _configure_verbose(verbose)
     compat = FridaCompat()
     config = _load_config(config_path)
     if not config.app:
@@ -283,6 +350,7 @@ def spawn(
 @_frontend_project_option()
 @_frontend_install_option()
 @click.option("--detach-on-load", is_flag=True, hidden=True)
+@_verbose_option()
 def attach(
     pid: int | None,
     config_path: str,
@@ -292,7 +360,9 @@ def attach(
     project_dir: Path | None,
     install: bool,
     detach_on_load: bool,
+    verbose: bool,
 ) -> None:
+    _configure_verbose(verbose)
     compat = FridaCompat()
     config = _load_config(config_path)
     watcher = _prepare_frontend_assets(
@@ -326,8 +396,12 @@ def attach(
 
 
 @cli.command()
-def doctor() -> None:
-    report = FridaCompat().doctor_report()
+@click.option("-c", "--config", "config_path", default="config.yml", show_default=True)
+@_verbose_option()
+def doctor(config_path: str, verbose: bool) -> None:
+    _configure_verbose(verbose)
+    compat = FridaCompat()
+    report = compat.doctor_report()
     click.echo(f"Installed Frida: {report['installed_version']}")
     click.echo(f"Supported: {'yes' if report['supported'] else 'no'}")
     if report["matched_profile"]:
@@ -339,6 +413,40 @@ def doctor() -> None:
         click.echo(
             f"- {profile['name']}: {profile['series']} (tested {profile['tested_version']}, range {profile['range']})"
         )
+    config = _load_optional_config(config_path)
+    if config is None:
+        click.echo(f"Config: {Path(config_path).expanduser()} (not found, skipped remote server checks)")
+        return
+
+    click.echo(f"Config: {config.source_path}")
+    click.echo(f"Configured server path: {config.server.servername}")
+    click.echo(f"Configured server host: {config.server.host}")
+    click.echo(f"Configured server version: {config.server.version or 'none'}")
+
+    if not config.server.is_remote:
+        click.echo("Remote server checks: skipped (config.server.host uses local or usb mode)")
+        return
+
+    manager = FridaServerManager(compat=compat)
+    try:
+        status = manager.inspect_remote_server(config)
+    except ServerManagerError as exc:
+        click.echo(f"Remote server checks: error ({exc})")
+        return
+
+    click.echo(f"Install target version: {status.selected_version}")
+    if status.device_abi and status.asset_arch:
+        click.echo(f"Device ABI: {status.device_abi} ({status.asset_arch})")
+    elif status.error:
+        click.echo(f"Device ABI: unknown ({status.error})")
+
+    click.echo(f"Remote server exists: {'yes' if status.exists else 'no'}")
+    if status.exists:
+        click.echo(f"Remote server executable: {'yes' if status.executable else 'no'}")
+    if status.installed_version:
+        click.echo(f"Remote server version: {status.installed_version}")
+        click.echo(f"Remote server supported: {'yes' if status.supported else 'no'}")
+        click.echo(f"Remote server profile: {status.matched_profile or 'none'}")
 
 
 def main() -> int:

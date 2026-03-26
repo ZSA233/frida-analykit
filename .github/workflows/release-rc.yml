@@ -1,15 +1,13 @@
-name: Release
+name: Release RC
 
 on:
   push:
     tags:
-      - "v*"
-    tags-ignore:
       - "v*-rc.*"
   workflow_dispatch:
     inputs:
       tag:
-        description: Stable tag to dry-run, for example v2.0.0
+        description: RC tag to dry-run, for example v2.0.0-rc.1
         required: true
         type: string
 
@@ -44,13 +42,9 @@ jobs:
         if: ${{ github.event_name == 'workflow_dispatch' }}
         run: |
           case "$TARGET_TAG" in
-            v*-rc.*)
-              echo "Stable release dry-run expects a non-RC tag" >&2
-              exit 1
-              ;;
-            v*) ;;
+            v*-rc.*) ;;
             *)
-              echo "workflow_dispatch tag must match vX.Y.Z" >&2
+              echo "workflow_dispatch tag must match vX.Y.Z-rc.N" >&2
               exit 1
               ;;
           esac
@@ -78,30 +72,21 @@ jobs:
     if: ${{ github.event_name == 'push' }}
     needs: build
     runs-on: ubuntu-latest
-    environment: production
     permissions:
       contents: write
-      id-token: write
     steps:
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22.14.0"
-          registry-url: "https://registry.npmjs.org"
-
       - name: Download release bundle
         uses: actions/download-artifact@v4
         with:
           name: release-bundle-${{ github.ref_name }}
           path: release-bundle
 
-      - name: Publish GitHub release
+      - name: Publish GitHub prerelease
         uses: softprops/action-gh-release@v2
         with:
+          prerelease: true
           files: |
             release-bundle/*.tar.gz
             release-bundle/*.whl
             release-bundle/*.tgz
           fail_on_unmatched_files: true
-
-      - name: Publish npm runtime to npmjs
-        run: npm publish release-bundle/*.tgz --access public --provenance

@@ -3,8 +3,8 @@
     {
       "name": "legacy-16",
       "series": "16.6.x",
-      "tested_version": "16.6.6",
-      "min_inclusive": "16.6.0",
+      "tested_version": "16.5.9",
+      "min_inclusive": "16.5.9",
       "max_exclusive": "17.0.0"
     },
     {

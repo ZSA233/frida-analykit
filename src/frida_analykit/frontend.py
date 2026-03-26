@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .config import AppConfig
+from .diagnostics import format_command, verbose_echo
 
 WATCH_READY_TIMEOUT_SECONDS = 30.0
 WATCH_POLL_INTERVAL_SECONDS = 0.2
@@ -122,6 +123,7 @@ def start_watch(project: FrontendProject, *, install: bool = False) -> WatchProc
     _validate_frontend_project(project, command="watch")
     _ensure_dependencies(project, install=install)
     baseline_signature = _file_signature(project.bundle_path)
+    verbose_echo(f"starting watch in `{project.project_dir}`: {format_command(['npm', 'run', 'watch'])}")
     try:
         process = subprocess.Popen(
             ["npm", "run", "watch"],
@@ -178,6 +180,7 @@ def _ensure_bundle_exists(project: FrontendProject) -> None:
 
 
 def _run_command(command: list[str], *, cwd: Path) -> None:
+    verbose_echo(f"running in `{cwd}`: {format_command(command)}")
     try:
         result = subprocess.run(
             command,
@@ -188,6 +191,12 @@ def _run_command(command: list[str], *, cwd: Path) -> None:
         )
     except OSError as exc:
         raise FrontendError(f"failed to start `{' '.join(command)}` in `{cwd}`: {exc}") from exc
+
+    if result.stdout and result.stdout.strip():
+        verbose_echo(f"stdout from {format_command(command)}:\n{result.stdout.rstrip()}")
+    if result.stderr and result.stderr.strip():
+        verbose_echo(f"stderr from {format_command(command)}:\n{result.stderr.rstrip()}")
+    verbose_echo(f"{format_command(command)} exited with code {result.returncode}")
 
     if result.returncode == 0:
         return

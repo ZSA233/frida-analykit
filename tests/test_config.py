@@ -11,6 +11,7 @@ app: com.example.demo
 jsfile: ./dist/_agent.js
 server:
   host: 127.0.0.1:27042
+  version: 17.8.2
 agent:
   datadir: ./data
   stdout: ./logs/stdout.log
@@ -26,6 +27,7 @@ script:
 
     assert config.app == "com.example.demo"
     assert config.jsfile == (tmp_path / "dist" / "_agent.js").resolve()
+    assert config.server.version == "17.8.2"
     assert config.agent.datadir == (tmp_path / "data").resolve()
     assert config.agent.stdout == (tmp_path / "logs" / "stdout.log").resolve()
     assert config.agent.stderr == (tmp_path / "logs" / "stderr.log").resolve()

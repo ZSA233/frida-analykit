@@ -1,0 +1,4 @@
+min_inclusive = "16.5.9"
+max_exclusive = "18.0.0"
+include_prerelease = false
+exclude = []

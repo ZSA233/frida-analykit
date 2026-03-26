@@ -7,6 +7,7 @@ server:
   servername: /data/local/tmp/frida-server
   host: 127.0.0.1:27042
   device: 
+  version: 
 
 agent:
   datadir: ./data/

@@ -1,0 +1,130 @@
+name: Release Backfill
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to backfill
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      target_matrix: ${{ steps.targets.outputs.matrix }}
+      target_count: ${{ steps.targets.outputs.count }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Sync Python environment
+        run: uv sync --dev
+
+      - name: Validate dispatch tag format
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.tag != '' }}
+        run: |
+          case "${{ inputs.tag }}" in
+            v*-rc.*)
+              echo "workflow_dispatch tag must point to a stable release, not an RC tag" >&2
+              exit 1
+              ;;
+            v*) ;;
+            *)
+              echo "workflow_dispatch tag must match v*" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Validate dispatch release exists
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.tag != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release view "${{ inputs.tag }}" --repo "${{ github.repository }}" >/dev/null
+
+      - name: Discover release targets
+        id: targets
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TARGET_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || '' }}
+        run: |
+          CMD=(uv run python scripts/release_assets.py discover-backfill --repo "${{ github.repository }}" --json)
+          if [ -n "$TARGET_TAG" ]; then
+            CMD+=(--tag "$TARGET_TAG")
+          fi
+          PLAN="$("${CMD[@]}")"
+          MATRIX="$(python -c 'import json,sys; plan=json.loads(sys.argv[1]); print(json.dumps({"include": plan["targets"]}, separators=(",", ":")))' "$PLAN")"
+          COUNT="$(python -c 'import json,sys; plan=json.loads(sys.argv[1]); print(plan["target_count"])' "$PLAN")"
+          echo "matrix=${MATRIX}" >> "$GITHUB_OUTPUT"
+          echo "count=${COUNT}" >> "$GITHUB_OUTPUT"
+          python -c 'import json,sys; plan=json.loads(sys.argv[1]); print(f"targets={plan[\"target_count\"]}")' "$PLAN"
+
+  backfill:
+    needs: prepare
+    if: ${{ needs.prepare.outputs.target_count != '0' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.prepare.outputs.target_matrix) }}
+    concurrency:
+      group: release-assets-${{ matrix.tag_name }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.tag_name }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Sync Python environment
+        run: uv sync --dev
+
+      - name: Plan missing wheels
+        id: plan
+        env:
+          EXISTING_ASSETS_JSON: ${{ matrix.existing_assets_json }}
+          STRICT_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag != '' }}
+        run: |
+          if ! PLAN="$(uv run python scripts/release_assets.py plan-release --existing-assets-json "$EXISTING_ASSETS_JSON" --json 2>plan.err)"; then
+            cat plan.err >&2
+            if [ "$STRICT_TAG" = "true" ]; then
+              exit 1
+            fi
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          MISSING="$(python -c 'import json,sys; plan=json.loads(sys.argv[1]); print(plan["missing_count"])' "$PLAN")"
+          echo "missing_count=${MISSING}" >> "$GITHUB_OUTPUT"
+
+      - name: Build missing wheels
+        if: ${{ steps.plan.outputs.skip != 'true' && steps.plan.outputs.missing_count != '0' }}
+        id: build
+        env:
+          EXISTING_ASSETS_JSON: ${{ matrix.existing_assets_json }}
+        run: |
+          BUILD="$(uv run python scripts/release_assets.py build-wheels --out-dir dist --existing-assets-json "$EXISTING_ASSETS_JSON" --json)"
+          BUILT="$(python -c 'import json,sys; payload=json.loads(sys.argv[1]); print(payload["built_count"])' "$BUILD")"
+          test "$BUILT" = "${{ steps.plan.outputs.missing_count }}"
+          echo "built_count=${BUILT}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload wheel asset
+        if: ${{ steps.build.outputs.built_count != '' && steps.build.outputs.built_count != '0' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ matrix.tag_name }}" dist/*.whl --clobber
