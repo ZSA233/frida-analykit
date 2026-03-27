@@ -8,8 +8,9 @@ from typing import Any, Callable, Final, Literal, overload
 
 from frida.core import Script, ScriptExportsAsync, Session, SessionDetachedCallback
 
+from ._version import __version__
 from .config import AgentConfig, AppConfig
-from .logging import build_loggers
+from .logging import LoggerBundle, build_loggers
 from .rpc.exports import ScriptExportsSyncWrapper
 from .rpc.handler.js_handle import JsHandle
 from .rpc.message import RPCMessage, RPCMsgInitConfig, RPCPayload
@@ -22,11 +23,43 @@ globalThis.__FRIDA_ANALYKIT_CONFIG__ = {{
     ...(globalThis.__FRIDA_ANALYKIT_CONFIG__ || {{}}),
     ...INJECT_ENV,
 }};
-import("/index.js");
+void (async () => {{
+    try {{
+        await import("/index.js");
+    }} catch (error) {{
+        const description = (() => {{
+            if (error instanceof Error && typeof error.message === "string" && error.message) {{
+                return error.message;
+            }}
+            if (typeof error === "string" && error.length > 0) {{
+                return error;
+            }}
+            try {{
+                return JSON.stringify(error);
+            }} catch {{
+                return String(error);
+            }}
+        }})();
+        const stack = error instanceof Error && typeof error.stack === "string" ? error.stack : "";
+        console.error(`[frida-analykit/bootstrap] ${{description}}`);
+        if (stack) {{
+            console.error(stack);
+        }}
+        throw error;
+    }}
+}})();
 """
 
 REG_MAP_SOURCE: Final[re.Pattern[str]] = re.compile(r"^(\d+)\s+(.*?)$", re.MULTILINE)
 ScriptEnv = RPCMsgInitConfig
+SESSION_BANNER_LOGO: Final[str] = r"""
+███████╗██████╗ ██╗██████╗  █████╗        █████╗ ███╗   ██╗ █████╗ ██╗     ██╗   ██╗██╗  ██╗██╗████████╗
+██╔════╝██╔══██╗██║██╔══██╗██╔══██╗      ██╔══██╗████╗  ██║██╔══██╗██║     ╚██╗ ██╔╝██║ ██╔╝██║╚══██╔══╝
+█████╗  ██████╔╝██║██║  ██║███████║█████╗███████║██╔██╗ ██║███████║██║      ╚████╔╝ █████═╝ ██║   ██║
+██╔══╝  ██╔══██╗██║██║  ██║██╔══██║╚════╝██╔══██║██║╚██╗██║██╔══██║██║       ╚██╔╝  ██╔═██╗ ██║   ██║
+██║     ██║  ██║██║██████╔╝██║  ██║      ██║  ██║██║ ╚████║██║  ██║███████╗   ██║   ██║  ██╗██║   ██║
+╚═╝     ╚═╝  ╚═╝╚═╝╚═════╝ ╚═╝  ╚═╝      ╚═╝  ╚═╝╚═╝  ╚═══╝╚═╝  ╚═╝╚══════╝   ╚═╝   ╚═╝  ╚═╝╚═╝   ╚═╝
+""".strip("\n")
 
 
 def try_inject_environ(script_src: str, env: dict | None = None) -> str:
@@ -50,6 +83,54 @@ def try_inject_environ(script_src: str, env: dict | None = None) -> str:
     )
 
 
+def render_session_banner(config: AppConfig, *, jsfile: Path, updated: datetime) -> str:
+    base_dir = config.source_path.parent if config.source_path is not None else None
+
+    def display_path(path: Path | None) -> str:
+        if path is None:
+            return "<unset>"
+        candidate = Path(path)
+        if base_dir is not None:
+            try:
+                relative = candidate.relative_to(base_dir)
+            except ValueError:
+                pass
+            else:
+                base = f".../{base_dir.name}"
+                if str(relative) == ".":
+                    return base
+                return f"{base}/{relative.as_posix()}"
+        parts = candidate.as_posix().split("/")
+        if len(parts) > 4:
+            return ".../" + "/".join(parts[-4:])
+        return candidate.as_posix()
+
+    def render_item(label: str, value: str) -> str:
+        return f"  ➜  {label:<11} {value}"
+
+    lines = [
+        SESSION_BANNER_LOGO,
+        "",
+        f"  v{__version__} ready at {updated.strftime('%H:%M:%S')}",
+        "",
+        render_item("Host:", config.server.host),
+        render_item("Target:", config.app or "<unset>"),
+        render_item("Script:", display_path(jsfile)),
+    ]
+    stdout_path = config.agent.stdout
+    stderr_path = config.agent.stderr
+    if stdout_path is not None and stderr_path is not None and stdout_path == stderr_path:
+        lines.append(render_item("Log Output:", display_path(stdout_path)))
+    else:
+        lines.append(render_item("Stdout:", display_path(stdout_path) if stdout_path is not None else "<stdout>"))
+        lines.append(render_item("Stderr:", display_path(stderr_path) if stderr_path is not None else "<stderr>"))
+    lines = [
+        *lines,
+        "",
+    ]
+    return "\n".join(lines)
+
+
 class ScriptWrapper:
     __SCRIPT_EXPORT__: Final[frozenset[str]] = frozenset(
         {
@@ -64,10 +145,18 @@ class ScriptWrapper:
         }
     )
 
-    def __init__(self, script: Script, env: ScriptEnv, resolver: RPCResolver) -> None:
+    def __init__(
+        self,
+        script: Script,
+        env: ScriptEnv,
+        resolver: RPCResolver,
+        *,
+        loggers: LoggerBundle | None = None,
+    ) -> None:
         self._script = script
         self._env = env
         self._resolver = resolver
+        self._loggers = loggers
         self._resolver.register_script(script)
         self.exports_sync = ScriptExportsSyncWrapper(script)
 
@@ -82,11 +171,12 @@ class ScriptWrapper:
     def __dir__(self):
         return tuple(object.__dir__(self)) + tuple(ScriptWrapper.__SCRIPT_EXPORT__)
 
-    def set_logger(self, stdout: Path | None = None, stderr: Path | None = None) -> None:
-        loggers = build_loggers(AgentConfig(stdout=stdout, stderr=stderr))
+    def set_logger(self, loggers: LoggerBundle | None = None) -> None:
+        active_loggers = loggers or self._loggers or build_loggers(AgentConfig())
+        self._loggers = active_loggers
 
         def handler(level: str, text: str) -> None:
-            stream = loggers.stdout if level == "info" else loggers.stderr
+            stream = active_loggers.stdout if level == "info" else active_loggers.stderr
             print(text, file=stream)
 
         self.set_log_handler(handler)
@@ -114,8 +204,8 @@ class SessionWrapper:
     def __init__(self, session: Session, *, config: AppConfig) -> None:
         self._session = session
         self._config = config
-        logs = build_loggers(config.agent)
-        self._resolver = RPCResolver(HandlerRegistry(config, logs.stdout, logs.stderr))
+        self._logs = build_loggers(config.agent)
+        self._resolver = RPCResolver(HandlerRegistry(config, self._logs.stdout, self._logs.stderr))
 
     @property
     def is_detached(self) -> bool: ...
@@ -147,7 +237,7 @@ class SessionWrapper:
             snapshot,
             runtime,
         )
-        return ScriptWrapper(script, inject_env, self._resolver)
+        return ScriptWrapper(script, inject_env, self._resolver, loggers=self._logs)
 
     def open_script(
         self,
@@ -160,10 +250,7 @@ class SessionWrapper:
         path = Path(jsfile)
         stat = path.stat()
         updated = datetime.fromtimestamp(stat.st_mtime)
-        print("=================== frida-analykit ===================")
-        print(f"[jsfile]    {jsfile}")
-        print(f"[update_at] {updated.strftime('%Y-%m-%d %H:%M:%S.%f')}")
-        print("======================================================")
+        print(render_session_banner(self._config, jsfile=path, updated=updated))
         source = path.read_text(encoding="utf-8")
         return self.create_script(source, name, snapshot, runtime, env)
 

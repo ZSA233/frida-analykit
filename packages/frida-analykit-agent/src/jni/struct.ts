@@ -1,6 +1,6 @@
 
 
-export const enum IndirectRefKind {
+export enum IndirectRefKind {
     kHandleScopeOrInvalid = 0,  // <<stack indirect reference table or invalid reference>>
     kLocal = 1,                 // <<local reference>>
     kGlobal = 2,                // <<global reference>>
@@ -9,7 +9,7 @@ export const enum IndirectRefKind {
 }
 
 
-export const enum JNI_VT {
+export enum JNI_VT {
     FindClass = 6,
     FromReflectedMethod = 7,
     ToReflectedMethod = 9,

@@ -1,4 +1,4 @@
-.PHONY: sync test compat scaffold build npm-pack release-check release-preflight release-local release-install-check dev-env dev-env-list dev-env-gen dev-env-enter dev-env-remove dev-smoke
+.PHONY: sync test compat scaffold build npm-pack release-check release-preflight release-local release-install-check dev-env dev-env-list dev-env-gen dev-env-enter dev-env-remove dev-smoke device-check device-test-core device-test-install device-test
 
 RELEASE_TAG ?=
 RC_TAG ?=
@@ -9,7 +9,7 @@ sync:
 	uv sync --extra repl --dev
 
 test:
-	uv run pytest -m "not smoke and not scaffold"
+	uv run pytest -m "not smoke and not scaffold and not device"
 
 compat:
 	FRIDA_ANALYKIT_ENABLE_SMOKE=1 uv run pytest -m smoke
@@ -38,7 +38,7 @@ release-preflight:
 		fi ;; \
 	esac
 	npm ci
-	uv run pytest -q -m "not smoke and not scaffold"
+	uv run pytest -q -m "not smoke and not scaffold and not device"
 	npm run agent:build
 
 release-local:
@@ -81,4 +81,16 @@ dev-env-remove:
 	uv run python scripts/dev_env.py remove --name "$(ENV_NAME)"
 
 dev-smoke:
-	FRIDA_ANALYKIT_ENABLE_SMOKE=1 "$(PYTHON_BIN)" -m pytest tests/test_smoke.py -q -m smoke
+	FRIDA_ANALYKIT_ENABLE_SMOKE=1 "$(PYTHON_BIN)" -m pytest tests/test_smoke.py -m smoke
+
+device-check:
+	FRIDA_ANALYKIT_ENABLE_DEVICE=1 "$(PYTHON_BIN)" -m pytest tests/device/test_preflight.py -m device -v
+
+device-test-core:
+	FRIDA_ANALYKIT_ENABLE_DEVICE=1 "$(PYTHON_BIN)" -m pytest tests/device/test_server_lifecycle.py tests/device/test_attach_marker.py -m device -v
+
+device-test-install:
+	FRIDA_ANALYKIT_ENABLE_DEVICE=1 "$(PYTHON_BIN)" -m pytest tests/device/test_server_install.py -m device -v
+
+device-test:
+	FRIDA_ANALYKIT_ENABLE_DEVICE=1 "$(PYTHON_BIN)" -m pytest tests/device -m device -v

@@ -23,6 +23,21 @@ def _config(base_dir: Path, *, app: str | None = None) -> AppConfig:
     ).resolve_paths(base_dir, source_path=base_dir / "config.yml")
 
 
+def _config_with_logs(base_dir: Path, *, app: str | None = None) -> AppConfig:
+    return AppConfig.model_validate(
+        {
+            "app": app,
+            "jsfile": "_agent.js",
+            "server": {"host": "local"},
+            "agent": {
+                "stdout": "./logs/outerr.log",
+                "stderr": "./logs/outerr.log",
+            },
+            "script": {"nettools": {}},
+        }
+    ).resolve_paths(base_dir, source_path=base_dir / "config.yml")
+
+
 def _remote_config(base_dir: Path, *, version: str | None = None) -> AppConfig:
     return AppConfig.model_validate(
         {
@@ -53,6 +68,46 @@ class _FakeDevice:
         self.resumed = pid
 
 
+class _FakeScript:
+    def __init__(self) -> None:
+        self.handlers: dict[str, object] = {}
+        self.log_handler = None
+        self.loaded = False
+
+    def on(self, signal: str, callback) -> None:
+        self.handlers[signal] = callback
+
+    def set_log_handler(self, handler) -> None:
+        self.log_handler = handler
+
+    def load(self) -> None:
+        self.loaded = True
+
+
+class _FakeAttachedSession:
+    def __init__(self) -> None:
+        self.script = _FakeScript()
+
+    def create_script(self, source: str, name=None, snapshot=None, runtime=None):
+        self.source = source
+        return self.script
+
+    def on(self, signal: str, callback) -> None:
+        self.handlers = getattr(self, "handlers", {})
+        self.handlers[signal] = callback
+
+
+class _FakeAttachDevice(_FakeDevice):
+    def __init__(self) -> None:
+        super().__init__()
+        self.attached: int | None = None
+        self.session = _FakeAttachedSession()
+
+    def attach(self, pid: int) -> _FakeAttachedSession:
+        self.attached = pid
+        return self.session
+
+
 class _FakeCompat:
     def __init__(self) -> None:
         self.device = _FakeDevice()
@@ -61,6 +116,17 @@ class _FakeCompat:
         return self.device
 
     def enumerate_applications(self, device: _FakeDevice, scope: str = "minimal"):
+        return []
+
+
+class _FakeCompatWithAttach:
+    def __init__(self) -> None:
+        self.device = _FakeAttachDevice()
+
+    def get_device(self, host: str) -> _FakeAttachDevice:
+        return self.device
+
+    def enumerate_applications(self, device: _FakeAttachDevice, scope: str = "minimal"):
         return []
 
 
@@ -369,15 +435,95 @@ def test_spawn_closes_watch_process(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     assert watch_state["closed"] is True
 
 
+def test_spawn_prints_resolved_agent_log_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    runner = CliRunner()
+    compat = _FakeCompatWithAttach()
+    (tmp_path / "_agent.js").write_text("16 /index.js\n✄\n", encoding="utf-8")
+
+    monkeypatch.setattr("frida_analykit.cli.FridaCompat", lambda: compat)
+    monkeypatch.setattr("frida_analykit.cli._load_config", lambda _: _config_with_logs(tmp_path, app="com.example.demo"))
+    monkeypatch.setattr("frida_analykit.cli._prepare_frontend_assets", lambda **kwargs: None)
+    monkeypatch.setattr("frida_analykit.cli._post_attach", lambda **kwargs: None)
+
+    result = runner.invoke(
+        cli,
+        ["spawn", "--config", str(tmp_path / "config.yml"), "--detach-on-load"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "➜  Host:" in result.output
+    assert "➜  Target:" in result.output
+    assert "➜  Script:" in result.output
+    assert "➜  Log Output:" in result.output
+    assert "com.example.demo" in result.output
+    assert "_agent.js" in result.output
+    assert "outerr.log" in result.output
+
+
+def test_server_boot_forwards_force_restart(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    runner = CliRunner()
+    calls: dict[str, object] = {}
+
+    def fake_boot(config, *, force_restart: bool = False):
+        calls["config"] = config
+        calls["force_restart"] = force_restart
+
+    monkeypatch.setattr("frida_analykit.cli._load_config", lambda _: _remote_config(tmp_path, version="17.8.1"))
+    monkeypatch.setattr("frida_analykit.cli.boot_server", fake_boot)
+
+    result = runner.invoke(
+        cli,
+        ["server", "boot", "--config", str(tmp_path / "config.yml"), "--force-restart"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert calls["config"].server.version == "17.8.1"
+    assert calls["force_restart"] is True
+
+
+def test_server_stop_prints_stopped_pids(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    runner = CliRunner()
+
+    monkeypatch.setattr("frida_analykit.cli._load_config", lambda _: _remote_config(tmp_path, version="17.8.1"))
+    monkeypatch.setattr("frida_analykit.cli.stop_server", lambda config: {222, 111})
+
+    result = runner.invoke(cli, ["server", "stop", "--config", str(tmp_path / "config.yml")])
+
+    assert result.exit_code == 0, result.output
+    assert "stopped remote frida-server pids: 111, 222" in result.output
+
+
+def test_server_stop_reports_no_matching_process(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    runner = CliRunner()
+
+    monkeypatch.setattr("frida_analykit.cli._load_config", lambda _: _remote_config(tmp_path, version="17.8.1"))
+    monkeypatch.setattr("frida_analykit.cli.stop_server", lambda config: set())
+
+    result = runner.invoke(cli, ["server", "stop", "--config", str(tmp_path / "config.yml")])
+
+    assert result.exit_code == 0, result.output
+    assert "no matching remote frida-server was running" in result.output
+
+
 def test_server_install_forwards_version_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     runner = CliRunner()
     calls: dict[str, object] = {}
 
     class FakeManager:
-        def install_remote_server(self, config, *, version_override=None, force_download=False):
+        def install_remote_server(
+            self,
+            config,
+            *,
+            version_override=None,
+            local_server_path=None,
+            force_download=False,
+            download_progress=None,
+        ):
             calls["config"] = config
             calls["version_override"] = version_override
+            calls["local_server_path"] = local_server_path
             calls["force_download"] = force_download
+            calls["download_progress"] = download_progress
             local_binary = tmp_path / "cache" / "frida-server"
             local_binary.parent.mkdir(parents=True, exist_ok=True)
             local_binary.write_text("binary", encoding="utf-8")
@@ -388,6 +534,7 @@ def test_server_install_forwards_version_override(tmp_path: Path, monkeypatch: p
                 device_abi="arm64-v8a",
                 asset_arch="android-arm64",
                 local_binary=local_binary,
+                local_source=None,
             )
 
     monkeypatch.setattr("frida_analykit.cli._load_config", lambda _: _remote_config(tmp_path, version="17.8.1"))
@@ -409,8 +556,103 @@ def test_server_install_forwards_version_override(tmp_path: Path, monkeypatch: p
     assert result.exit_code == 0, result.output
     assert calls["config"].server.version == "17.8.1"
     assert calls["version_override"] == "17.8.2"
+    assert calls["local_server_path"] is None
     assert calls["force_download"] is True
+    assert calls["download_progress"] is not None
     assert "installed frida-server 17.8.2" in result.output
+
+
+def test_server_install_supports_local_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    runner = CliRunner()
+    calls: dict[str, object] = {}
+    local_server = tmp_path / "frida-server.xz"
+    local_server.write_text("binary", encoding="utf-8")
+
+    class FakeManager:
+        def install_remote_server(
+            self,
+            config,
+            *,
+            version_override=None,
+            local_server_path=None,
+            force_download=False,
+            download_progress=None,
+        ):
+            calls["config"] = config
+            calls["version_override"] = version_override
+            calls["local_server_path"] = local_server_path
+            calls["force_download"] = force_download
+            calls["download_progress"] = download_progress
+            local_binary = tmp_path / "cache" / "frida-server"
+            local_binary.parent.mkdir(parents=True, exist_ok=True)
+            local_binary.write_text("binary", encoding="utf-8")
+            return SimpleNamespace(
+                installed_version="16.5.9",
+                selected_version="local",
+                remote_path=config.server.servername,
+                device_abi="arm64-v8a",
+                asset_arch="android-arm64",
+                local_binary=local_binary,
+                local_source=local_server,
+            )
+
+    monkeypatch.setattr("frida_analykit.cli._load_config", lambda _: _remote_config(tmp_path, version="17.8.1"))
+    monkeypatch.setattr("frida_analykit.cli.FridaServerManager", lambda *args, **kwargs: FakeManager())
+
+    result = runner.invoke(
+        cli,
+        [
+            "server",
+            "install",
+            "--config",
+            str(tmp_path / "config.yml"),
+            "--local-server",
+            str(local_server),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert calls["version_override"] is None
+    assert calls["local_server_path"] == local_server
+    assert calls["force_download"] is False
+    assert calls["download_progress"] is None
+    assert f"local source: {local_server}" in result.output
+
+
+@pytest.mark.parametrize(
+    ("args", "expected"),
+    [
+        (
+            ["server", "install", "--config", "config.yml", "--version", "17.8.2", "--local-server", "frida-server"],
+            "`--local-server` cannot be combined with `--version`",
+        ),
+        (
+            ["server", "install", "--config", "config.yml", "--local-server", "frida-server", "--force-download"],
+            "`--force-download` can only be used together with `--version`",
+        ),
+        (
+            ["server", "install", "--config", "config.yml", "--force-download"],
+            "`--force-download` requires an explicit `--version`",
+        ),
+    ],
+)
+def test_server_install_validates_option_combinations(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    args: list[str],
+    expected: str,
+) -> None:
+    runner = CliRunner()
+    local_server = tmp_path / "frida-server"
+    local_server.write_text("binary", encoding="utf-8")
+    rewritten_args = [str(local_server) if item == "frida-server" else item for item in args]
+
+    monkeypatch.setattr("frida_analykit.cli._load_config", lambda _: _remote_config(tmp_path, version="17.8.1"))
+
+    result = runner.invoke(cli, rewritten_args)
+
+    assert result.exit_code != 0
+    assert expected in result.output
 
 
 def test_doctor_reports_remote_server_status_when_config_exists(

@@ -71,6 +71,8 @@ frida-analykit env install-frida --version 16.5.9
 
 `make dev-env` only prints help. `make dev-env-gen` installs the repo-oriented `dev + repl` dependencies by default, requires an explicit `FRIDA_VERSION`, keeps `ENV_NAME` optional, and accepts `NO_REPL=1` to skip the REPL extra. `frida-analykit env create` installs `repl` by default but does not install the repo `dev` group, and accepts `--no-repl` to skip it. `make dev-env-enter` and `frida-analykit env shell` open a child shell; `frida-analykit env use <name>` only switches the current environment pointer and does not modify the current shell. Inside the child shell you can directly run `uv pip install ...`, `python`, `frida`, and `frida-analykit`; if you want `uv run` / `uv sync` to prefer the active environment, use `--active` explicitly. Exit a child shell with `exit`. If you activate manually with `source .../bin/activate`, leave it with `deactivate`.
 
+`env create` and `dev-env-gen` now pass through the native `uv` output during environment preparation, so the built-in `uv venv`, `uv sync`, and `uv pip install` progress remains visible. These managed-environment commands require a working `uv` binary on `PATH`; if `uv` is missing, the CLI now fails with an explicit install hint instead of a raw traceback.
+
 ## Flow 1: Use It As A CLI Tool
 
 Create `config.yml`:
@@ -99,11 +101,14 @@ Typical commands:
 
 ```sh
 frida-analykit server boot --config config.yml
+frida-analykit server boot --config config.yml --force-restart
+frida-analykit server stop --config config.yml
 frida-analykit doctor --config config.yml
 frida-analykit doctor --config config.yml --verbose
 frida-analykit server install --config config.yml
 frida-analykit server install --config config.yml --verbose
 frida-analykit server install --config config.yml --version 17.8.2
+frida-analykit server install --config config.yml --local-server ./frida-server-17.8.2-android-arm64.xz
 frida-analykit build --config config.yml
 frida-analykit spawn --config config.yml
 frida-analykit attach --config config.yml --pid 12345
@@ -118,7 +123,29 @@ Notes:
 - `--verbose` prints the actual adb/npm subprocess commands, exit codes, and captured stdout/stderr so you can diagnose mismatches between expected and observed device state.
 - `server.host` also supports `local` and `usb` shortcuts in addition to `host:port`.
 - `doctor --config` reads `config.yml`, checks the device-side `server.servername`, reports the detected server version, and shows the resolved asset arch for the current device ABI.
-- `server install` prefers `--version`, then `server.version`, then the installed Python `frida` version; downloaded archives are cached locally and reused on later installs.
+- `server boot` does not kill an existing remote `frida-server` by default. If a matching process is already running, the command fails and points you to `server stop` or `server boot --force-restart`.
+- `server stop` is the supported cleanup path. It succeeds even when no matching remote process is running, and still attempts to remove the configured adb forward.
+- `server install` supports two sources: `--version` downloads from GitHub with progress output, while `--local-server` pushes a local executable or `.xz` archive. Version-based installs prefer `--version`, then `server.version`, then the installed Python `frida` version. Downloaded archives are cached locally and reused.
+
+## Device Tests
+
+The repository also includes a self-contained Android device test suite. It does not depend on any external example project. Each test generates a temporary `_agent.js + config.yml` pair and only validates the core path: `frida-server` lifecycle, a minimal injection marker, and server installation.
+
+Required environment variables:
+
+- `FRIDA_ANALYKIT_ENABLE_DEVICE=1`
+- `FRIDA_ANALYKIT_DEVICE_APP=<package>`
+- optional `ANDROID_SERIAL=<serial>`
+- optional `FRIDA_ANALYKIT_DEVICE_LOCAL_SERVER=<path>` for `server install --local-server`
+
+Targets:
+
+```sh
+make device-check
+make device-test-core
+make device-test-install
+make device-test
+```
 
 ## Flow 2: Generate A Custom TypeScript Agent Workspace
 
@@ -179,6 +206,8 @@ frida-analykit attach --config ./config.yml --watch --repl
 ```
 
 The CLI reuses the workspace `npm run build` and `npm run watch` scripts. You can still execute those scripts manually for advanced workflows.
+
+If `config.yml` sets `agent.stdout` / `agent.stderr`, the CLI prints the resolved log paths before injection. In ESM mode the top-level `import` chain runs before later `console.log(...)` statements in `index.ts`, so a missing "first log line" usually means a bootstrap or import failure. Check `logs/outerr.log` first before assuming the log path is wrong.
 
 Run it with the Python CLI:
 

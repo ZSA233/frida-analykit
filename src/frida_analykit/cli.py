@@ -22,7 +22,7 @@ from .dev_env import (
 from .diagnostics import set_verbose
 from .frontend import FrontendError, WatchProcess, build_agent_bundle, load_frontend_project, start_watch
 from .scaffold import generate_dev_workspace, scaffold_summary
-from .server import FridaServerManager, ServerManagerError, boot_server
+from .server import FridaServerManager, ServerManagerError, boot_server, stop_server
 from .session import SessionWrapper
 
 
@@ -117,7 +117,7 @@ def _prepare_session(config: AppConfig, device: Any, pid: int):
     session = SessionWrapper.from_session(device.attach(pid), config=config)
     session.on("detached", _on_session_detached)
     script = session.open_script(str(config.jsfile))
-    script.set_logger(config.agent.stdout, config.agent.stderr)
+    script.set_logger()
     script.load()
     return device, session, script
 
@@ -183,6 +183,36 @@ def _configure_verbose(verbose: bool) -> None:
 
 def _global_env_manager() -> DevEnvManager:
     return DevEnvManager.for_global()
+
+
+class _DownloadProgressReporter:
+    def __init__(self, *, label: str) -> None:
+        self._label = label
+        self._last_downloaded = 0
+        self._bar_cm = None
+        self._bar = None
+
+    def __call__(self, downloaded: int, total: int | None) -> None:
+        if self._bar is None:
+            self._bar_cm = click.progressbar(
+                length=total,
+                label=self._label,
+                show_eta=total is not None,
+                show_percent=total is not None,
+                show_pos=True,
+            )
+            self._bar = self._bar_cm.__enter__()
+        delta = max(downloaded - self._last_downloaded, 0)
+        if delta > 0:
+            self._bar.update(delta)
+        self._last_downloaded = downloaded
+
+    def close(self) -> None:
+        if self._bar_cm is None:
+            return
+        self._bar_cm.__exit__(None, None, None)
+        self._bar_cm = None
+        self._bar = None
 
 
 @click.group()
@@ -307,10 +337,34 @@ def server_group() -> None:
 
 @server_group.command("boot")
 @click.option("-c", "--config", "config_path", default="config.yml", show_default=True)
+@click.option(
+    "--force-restart",
+    is_flag=True,
+    help="Kill an existing remote frida-server that matches config.server.servername before starting a new one.",
+)
 @_verbose_option()
-def server_boot(config_path: str, verbose: bool) -> None:
+def server_boot(config_path: str, force_restart: bool, verbose: bool) -> None:
     _configure_verbose(verbose)
-    boot_server(_load_config(config_path))
+    try:
+        boot_server(_load_config(config_path), force_restart=force_restart)
+    except ServerManagerError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+
+@server_group.command("stop")
+@click.option("-c", "--config", "config_path", default="config.yml", show_default=True)
+@_verbose_option()
+def server_stop(config_path: str, verbose: bool) -> None:
+    _configure_verbose(verbose)
+    try:
+        pids = stop_server(_load_config(config_path))
+    except ServerManagerError as exc:
+        raise click.ClickException(str(exc)) from exc
+    if not pids:
+        click.echo("no matching remote frida-server was running")
+        return
+    pid_list = ", ".join(str(pid) for pid in sorted(pids))
+    click.echo(f"stopped remote frida-server pids: {pid_list}")
 
 
 @server_group.command("install")
@@ -326,27 +380,50 @@ def server_boot(config_path: str, verbose: bool) -> None:
     is_flag=True,
     help="Redownload the frida-server archive even when a cached copy is already available.",
 )
+@click.option(
+    "--local-server",
+    type=click.Path(path_type=Path, dir_okay=False, exists=True),
+    default=None,
+    help="Push a local frida-server binary or .xz archive instead of downloading by version.",
+)
 @_verbose_option()
 def server_install(
     config_path: str,
     server_version: str | None,
     force_download: bool,
+    local_server: Path | None,
     verbose: bool,
 ) -> None:
     _configure_verbose(verbose)
+    if local_server is not None and server_version is not None:
+        raise click.ClickException("`--local-server` cannot be combined with `--version`")
+    if local_server is not None and force_download:
+        raise click.ClickException("`--force-download` can only be used together with `--version`")
+    if local_server is None and server_version is None and force_download:
+        raise click.ClickException("`--force-download` requires an explicit `--version`")
+
     config = _load_config(config_path)
+    progress = _DownloadProgressReporter(label="Downloading frida-server") if server_version else None
     try:
         result = FridaServerManager().install_remote_server(
             config,
             version_override=server_version,
+            local_server_path=local_server,
             force_download=force_download,
+            download_progress=progress,
         )
     except ServerManagerError as exc:
         raise click.ClickException(str(exc)) from exc
+    finally:
+        if progress is not None:
+            progress.close()
     click.echo(f"installed frida-server {result.installed_version or result.selected_version}")
     click.echo(f"remote path: {result.remote_path}")
     click.echo(f"device abi: {result.device_abi} ({result.asset_arch})")
-    click.echo(f"local cache: {result.local_binary}")
+    if result.local_source is not None:
+        click.echo(f"local source: {result.local_source}")
+    else:
+        click.echo(f"local cache: {result.local_binary}")
 
 
 @cli.command()

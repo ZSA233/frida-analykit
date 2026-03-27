@@ -1,23 +1,38 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from typing import Final
 
 from frida.core import Script
-from pydantic import ValidationError
 
 from .message import RPCMessage, RPCPayload
 
 CAMEL_TO_SNAKE: Final[re.Pattern[str]] = re.compile(r"([A-Z])")
 
 
+def _as_rpc_message(value):
+    if isinstance(value, RPCMessage):
+        return value
+    if isinstance(value, Mapping) and "type" in value:
+        return RPCMessage.from_mapping(value)
+    return None
+
+
 def make_rpc_response(response):
-    if isinstance(response, (list, tuple)) and len(response) > 1 and isinstance(response[1], bytes):
-        return RPCPayload(message=response[0], data=response[1])
-    try:
-        return RPCPayload(message=response)
-    except ValidationError:
+    if isinstance(response, RPCPayload):
         return response
+
+    if isinstance(response, (list, tuple)) and len(response) > 1 and isinstance(response[1], (bytes, bytearray)):
+        message = _as_rpc_message(response[0])
+        if message is None:
+            return response
+        return RPCPayload(message=message, data=bytes(response[1]))
+
+    message = _as_rpc_message(response)
+    if message is not None:
+        return RPCPayload(message=message)
+    return response
 
 
 class ScriptExportsSyncWrapper:

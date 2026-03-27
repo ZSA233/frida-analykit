@@ -55,3 +55,25 @@ def test_default_handler_writes_binary_payload(tmp_path: Path) -> None:
     written = list((tmp_path / "data").glob("SAVE_FILE_*"))
     assert len(written) == 1
     assert written[0].read_bytes() == b"hello"
+
+
+def test_default_exception_handler_formats_script_errors(tmp_path: Path) -> None:
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    registry = HandlerRegistry(_config(tmp_path), stdout, stderr)
+
+    registry.handle_exception(
+        {
+            "description": "Unable to load module",
+            "stack": "Error: Unable to load module\n    at /__inject__.js:1:1",
+            "fileName": "/__inject__.js",
+            "lineNumber": 1,
+            "columnNumber": 1,
+        },
+        None,
+    )
+
+    output = stderr.getvalue()
+    assert "[script-error] /__inject__.js:1:1" in output
+    assert "[script-error] Unable to load module" in output
+    assert "Error: Unable to load module" in output

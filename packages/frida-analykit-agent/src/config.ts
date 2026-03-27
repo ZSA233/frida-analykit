@@ -19,27 +19,26 @@ export function setGlobalProperties(keyValues: { [key: string]: any }): void {
 }
 
 
+export const LogLevel = {
+    DEBUG: 0,
+    INFO: 1,
+    WARN: 2,
+    ERROR: 3,
+    _MUST_LOG: 9999999,
+} as const
 
-export const enum LogLevel {
-    DEBUG = 0,
-    INFO = 1,
-    WARN = 2,
-    ERROR = 3,
-
-
-    _MUST_LOG = 9999999,
-}
+export type LogLevel = (typeof LogLevel)[keyof typeof LogLevel]
 
 
 
 declare global {
-    const enum LogLevel {
-        DEBUG = 0,
-        INFO = 1,
-        WARN = 2,
-        ERROR = 3,
+    const LogLevel: {
+        DEBUG: number
+        INFO: number
+        WARN: number
+        ERROR: number
+        _MUST_LOG: number
     }
-
 }
 
 export class Config {
@@ -53,4 +52,5 @@ export class Config {
 
 setGlobalProperties({
     'Config': Config,
+    'LogLevel': LogLevel,
 })

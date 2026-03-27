@@ -154,6 +154,45 @@ def test_global_create_can_skip_repl_extra(tmp_path: Path) -> None:
     assert calls[1][0][-1] == str(Path(__file__).resolve().parents[1])
 
 
+def test_create_streams_uv_progress_output(tmp_path: Path) -> None:
+    calls: list[tuple[list[str], bool]] = []
+
+    def _run(command, cwd=None, env=None, check=False, capture_output=False, text=False):
+        calls.append((command, capture_output))
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    manager = DevEnvManager.for_repo(tmp_path, subprocess_run=_run)
+
+    manager.create(name="frida-16.5.9", frida_version="16.5.9")
+
+    assert calls == [
+        (["uv", "venv", str(tmp_path / ".frida-analykit" / "envs" / "frida-16.5.9"), "--python", "3.11"], False),
+        (["uv", "sync", "--active", "--extra", "repl", "--dev"], False),
+        (
+            [
+                "uv",
+                "pip",
+                "install",
+                "--python",
+                str(tmp_path / ".frida-analykit" / "envs" / "frida-16.5.9" / "bin" / "python"),
+                "frida==16.5.9",
+                "frida-tools",
+            ],
+            False,
+        ),
+    ]
+
+
+def test_create_reports_missing_uv_with_install_guidance(tmp_path: Path) -> None:
+    def _run(command, cwd=None, env=None, check=False, capture_output=False, text=False):
+        raise FileNotFoundError(command[0])
+
+    manager = DevEnvManager.for_repo(tmp_path, subprocess_run=_run)
+
+    with pytest.raises(DevEnvError, match="require `uv`"):
+        manager.create(name="frida-16.5.9", frida_version="16.5.9")
+
+
 def test_list_envs_discovers_legacy_virtualenvs(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -97,11 +97,11 @@ def build_loggers(agent: AgentConfig) -> LoggerBundle:
     if agent.stdout and agent.stderr and agent.stdout == agent.stderr:
         shared = FileLogger(LoggerName.OUTERR, str(agent.stdout))
         stdout = shared
-        stderr = shared.clone(color=colorama.Fore.RED)
+        stderr = shared.clone()
     else:
         if agent.stdout:
             stdout = FileLogger(LoggerName.STDOUT, str(agent.stdout))
         if agent.stderr:
-            stderr = FileLogger(LoggerName.STDERR, str(agent.stderr), color=colorama.Fore.RED)
+            stderr = FileLogger(LoggerName.STDERR, str(agent.stderr))
 
     return LoggerBundle(stdout=stdout, stderr=stderr)

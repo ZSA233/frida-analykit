@@ -47,6 +47,9 @@ class ServerManagerError(RuntimeError):
     pass
 
 
+DownloadProgressCallback = Callable[[int, int | None], None]
+
+
 @dataclass(frozen=True)
 class DownloadedServer:
     version: str
@@ -81,6 +84,7 @@ class ServerInstallResult:
     local_binary: Path
     remote_path: str
     installed_version: str | None
+    local_source: Path | None = None
 
 
 def _default_cache_dir() -> Path:
@@ -96,6 +100,21 @@ def _extract_version(text: str) -> str | None:
     return match.group(0) if match else None
 
 
+def _extract_version_from_local_source(path: Path) -> str | None:
+    name = path.name
+    if name.endswith(".xz"):
+        name = name[: -len(".xz")]
+    prefix = "frida-server-"
+    if name.startswith(prefix):
+        payload = name[len(prefix) :]
+        asset_arches = sorted(set(_ANDROID_ABI_TO_ASSET.values()), key=len, reverse=True)
+        for asset_arch in asset_arches:
+            suffix = f"-{asset_arch}"
+            if payload.endswith(suffix):
+                return payload[: -len(suffix)]
+    return _extract_version(name)
+
+
 def _iter_abi_candidates(raw: str) -> list[str]:
     return [match.group(1) for match in _ABI_TOKEN_PATTERN.finditer(raw)]
 
@@ -105,6 +124,22 @@ def _adb_prefix(config: AppConfig, adb_executable: str = "adb") -> list[str]:
     if config.server.device:
         prefix.extend(["-s", config.server.device])
     return prefix
+
+
+def _resolve_local_source(path: Path) -> Path:
+    candidate = path.expanduser().resolve()
+    if not candidate.is_file():
+        raise ServerManagerError(f"local frida-server source `{path}` does not exist or is not a file")
+    return candidate
+
+
+def _tail_text(text: str | None, *, limit: int = 20) -> str | None:
+    if text is None:
+        return None
+    lines = [line for line in text.strip().splitlines() if line.strip()]
+    if not lines:
+        return None
+    return "\n".join(lines[-limit:])
 
 
 class FridaServerManager:
@@ -202,23 +237,41 @@ class FridaServerManager:
         config: AppConfig,
         *,
         version_override: str | None = None,
+        local_server_path: Path | None = None,
         asset_arch_override: str | None = None,
         force_download: bool = False,
+        download_progress: DownloadProgressCallback | None = None,
     ) -> ServerInstallResult:
         self._ensure_remote_config(config, action="remote server installation")
-        selected_version = self.resolve_server_version(config, version_override=version_override)
+        if local_server_path is not None and version_override is not None:
+            raise ServerManagerError("`--local-server` cannot be combined with `--version`")
+        if local_server_path is not None and force_download:
+            raise ServerManagerError("`--force-download` can only be used together with `--version`")
+        if local_server_path is None and version_override is None and force_download:
+            raise ServerManagerError("`--force-download` requires an explicit `--version`")
+
+        local_source = _resolve_local_source(local_server_path) if local_server_path is not None else None
+        if local_source is not None:
+            selected_version = _extract_version_from_local_source(local_source) or "local"
+        else:
+            selected_version = self.resolve_server_version(config, version_override=version_override)
         device_abi, asset_arch = self.detect_device_abi(config)
         if asset_arch_override is not None:
             asset_arch = asset_arch_override
             device_abi = asset_arch_override
             verbose_echo(f"overriding detected asset arch with `{asset_arch_override}`")
 
-        downloaded = self.download_server_binary(
-            selected_version,
-            device_abi=device_abi,
-            asset_arch=asset_arch,
-            force=force_download,
-        )
+        if local_source is not None:
+            local_binary = self.prepare_local_server_binary(local_source)
+        else:
+            downloaded = self.download_server_binary(
+                selected_version,
+                device_abi=device_abi,
+                asset_arch=asset_arch,
+                force=force_download,
+                progress_callback=download_progress,
+            )
+            local_binary = downloaded.binary_path
 
         remote_path = config.server.servername
         temp_name = f".frida-analykit-{PurePosixPath(remote_path).name}-{selected_version}"
@@ -228,7 +281,7 @@ class FridaServerManager:
         try:
             self._run_adb(
                 config,
-                ["push", str(downloaded.binary_path), temp_remote_path],
+                ["push", str(local_binary), temp_remote_path],
                 capture_output=True,
             )
             quoted_temp = shlex.quote(temp_remote_path)
@@ -250,20 +303,26 @@ class FridaServerManager:
             selected_version=selected_version,
             device_abi=device_abi,
             asset_arch=asset_arch,
-            local_binary=downloaded.binary_path,
+            local_binary=local_binary,
             remote_path=remote_path,
             installed_version=status.installed_version,
+            local_source=local_source,
         )
 
-    def boot_remote_server(self, config: AppConfig) -> None:
+    def boot_remote_server(self, config: AppConfig, *, force_restart: bool = False) -> None:
         self._ensure_remote_config(config, action="server boot")
-
-        try:
-            _, port = config.server.host.rsplit(":", 1)
-        except ValueError as exc:
-            raise ServerManagerError(
-                f"server boot requires `server.host` in `host:port` format, got `{config.server.host}`"
-            ) from exc
+        port = self._require_host_port(config.server.host, action="server boot")
+        existing_pids = self.list_remote_server_pids(config)
+        if existing_pids:
+            if not force_restart:
+                pid_list = ", ".join(str(pid) for pid in sorted(existing_pids))
+                raise ServerManagerError(
+                    "remote frida-server already running "
+                    f"(pids: {pid_list}); run `frida-analykit server stop --config ...` "
+                    "or retry with `frida-analykit server boot --force-restart`"
+                )
+            verbose_echo(f"force restarting remote frida-server pids: {sorted(existing_pids)}")
+            self._kill_remote_pids(config, existing_pids)
 
         try:
             self._run_adb(
@@ -292,25 +351,53 @@ class FridaServerManager:
                     f"unable to parse a frida-server version from `{config.server.servername} --version`; continuing with boot"
                 )
 
-            launch_command = f"{server_path} -l 0.0.0.0:{port}"
-            process = self._popen_adb(
+            launch_command = self._build_boot_command(config.server.servername, port)
+            command, process = self._popen_adb(
                 config,
                 ["shell", self._remote_shell_command(launch_command, as_root=True)],
             )
             try:
                 returncode = process.wait()
+                stdout, stderr = self._collect_process_output(process)
+                self._log_process_result(
+                    command=command,
+                    returncode=returncode,
+                    stdout=stdout,
+                    stderr=stderr,
+                )
             except KeyboardInterrupt:
                 verbose_echo("keyboard interrupt received while waiting for remote frida-server")
                 self._terminate_process(process)
                 self.cleanup_booted_remote_server(config, before_pids=before_pids)
                 return
+            except BaseException:
+                self._terminate_process(process)
+                self.cleanup_booted_remote_server(config, before_pids=before_pids)
+                raise
 
             if returncode != 0:
+                self.cleanup_booted_remote_server(config, before_pids=before_pids)
                 raise ServerManagerError(
-                    f"`{config.server.servername} -l 0.0.0.0:{port}` exited with code {returncode}"
+                    self._format_boot_failure(
+                        config,
+                        port=port,
+                        returncode=returncode,
+                        stdout=stdout,
+                        stderr=stderr,
+                    )
                 )
         finally:
             self._remove_forward(config, port)
+
+    def stop_remote_server(self, config: AppConfig) -> set[int]:
+        self._ensure_remote_config(config, action="server stop")
+        pids = self.list_remote_server_pids(config)
+        if pids:
+            self._kill_remote_pids(config, pids)
+        port = self._optional_host_port(config.server.host)
+        if port is not None:
+            self._remove_forward(config, port)
+        return pids
 
     def detect_device_abi(self, config: AppConfig) -> tuple[str, str]:
         self._ensure_remote_config(config, action="device ABI detection")
@@ -373,6 +460,24 @@ class FridaServerManager:
         verbose_echo(f"cleaning up remote frida-server pids: {sorted(launched_pids)}")
         self._kill_remote_pids(config, launched_pids)
 
+    def prepare_local_server_binary(self, local_source: Path) -> Path:
+        resolved = _resolve_local_source(local_source)
+        destination_root = self._cache_dir / "local"
+        if resolved.suffix == ".xz":
+            target_name = resolved.name[: -len(".xz")]
+            destination = destination_root / target_name
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            verbose_echo(f"extracting local frida-server archive `{resolved}` to `{destination}`")
+            with lzma.open(resolved, "rb") as source, destination.open("wb") as target:
+                shutil.copyfileobj(source, target)
+        else:
+            destination = destination_root / resolved.name
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            verbose_echo(f"copying local frida-server binary `{resolved}` to `{destination}`")
+            shutil.copyfile(resolved, destination)
+        destination.chmod(0o755)
+        return destination
+
     def download_server_binary(
         self,
         version: str,
@@ -380,6 +485,7 @@ class FridaServerManager:
         device_abi: str,
         asset_arch: str,
         force: bool = False,
+        progress_callback: DownloadProgressCallback | None = None,
     ) -> DownloadedServer:
         release = self._load_release_metadata(version)
         expected_name = f"frida-server-{version}-{asset_arch}.xz"
@@ -395,7 +501,11 @@ class FridaServerManager:
             if force or not archive_path.exists():
                 archive_path.parent.mkdir(parents=True, exist_ok=True)
                 verbose_echo(f"downloading `{asset_name}` to `{archive_path}`")
-                self._download_to_path(str(asset["browser_download_url"]), archive_path)
+                self._download_to_path(
+                    str(asset["browser_download_url"]),
+                    archive_path,
+                    progress_callback=progress_callback,
+                )
             if force or not binary_path.exists():
                 binary_path.parent.mkdir(parents=True, exist_ok=True)
                 verbose_echo(f"extracting `{archive_path}` to `{binary_path}`")
@@ -447,7 +557,13 @@ class FridaServerManager:
             f"unable to find a Frida release tagged {version}. Tried: {', '.join(errors)}"
         )
 
-    def _download_to_path(self, url: str, destination: Path) -> None:
+    def _download_to_path(
+        self,
+        url: str,
+        destination: Path,
+        *,
+        progress_callback: DownloadProgressCallback | None = None,
+    ) -> None:
         verbose_echo(f"downloading release asset from `{url}`")
         request = Request(
             url,
@@ -458,7 +574,22 @@ class FridaServerManager:
         )
         try:
             with self._urlopen(request) as response, destination.open("wb") as handle:
-                shutil.copyfileobj(response, handle)
+                header_value = None
+                headers = getattr(response, "headers", None)
+                if headers is not None:
+                    header_value = headers.get("Content-Length")
+                total_bytes = int(header_value) if header_value and header_value.isdigit() else None
+                downloaded = 0
+                if progress_callback is not None:
+                    progress_callback(0, total_bytes)
+                while True:
+                    chunk = response.read(64 * 1024)
+                    if not chunk:
+                        break
+                    handle.write(chunk)
+                    downloaded += len(chunk)
+                    if progress_callback is not None:
+                        progress_callback(downloaded, total_bytes)
         except HTTPError as exc:
             raise ServerManagerError(f"failed to download `{url}`: HTTP {exc.code}") from exc
         except URLError as exc:
@@ -517,11 +648,17 @@ class FridaServerManager:
         verbose_echo(f"remote shell command: {command}")
         return self._run_adb(config, shell_args, capture_output=True, check=check)
 
-    def _popen_adb(self, config: AppConfig, args: list[str]):
+    def _popen_adb(self, config: AppConfig, args: list[str]) -> tuple[list[str], Any]:
         command = [*_adb_prefix(config, adb_executable=self._adb_executable), *args]
         verbose_echo(f"starting adb process: {format_command(command)}")
         try:
-            return self._subprocess_popen(command)
+            process = self._subprocess_popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            return command, process
         except OSError as exc:
             raise ServerManagerError(
                 f"failed to start `{format_command(command)}`: {exc}"
@@ -578,6 +715,79 @@ class FridaServerManager:
             self._shell(config, f"kill -9 {pid}", as_root=True, check=False)
 
     @staticmethod
+    def _build_boot_command(server_path: str, port: str) -> str:
+        shell_body = (
+            "child=''; "
+            "cleanup() { "
+            "if [ -n \"$child\" ]; then "
+            "kill \"$child\" 2>/dev/null || true; "
+            "wait \"$child\" 2>/dev/null || true; "
+            "fi; "
+            "}; "
+            "trap cleanup HUP INT TERM EXIT; "
+            f"{shlex.quote(server_path)} -l 0.0.0.0:{port} & "
+            "child=$!; "
+            "wait \"$child\""
+        )
+        return f"sh -c {shlex.quote(shell_body)}"
+
+    @staticmethod
+    def _collect_process_output(process: Any) -> tuple[str | None, str | None]:
+        try:
+            stdout, stderr = process.communicate(timeout=1)
+        except BaseException:
+            stdout = getattr(process, "stdout", None)
+            stderr = getattr(process, "stderr", None)
+            stdout = stdout.read() if hasattr(stdout, "read") else None
+            stderr = stderr.read() if hasattr(stderr, "read") else None
+        return stdout, stderr
+
+    def _format_boot_failure(
+        self,
+        config: AppConfig,
+        *,
+        port: str,
+        returncode: int,
+        stdout: str | None,
+        stderr: str | None,
+    ) -> str:
+        message = f"`{config.server.servername} -l 0.0.0.0:{port}` exited with code {returncode}"
+        stderr_tail = _tail_text(stderr)
+        stdout_tail = _tail_text(stdout)
+        combined = "\n".join(part for part in (stderr_tail, stdout_tail) if part)
+        if combined:
+            message = f"{message}\n{combined}"
+
+        if "Address already in use" not in combined:
+            return message
+
+        active_pids = self.list_remote_server_pids(config)
+        if not active_pids:
+            return message
+        pid_list = ", ".join(str(pid) for pid in sorted(active_pids))
+        return (
+            f"{message}\n"
+            f"remote frida-server is still running (pids: {pid_list}); "
+            "run `frida-analykit server stop --config ...` or retry with "
+            "`frida-analykit server boot --force-restart`"
+        )
+
+    @staticmethod
+    def _require_host_port(host: str, *, action: str) -> str:
+        try:
+            _, port = host.rsplit(":", 1)
+        except ValueError as exc:
+            raise ServerManagerError(f"{action} requires `server.host` in `host:port` format, got `{host}`") from exc
+        return port
+
+    @classmethod
+    def _optional_host_port(cls, host: str) -> str | None:
+        try:
+            return cls._require_host_port(host, action="server stop")
+        except ServerManagerError:
+            return None
+
+    @staticmethod
     def _ensure_remote_config(config: AppConfig, *, action: str) -> None:
         if not config.server.is_remote:
             raise ServerManagerError(f"{action} only supports remote adb-backed targets")
@@ -615,5 +825,9 @@ class FridaServerManager:
                 return
 
 
-def boot_server(config: AppConfig) -> None:
-    FridaServerManager().boot_remote_server(config)
+def boot_server(config: AppConfig, *, force_restart: bool = False) -> None:
+    FridaServerManager().boot_remote_server(config, force_restart=force_restart)
+
+
+def stop_server(config: AppConfig) -> set[int]:
+    return FridaServerManager().stop_remote_server(config)

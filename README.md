@@ -70,6 +70,8 @@ frida-analykit env install-frida --version 16.5.9
 
 `make dev-env` 默认只显示帮助。`make dev-env-gen` 默认安装仓库开发所需的 `dev + repl` 依赖，必须显式传入 `FRIDA_VERSION`，`ENV_NAME` 可选，`NO_REPL=1` 可关闭 REPL 依赖；`frida-analykit env create` 默认安装 `repl`，但不会安装仓库的 `dev` 依赖组，可通过 `--no-repl` 关闭。`make dev-env-enter` 和 `frida-analykit env shell` 会打开一个子 shell；`frida-analykit env use <name>` 只切换 current 环境，不会修改当前 shell。进入子 shell 后可以直接执行 `uv pip install ...`、`python`、`frida`、`frida-analykit`；如果要让 `uv run` / `uv sync` 优先作用于当前激活环境，仍建议显式加 `--active`。退出子 shell 用 `exit`；如果你手动 `source .../bin/activate`，则退出时用 `deactivate`。
 
+`env create` / `dev-env-gen` 在安装依赖时会直接透传 `uv` 自己的原始输出，所以你会看到 `uv venv`、`uv sync`、`uv pip install` 的原生进度。这里的受管理环境能力依赖本机存在 `uv` 命令；如果未安装或不在 `PATH` 里，CLI 会给出明确报错并提示先安装 `uv`。
+
 ## 用法 1：直接把它当成 CLI 工具
 
 准备一个 `config.yml`：
@@ -99,6 +101,8 @@ script:
 ```sh
 # 远端 frida-server 启动
 frida-analykit server boot --config config.yml
+frida-analykit server boot --config config.yml --force-restart
+frida-analykit server stop --config config.yml
 
 # 查看当前 Python Frida 与设备端 frida-server 状态
 frida-analykit doctor --config config.yml
@@ -110,6 +114,9 @@ frida-analykit server install --config config.yml --verbose
 
 # 如需手动指定 server 版本
 frida-analykit server install --config config.yml --version 17.8.2
+
+# 使用本地 frida-server 或 .xz 资产推送
+frida-analykit server install --config config.yml --local-server ./frida-server-17.8.2-android-arm64.xz
 
 # 先编译 index.ts -> _agent.js
 frida-analykit build --config config.yml
@@ -134,7 +141,29 @@ frida-analykit attach --config config.yml --watch --repl
 - `--verbose` 会打印实际执行的 adb/npm 子进程命令、退出码和捕获到的 stdout/stderr，适合排查设备端命令判断为什么与预期不一致。
 - `server.host` 除了 `host:port`，也支持 `local` 和 `usb` 这类本地/USB 设备简写。
 - `doctor --config` 会读取 `config.yml`，检查 `server.servername` 对应的设备端文件、版本、以及当前 ABI 推导出的下载资产类型。
-- `server install` 会优先使用 `--version`，否则使用 `server.version`，再否则退回当前已安装的 Python `frida` 版本；下载文件会缓存到本机缓存目录，后续重复安装会复用。
+- `server boot` 默认不会自动杀掉已经存在的远端 `frida-server`；检测到同名进程时会直接报错，并提示你执行 `server stop` 或改用 `server boot --force-restart`。
+- `server stop` 是正式清理入口；即使设备上当前没有匹配进程，也会返回成功并尝试清理对应的 adb forward。
+- `server install` 支持两种来源：`--version` 从 GitHub 下载并显示进度，`--local-server` 直接推送本地可执行文件或 `.xz` 资产。版本模式下会优先使用 `--version`，否则使用 `server.version`，再否则退回当前已安装的 Python `frida` 版本；下载文件会缓存到本机缓存目录，后续重复安装会复用。
+
+## 真机测试
+
+仓库内置了一组自包含的 Android 真机测试，不依赖外部示例工程。测试会在临时目录里生成最小 `_agent.js + config.yml`，只验证最核心的链路：`frida-server` 生命周期、最小日志注入、以及安装命令。
+
+运行前需要：
+
+- `FRIDA_ANALYKIT_ENABLE_DEVICE=1`
+- `FRIDA_ANALYKIT_DEVICE_APP=<package>`
+- 可选 `ANDROID_SERIAL=<serial>`
+- 可选 `FRIDA_ANALYKIT_DEVICE_LOCAL_SERVER=<path>`，用于 `server install --local-server` 测试
+
+命令：
+
+```sh
+make device-check
+make device-test-core
+make device-test-install
+make device-test
+```
 
 ## 用法 2：生成自定义 TypeScript agent 工作区
 
@@ -200,6 +229,8 @@ frida-analykit attach --config ./config.yml --watch --repl
 ```
 
 CLI 会复用工作区中的 `npm run build` / `npm run watch`。如果你更习惯手动调试，也仍然可以直接执行这两个 npm scripts。
+
+如果 `config.yml` 里配置了 `agent.stdout` / `agent.stderr`，CLI 在注入前会打印解析后的日志文件路径。ESM 场景下，`index.ts` 里的顶层 `import` 会先于后面的 `console.log(...)` 执行，所以如果你预期中的“第一行日志”没有出现，优先检查 `logs/outerr.log` 里的 bootstrap / import 错误，而不是先怀疑路径没生效。
 
 然后用同一个 Python CLI 去运行：
 

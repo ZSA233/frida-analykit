@@ -72,7 +72,8 @@ addopts = "-ra"
 testpaths = ["tests"]
 markers = [
   "smoke: requires a local Frida attachment target",
-  "scaffold: requires npm install/build tooling"
+  "scaffold: requires npm install/build tooling",
+  "device: requires an attached Android device and FRIDA_ANALYKIT_ENABLE_DEVICE=1"
 ]
 
 [dependency-groups]

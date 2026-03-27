@@ -27,6 +27,14 @@ REPL = os.environ.get("REPL", False)
 _SCOPE_GET_PREFIX = "__get__$$"
 
 
+def _safe_scope_del(scope_del, inst_id: str, scope_id: str) -> None:
+    try:
+        scope_del(inst_id, scope_id)
+    except Exception:
+        # Handles may outlive the underlying Frida script during REPL/session teardown.
+        pass
+
+
 class Unset:
     def __init__(self, name: str) -> None:
         self.name = name
@@ -37,6 +45,14 @@ class JsHandle:
         {"_JsHandle" + value for value in ("__path", "__parent", "__script", "__props", "__typ", "__scope_id", "__inst_id", "__value", "__lock")}
     )
     __LATER_PROP__: Final[frozenset[str]] = frozenset({"value", "type"})
+
+    @staticmethod
+    def _render_path(path: str, parent: "JsHandle" | None, inst_id: str | None) -> str:
+        if parent is None:
+            return path
+        if inst_id is not None and inst_id.startswith(_SCOPE_GET_PREFIX):
+            return inst_id
+        return f"{str(parent)}/{path}"
 
     def __init__(
         self,
@@ -62,7 +78,7 @@ class JsHandle:
         elif inst_id is True:
             resolved_id = f"{_SCOPE_GET_PREFIX}{hex(id(self))}"
         elif inst_id is None:
-            resolved_id = str(self)
+            resolved_id = JsHandle._render_path(path, parent, None)
         else:  # pragma: no cover - defensive
             raise TypeError(f"unexpected type of {type(inst_id)!r}")
         self.__inst_id = resolved_id
@@ -76,18 +92,14 @@ class JsHandle:
 
         weakref.finalize(
             self,
-            functools.partial(self.__script.exports_sync.scope_del, resolved_id, scope_id),
+            functools.partial(_safe_scope_del, self.__script.exports_sync.scope_del, resolved_id, scope_id),
         )
 
     def __repr__(self) -> str:
         return f"<JsHandle: [{self.__typ}] {self}>"
 
     def __str__(self) -> str:
-        if self.__parent is None:
-            return self.__path
-        if self.__inst_id is not None and self.__inst_id.startswith(_SCOPE_GET_PREFIX):
-            return self.__inst_id
-        return f"{self.__parent}/{self.__path}"
+        return JsHandle._render_path(self.__path, self.__parent, self.__inst_id)
 
     def __dir__(self):
         return tuple(self.__props) + tuple(JsHandle.__LATER_PROP__)

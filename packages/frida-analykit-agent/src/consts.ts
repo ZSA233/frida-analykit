@@ -9,7 +9,7 @@ export const nativeFunctionOptions: NativeABI | NativeFunctionOptions = {
 
 
 
-export const enum SYM_INFO_BIND {
+export enum SYM_INFO_BIND {
     STB_LOCAL = 0x0,
     STB_GLOBAL = 0x1,
     STB_WEAK = 0x2,
@@ -17,7 +17,7 @@ export const enum SYM_INFO_BIND {
 }
 
 
-export const enum SYM_INFO_TYPE {
+export enum SYM_INFO_TYPE {
     STT_NOTYPE = 0x0,
     STT_OBJECT = 0x1,
     STT_FUNC = 0x2,
@@ -25,8 +25,7 @@ export const enum SYM_INFO_TYPE {
     STT_FILE = 0x4,
 }
 
-export const enum SYM_SHNDX {
+export enum SYM_SHNDX {
     SHN_UNDEF = 0,
     SHN_ABS = 0xfff1,
 }
-

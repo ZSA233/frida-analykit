@@ -23,6 +23,10 @@ _LEGACY_ENV_GLOB = ".venv-*"
 _DEFAULT_PYTHON_VERSION = "3.11"
 _FRIDA_TOOLS_REQUIREMENT = "frida-tools"
 _REPL_EXTRA = "repl"
+_UV_REQUIRED_MESSAGE = (
+    "Managed environment commands require `uv`, but it was not found on PATH. "
+    "Install `uv`, ensure the `uv` command is available, then retry."
+)
 
 
 class DevEnvError(RuntimeError):
@@ -282,6 +286,7 @@ class DevEnvManager:
             ["uv", "venv", str(env_dir), "--python", _DEFAULT_PYTHON_VERSION],
             cwd=self._repo_root,
             error_message=f"Failed to create {resolved_name}",
+            stream_output=True,
         )
 
         env_python = _python_path(env_dir)
@@ -307,6 +312,7 @@ class DevEnvManager:
                 cwd=self._repo_root,
                 env=env,
                 error_message=f"Failed to sync project dependencies into {resolved_name}",
+                stream_output=True,
             )
         else:
             install_source = _repo_install_source(self._repo_root)
@@ -320,6 +326,7 @@ class DevEnvManager:
                 command,
                 cwd=None,
                 error_message=f"Failed to install frida-analykit into {resolved_name}",
+                stream_output=True,
             )
 
         self._run_checked(
@@ -334,6 +341,7 @@ class DevEnvManager:
             ],
             cwd=self._repo_root,
             error_message=f"Failed to install frida=={resolved_version} into {resolved_name}",
+            stream_output=True,
         )
 
         managed = ManagedEnv(
@@ -442,6 +450,7 @@ class DevEnvManager:
             ],
             cwd=self._repo_root,
             error_message=f"Failed to install frida=={frida_version} into {env_dir.name}",
+            stream_output=True,
         )
         if update_registry:
             self._update_registry_for_env(env_dir, frida_version)
@@ -872,17 +881,26 @@ class DevEnvManager:
         cwd: Path | None,
         error_message: str,
         env: dict[str, str] | None = None,
+        stream_output: bool = False,
     ) -> None:
-        result = self._subprocess_run(
-            command,
-            cwd=cwd,
-            env=env,
-            check=False,
-            capture_output=True,
-            text=True,
-        )
+        try:
+            result = self._subprocess_run(
+                command,
+                cwd=cwd,
+                env=env,
+                check=False,
+                capture_output=not stream_output,
+                text=True,
+            )
+        except FileNotFoundError as exc:
+            if command and command[0] == "uv":
+                raise DevEnvError(_UV_REQUIRED_MESSAGE) from exc
+            tool = command[0] if command else "<unknown>"
+            raise DevEnvError(f"Required command `{tool}` was not found on PATH") from exc
         if result.returncode != 0:
-            detail = "\n".join(part for part in (result.stdout, result.stderr) if part).strip()
+            detail = "\n".join(
+                part for part in (getattr(result, "stdout", None), getattr(result, "stderr", None)) if part
+            ).strip()
             if detail:
                 raise DevEnvError(f"{error_message}: {detail}")
             raise DevEnvError(error_message)

@@ -71,7 +71,29 @@ class HandlerRegistry:
 
     def _default_exception_handler(self, message: dict, data: bytes | None) -> None:
         del data
-        print(json.dumps(message, ensure_ascii=False), file=self._stderr)
+        description = message.get("description")
+        stack = message.get("stack")
+        file_name = message.get("fileName")
+        line = message.get("lineNumber")
+        column = message.get("columnNumber")
+
+        if not any(value is not None for value in (description, stack, file_name, line, column)):
+            print(json.dumps(message, ensure_ascii=False), file=self._stderr)
+            return
+
+        if file_name:
+            location = str(file_name)
+            if line is not None:
+                location = f"{location}:{line}"
+                if column is not None:
+                    location = f"{location}:{column}"
+            print(f"[script-error] {location}", file=self._stderr)
+
+        if description:
+            print(f"[script-error] {description}", file=self._stderr)
+
+        if stack:
+            print(stack, file=self._stderr)
 
     def _default_batch_handler(self, payload: RPCPayload) -> None:
         for item in unpack_batch_payload(payload):

@@ -2,7 +2,7 @@
 
 
 
-export const enum RPCMsgType {
+export enum RPCMsgType {
     BATCH = 'BATCH',
     SCOPE_CALL = 'SCOPE_CALL',
     SCOPE_EVAL = 'SCOPE_EVAL',
@@ -15,11 +15,11 @@ export const enum RPCMsgType {
 }
 
 
-export const enum batchSendSource {
+export enum batchSendSource {
 }
 
 
-export const enum saveFileSource {
+export enum saveFileSource {
     procMaps = 'procMaps',
     textFile = 'textFile',
     elfModule = 'elfModule',
