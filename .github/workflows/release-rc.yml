@@ -1,0 +1,81 @@
+name: Release RC
+
+on:
+  push:
+    tags:
+      - "v*-rc.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: RC tag to dry-run, for example v2.0.0-rc.1
+        required: true
+        type: string
+
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      TARGET_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+    steps:
+      - name: Initialize npm cache path
+        shell: bash
+        run: echo "npm_config_cache=$RUNNER_TEMP/npm-cache" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate dispatch tag format
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          case "$TARGET_TAG" in
+            v*-rc.*) ;;
+            *)
+              echo "workflow_dispatch tag must match vX.Y.Z-rc.N" >&2
+              exit 1
+              ;;
+          esac
+
+      - uses: ./.github/actions/release-bundle
+        with:
+          release_tag: ${{ env.TARGET_TAG }}
+
+      - name: Upload release bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-bundle-${{ env.TARGET_TAG }}
+          path: |
+            dist/*.tar.gz
+            dist/*.whl
+            *.tgz
+          if-no-files-found: error
+
+  publish:
+    if: ${{ github.event_name == 'push' }}
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download release bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: release-bundle-${{ github.ref_name }}
+          path: release-bundle
+
+      - name: Publish GitHub prerelease
+        uses: softprops/action-gh-release@v2
+        with:
+          prerelease: true
+          generate_release_notes: true
+          files: |
+            release-bundle/dist/*.tar.gz
+            release-bundle/dist/*.whl
+            release-bundle/*.tgz
+          fail_on_unmatched_files: true

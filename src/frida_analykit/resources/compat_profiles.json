@@ -1,0 +1,18 @@
+{
+  "profiles": [
+    {
+      "name": "legacy-16",
+      "series": "16.6.x",
+      "tested_version": "16.5.9",
+      "min_inclusive": "16.5.9",
+      "max_exclusive": "17.0.0"
+    },
+    {
+      "name": "current-17",
+      "series": "17.x",
+      "tested_version": "17.8.2",
+      "min_inclusive": "17.0.0",
+      "max_exclusive": "18.0.0"
+    }
+  ]
+}

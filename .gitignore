@@ -1,4 +1,10 @@
-__pycache__
-package-lock.json
-node_modules
+__pycache__/
+.pytest_cache/
+.venv/
+.venv-*/
+.frida-analykit/
+build/
+dist/
+node_modules/
 cmodule-includes/
+*.tgz

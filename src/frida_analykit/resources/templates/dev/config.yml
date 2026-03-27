@@ -1,0 +1,20 @@
+
+
+app: 
+jsfile: _agent.js
+
+server:
+  servername: /data/local/tmp/frida-server
+  host: 127.0.0.1:27042
+  device: 
+  version: 
+
+agent:
+  datadir: ./data/
+  stdout: ./logs/outerr.log
+  stderr: ./logs/outerr.log
+
+
+script:
+  nettools:
+    ssl_log_secret: ./data/nettools/sslkey/

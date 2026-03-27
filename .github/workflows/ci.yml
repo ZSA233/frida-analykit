@@ -1,0 +1,121 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  release-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Sync Python environment
+        run: uv sync --dev
+
+      - name: Validate release contract
+        run: uv run python scripts/release_assets.py validate-config
+
+  python-tests:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.11"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Sync Python environment
+        run: uv sync --extra repl --dev
+
+      - name: Run Python tests
+        run: uv run pytest -q -m "not smoke and not scaffold"
+
+  compat-smoke:
+    needs: release-contract
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [legacy-16, current-17]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Sync Python environment
+        run: uv sync --extra repl --dev
+
+      - name: Select Frida profile
+        id: profile
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          from pathlib import Path
+
+          profile_name = "${{ matrix.profile }}"
+          data = json.loads(Path("src/frida_analykit/resources/compat_profiles.json").read_text())
+          profile = next(item for item in data["profiles"] if item["name"] == profile_name)
+          print(f"version={profile['tested_version']}")
+          PY
+
+      - name: Install pinned Frida
+        run: uv pip install --python .venv/bin/python "frida==${{ steps.profile.outputs.version }}"
+
+      - name: Run smoke test
+        env:
+          FRIDA_ANALYKIT_ENABLE_SMOKE: "1"
+        run: uv run pytest tests/test_smoke.py -q -m smoke
+
+  node-scaffold:
+    needs: release-contract
+    runs-on: ubuntu-latest
+    steps:
+      - name: Initialize npm cache path
+        shell: bash
+        run: echo "npm_config_cache=$RUNNER_TEMP/npm-cache" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Sync Python environment
+        run: uv sync --dev
+
+      - name: Install Node workspace dependencies
+        run: npm ci
+
+      - name: Type-check runtime package
+        run: npm run agent:build
+
+      - name: Run scaffold test
+        env:
+          FRIDA_ANALYKIT_ENABLE_NPM: "1"
+        run: uv run pytest tests/test_scaffold.py -q -m scaffold

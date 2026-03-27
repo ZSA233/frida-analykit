@@ -1,0 +1,10 @@
+# Single source of truth for release-critical version metadata.
+# Python version: X.Y.Z / X.Y.ZrcN
+# npm version: X.Y.Z / X.Y.Z-rc.N
+# git tag: vX.Y.Z / vX.Y.Z-rc.N
+# This file only drives release-critical files. README/docs install examples
+# are intentionally updated separately when user-facing guidance changes.
+
+base_version = "2.0.0"
+channel = "rc"
+rc_number = 4
