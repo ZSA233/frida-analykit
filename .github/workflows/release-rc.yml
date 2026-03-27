@@ -22,8 +22,11 @@ jobs:
       contents: read
     env:
       TARGET_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
-      npm_config_cache: ${{ runner.temp }}/npm-cache
     steps:
+      - name: Initialize npm cache path
+        shell: bash
+        run: echo "npm_config_cache=$RUNNER_TEMP/npm-cache" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0

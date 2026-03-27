@@ -89,9 +89,11 @@ jobs:
   node-scaffold:
     needs: release-contract
     runs-on: ubuntu-latest
-    env:
-      npm_config_cache: ${{ runner.temp }}/npm-cache
     steps:
+      - name: Initialize npm cache path
+        shell: bash
+        run: echo "npm_config_cache=$RUNNER_TEMP/npm-cache" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
