@@ -379,6 +379,58 @@ def test_set_stable_release_with_check_rolls_back_when_preflight_fails(
     assert _managed_file_texts(repo_root) == before
 
 
+def test_run_release_preflight_streams_output_to_terminal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    calls: list[tuple[list[str], dict[str, object]]] = []
+
+    def fake_run(command, **kwargs):
+        calls.append((list(command), kwargs))
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(release_version_script.subprocess, "run", fake_run)
+
+    release_version_script.run_release_preflight(repo_root, tag="v2.0.0-rc.1")
+
+    assert calls == [
+        (
+            ["make", "release-preflight", "RELEASE_TAG=v2.0.0-rc.1"],
+            {"cwd": repo_root, "check": False},
+        )
+    ]
+
+
+def test_sync_release_version_rolls_back_when_preflight_is_interrupted(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_config = release_version_script.ReleaseVersionConfig(base_version="2.0.0", channel="stable")
+    target_config = release_version_script.ReleaseVersionConfig(
+        base_version="2.0.0",
+        channel="rc",
+        rc_number=1,
+    )
+    repo_root = _make_version_repo(tmp_path, config=original_config)
+    before = _managed_file_texts(repo_root)
+
+    def fake_run_lockfile_sync(current_repo_root: Path) -> None:
+        _write_lockfile(current_repo_root, target_config.release)
+
+    def fake_run_release_preflight(current_repo_root: Path, *, tag: str, rc_tag: str | None = None) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(release_version_script, "run_lockfile_sync", fake_run_lockfile_sync)
+    monkeypatch.setattr(release_version_script, "run_release_preflight", fake_run_release_preflight)
+
+    with pytest.raises(KeyboardInterrupt):
+        release_version_script.sync_release_version(repo_root, target_config, check=True)
+
+    assert _managed_file_texts(repo_root) == before
+
+
 @pytest.mark.parametrize(
     ("tag", "mutator", "expected_message"),
     [

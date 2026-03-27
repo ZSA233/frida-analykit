@@ -39,7 +39,7 @@ release-preflight:
 		fi ;; \
 	esac
 	npm ci
-	uv run pytest -q -m "not smoke and not scaffold and not device"
+	uv run pytest -x -vv -m "not smoke and not scaffold and not device"
 	npm run agent:build
 
 release-local:

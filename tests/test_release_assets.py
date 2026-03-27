@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import subprocess
 import sys
 import textwrap
@@ -415,6 +416,10 @@ def test_install_check_uses_single_release_artifacts_and_minimum_supported_frida
 def test_release_build_outputs_single_wheel_with_range_dependency(tmp_path: Path) -> None:
     repo_root = _make_release_repo(tmp_path)
     dist_dir = repo_root / "dist"
+    env = dict(os.environ)
+    # Isolate uv's cache from the user profile so this build test does not
+    # depend on host cache permissions or preexisting global state.
+    env["UV_CACHE_DIR"] = str(tmp_path / ".uv-cache")
 
     subprocess.run(
         ["uv", "build", "--sdist", "--wheel", "--out-dir", str(dist_dir)],
@@ -422,6 +427,7 @@ def test_release_build_outputs_single_wheel_with_range_dependency(tmp_path: Path
         check=True,
         capture_output=True,
         text=True,
+        env=env,
     )
 
     metadata = release_assets.load_package_metadata(repo_root)

@@ -315,17 +315,14 @@ def run_release_preflight(
     command = ["make", "release-preflight", f"RELEASE_TAG={tag}"]
     if rc_tag is not None:
         command.append(f"RC_TAG={rc_tag}")
+    # Stream release-preflight output directly so long-running npm/test steps
+    # stay visible to the operator during CHECK=1 flows.
     result = subprocess.run(
         command,
         cwd=repo_root,
         check=False,
-        capture_output=True,
-        text=True,
     )
     if result.returncode != 0:
-        detail = "\n".join(part for part in (result.stdout, result.stderr) if part).strip()
-        if detail:
-            raise ReleaseVersionToolError(f"Release preflight failed for {tag}: {detail}")
         raise ReleaseVersionToolError(f"Release preflight failed for {tag}")
 
 
@@ -348,12 +345,14 @@ def sync_release_version(
                 tag=config.release.tag,
                 rc_tag=None if config.release.is_rc else rc_tag,
             )
-    except Exception as exc:
+    except BaseException as exc:
         try:
             restore_managed_version_files(repo_root, snapshots)
         except Exception as restore_exc:
             raise ReleaseVersionToolError(f"{exc}; rollback failed: {restore_exc}") from exc
         if isinstance(exc, ReleaseVersionToolError):
+            raise
+        if isinstance(exc, (KeyboardInterrupt, SystemExit)):
             raise
         raise ReleaseVersionToolError(str(exc)) from exc
     return release_summary(config)
