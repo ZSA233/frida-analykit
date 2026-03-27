@@ -5,7 +5,6 @@ __pycache__/
 .frida-analykit/
 build/
 dist/
-package-lock.json
 node_modules/
 cmodule-includes/
 *.tgz
