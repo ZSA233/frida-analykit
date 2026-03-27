@@ -1,4 +1,4 @@
-.PHONY: sync test compat scaffold build npm-pack release-check release-preflight release-local release-install-check dev-env dev-env-list dev-env-gen dev-env-enter dev-env-remove dev-smoke device-check device-test-core device-test-install device-test
+.PHONY: sync test compat scaffold build npm-pack release-check release-preflight release-local release-install-check release-version-show release-version-rc release-version-stable dev-env dev-env-list dev-env-gen dev-env-enter dev-env-remove dev-smoke device-check device-test-core device-test-install device-test
 
 RELEASE_TAG ?=
 RC_TAG ?=
@@ -27,6 +27,7 @@ release-check: test scaffold build npm-pack
 
 release-preflight:
 	@if [ -z "$(RELEASE_TAG)" ]; then echo "RELEASE_TAG is required" >&2; exit 1; fi
+	uv run python scripts/release_version.py check-sync --tag "$(RELEASE_TAG)"
 	uv run python scripts/release_assets.py validate-config
 	uv run python scripts/release_assets.py validate-release-version --tag "$(RELEASE_TAG)"
 	@case "$(RELEASE_TAG)" in \
@@ -49,6 +50,23 @@ release-local:
 release-install-check:
 	@if [ -z "$(RELEASE_TAG)" ]; then echo "RELEASE_TAG is required" >&2; exit 1; fi
 	uv run python scripts/release_assets.py install-check --tag "$(RELEASE_TAG)" --dist-dir "$(DIST_DIR)"
+
+release-version-show:
+	uv run python scripts/release_version.py show
+
+release-version-rc:
+	@if [ -z "$(BASE_VERSION)" ] || [ -z "$(RC)" ]; then \
+		echo "Usage: make release-version-rc BASE_VERSION=<version> RC=<number> [CHECK=1]" >&2; \
+		exit 2; \
+	fi
+	uv run python scripts/release_version.py set-rc --base "$(BASE_VERSION)" --rc "$(RC)" $(if $(filter 1,$(CHECK)),--check)
+
+release-version-stable:
+	@if [ -z "$(BASE_VERSION)" ]; then \
+		echo "Usage: make release-version-stable BASE_VERSION=<version> [CHECK=1] [RC_TAG=<tag>]" >&2; \
+		exit 2; \
+	fi
+	uv run python scripts/release_version.py set-stable --base "$(BASE_VERSION)" $(if $(filter 1,$(CHECK)),--check) $(if $(RC_TAG),--rc-tag "$(RC_TAG)")
 
 dev-env:
 	uv run python scripts/dev_env.py help

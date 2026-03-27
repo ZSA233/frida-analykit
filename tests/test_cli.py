@@ -137,7 +137,7 @@ def test_gen_dev_creates_v2_workspace(tmp_path: Path) -> None:
 
     assert result.exit_code == 0, result.output
     package = json.loads((tmp_path / "package.json").read_text(encoding="utf-8"))
-    assert package["dependencies"]["@zsa233/frida-analykit-agent"] == default_agent_package_spec("2.0.0")
+    assert package["dependencies"]["@zsa233/frida-analykit-agent"] == default_agent_package_spec()
     assert package["scripts"]["build"] == "frida-compile index.ts -o _agent.js -c"
     assert package["scripts"]["watch"] == "frida-compile index.ts -o _agent.js -w"
     assert package["devDependencies"]["typescript"] == "^5.8.3"

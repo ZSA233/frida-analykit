@@ -62,6 +62,13 @@ def _make_release_repo(tmp_path: Path) -> Path:
     )
     _write_file(repo_root / "README.md", "# demo\n")
     _write_file(
+        repo_root / "release-version.toml",
+        """
+        base_version = "0.5.0"
+        channel = "stable"
+        """,
+    )
+    _write_file(
         repo_root / "package.json",
         """
         {
@@ -299,6 +306,10 @@ def test_validate_release_version_accepts_rc_mapping(tmp_path: Path) -> None:
 
 def test_validate_promotion_allows_only_version_metadata_changes(tmp_path: Path) -> None:
     repo_root = _make_release_repo(tmp_path)
+    (repo_root / "release-version.toml").write_text(
+        'base_version = "0.5.0"\nchannel = "rc"\nrc_number = 1\n',
+        encoding="utf-8",
+    )
     (repo_root / "src/demo_tool/_version.py").write_text('__version__ = "0.5.0rc1"\n', encoding="utf-8")
     (repo_root / "package.json").write_text(
         (repo_root / "package.json")
@@ -324,6 +335,10 @@ def test_validate_promotion_allows_only_version_metadata_changes(tmp_path: Path)
     _git_init(repo_root)
     subprocess.run(["git", "tag", "v0.5.0-rc.1"], cwd=repo_root, check=True, capture_output=True, text=True)
 
+    (repo_root / "release-version.toml").write_text(
+        'base_version = "0.5.0"\nchannel = "stable"\n',
+        encoding="utf-8",
+    )
     (repo_root / "src/demo_tool/_version.py").write_text('__version__ = "0.5.0"\n', encoding="utf-8")
     (repo_root / "package.json").write_text(
         (repo_root / "package.json")
@@ -354,6 +369,7 @@ def test_validate_promotion_allows_only_version_metadata_changes(tmp_path: Path)
         "package-lock.json",
         "package.json",
         "packages/frida-analykit-agent/package.json",
+        "release-version.toml",
         "src/demo_tool/_version.py",
     ]
 

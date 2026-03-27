@@ -36,10 +36,12 @@ COMPAT_PROFILES_PATH = Path("src/frida_analykit/resources/compat_profiles.json")
 ROOT_PACKAGE_JSON_PATH = Path("package.json")
 AGENT_PACKAGE_JSON_PATH = Path("packages/frida-analykit-agent/package.json")
 PACKAGE_LOCK_PATH = Path("package-lock.json")
+RELEASE_VERSION_PATH = Path("release-version.toml")
 PROMOTION_ALLOWED_DIFFS = {
     PACKAGE_LOCK_PATH.as_posix(),
     ROOT_PACKAGE_JSON_PATH.as_posix(),
     AGENT_PACKAGE_JSON_PATH.as_posix(),
+    RELEASE_VERSION_PATH.as_posix(),
 }
 
 
