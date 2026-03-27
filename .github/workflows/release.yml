@@ -85,8 +85,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            release-bundle/*.tar.gz
-            release-bundle/*.whl
+            release-bundle/dist/*.tar.gz
+            release-bundle/dist/*.whl
             release-bundle/*.tgz
           fail_on_unmatched_files: true
 
