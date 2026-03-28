@@ -3,9 +3,10 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import frida
 from click.testing import CliRunner
 
-from frida_analykit.cli import cli
+from frida_analykit.cli import _prepare_session, cli
 from frida_analykit.config import AppConfig
 from frida_analykit.dev_env import DevEnvError, ManagedEnv
 from frida_analykit.scaffold import default_agent_package_spec
@@ -366,8 +367,43 @@ def test_env_install_frida_uses_current_interpreter(monkeypatch: pytest.MonkeyPa
 
     assert result.exit_code == 0, result.output
     assert calls["frida_version"] == "16.5.9"
-    assert str(calls["python_path"]).endswith("python")
+    assert Path(calls["python_path"]).stem == "python"
     assert "updated Frida runtime" in result.output
+
+
+def test_prepare_session_retries_process_not_found_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config = _config(tmp_path)
+    attempts: list[int] = []
+
+    class FlakyDevice:
+        def attach(self, pid: int):
+            attempts.append(pid)
+            if len(attempts) == 1:
+                raise frida.ProcessNotFoundError("process not found")
+            return _FakeAttachedSession()
+
+    class FakeSessionWrapper:
+        def __init__(self) -> None:
+            self.handlers: dict[str, object] = {}
+            self.script = _FakeScript()
+            self.script.set_logger = lambda: None
+
+        def on(self, signal: str, callback) -> None:
+            self.handlers[signal] = callback
+
+        def open_script(self, path: str):
+            assert path.endswith("_agent.js")
+            return self.script
+
+    monkeypatch.setattr("frida_analykit.cli.SessionWrapper.from_session", lambda session, config: FakeSessionWrapper())
+    monkeypatch.setattr("frida_analykit.cli.time.sleep", lambda _: None)
+
+    _, session, script = _prepare_session(config, FlakyDevice(), 31337)
+
+    assert attempts == [31337, 31337]
+    assert isinstance(session, FakeSessionWrapper)
+    assert isinstance(script, _FakeScript)
+    assert script.loaded is True
 
 
 def test_env_install_frida_surfaces_validation_errors(monkeypatch: pytest.MonkeyPatch) -> None:

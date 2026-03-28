@@ -113,8 +113,19 @@ def _on_session_detached(reason: str, crash: frida._frida.Crash | None) -> None:
         click.echo(crash.report, err=True)
 
 
+def _attach_with_retry(device: Any, pid: int, *, timeout_seconds: float = 2.0):
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        try:
+            return device.attach(pid)
+        except frida.ProcessNotFoundError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.05)
+
+
 def _prepare_session(config: AppConfig, device: Any, pid: int):
-    session = SessionWrapper.from_session(device.attach(pid), config=config)
+    session = SessionWrapper.from_session(_attach_with_retry(device, pid), config=config)
     session.on("detached", _on_session_detached)
     script = session.open_script(str(config.jsfile))
     script.set_logger()
