@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 from click.testing import CliRunner
 
+from frida_analykit._version import __version__
 from frida_analykit.cli import cli
 from frida_analykit.config import AppConfig
 from frida_analykit.dev_env import DevEnvError, ManagedEnv
@@ -188,6 +189,16 @@ def test_gen_dev_creates_v2_workspace(tmp_path: Path) -> None:
 
 def test_default_agent_package_spec_maps_python_rc_to_npm_rc() -> None:
     assert default_agent_package_spec("2.0.0rc1") == "2.0.0-rc.1"
+
+
+def test_cli_version_option_reports_installed_version() -> None:
+    runner = CliRunner()
+
+    result = runner.invoke(cli, ["--version"])
+
+    assert result.exit_code == 0, result.output
+    assert __version__ in result.output
+    assert "frida-analykit" in result.output
 
 
 def test_env_group_prints_help_when_no_subcommand() -> None:
@@ -528,6 +539,77 @@ def test_spawn_forwards_remote_port_for_configured_device(tmp_path: Path, monkey
     assert result.exit_code == 0, result.output
     assert compat.calls == [("127.0.0.1:27042", None)]
     assert forwarded["config"].server.device == "emulator-5554"
+    assert forwarded["action"] == "device connection"
+
+
+def test_spawn_forwards_remote_port_without_configured_device(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    runner = CliRunner()
+    compat = _FakeCompat()
+    forwarded: dict[str, object] = {}
+
+    class FakeManager:
+        def ensure_remote_forward(self, config, *, action="remote port forward"):
+            forwarded["config"] = config
+            forwarded["action"] = action
+            return "27042"
+
+    monkeypatch.setattr("frida_analykit.cli.FridaCompat", lambda: compat)
+    monkeypatch.setattr(
+        "frida_analykit.cli._load_config",
+        lambda _: _remote_runtime_config(tmp_path, app="com.example.demo", device=None),
+    )
+    monkeypatch.setattr("frida_analykit.cli.FridaServerManager", lambda *args, **kwargs: FakeManager())
+    monkeypatch.setattr("frida_analykit.cli._prepare_frontend_assets", lambda **kwargs: None)
+    monkeypatch.setattr(
+        "frida_analykit.cli._prepare_session",
+        lambda config, device, pid: (device, object(), object()),
+    )
+    monkeypatch.setattr("frida_analykit.cli._post_attach", lambda **kwargs: None)
+
+    result = runner.invoke(
+        cli,
+        ["spawn", "--config", str(tmp_path / "config.yml"), "--detach-on-load"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert compat.calls == [("127.0.0.1:27042", None)]
+    assert forwarded["config"].server.device is None
+    assert forwarded["action"] == "device connection"
+
+
+def test_attach_forwards_remote_port_without_configured_device(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    runner = CliRunner()
+    compat = _FakeCompatWithAttach()
+    forwarded: dict[str, object] = {}
+
+    class FakeManager:
+        def ensure_remote_forward(self, config, *, action="remote port forward"):
+            forwarded["config"] = config
+            forwarded["action"] = action
+            return "27042"
+
+    monkeypatch.setattr("frida_analykit.cli.FridaCompat", lambda: compat)
+    monkeypatch.setattr(
+        "frida_analykit.cli._load_config",
+        lambda _: _remote_runtime_config(tmp_path, app="com.example.demo", device=None),
+    )
+    monkeypatch.setattr("frida_analykit.cli.FridaServerManager", lambda *args, **kwargs: FakeManager())
+    monkeypatch.setattr("frida_analykit.cli._prepare_frontend_assets", lambda **kwargs: None)
+    monkeypatch.setattr(
+        "frida_analykit.cli._prepare_session",
+        lambda config, device, pid: (device, object(), object()),
+    )
+    monkeypatch.setattr("frida_analykit.cli._find_app_pid", lambda device, compat, app_id: 123)
+    monkeypatch.setattr("frida_analykit.cli._post_attach", lambda **kwargs: None)
+
+    result = runner.invoke(
+        cli,
+        ["attach", "--config", str(tmp_path / "config.yml"), "--detach-on-load"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert compat.calls == [("127.0.0.1:27042", None)]
+    assert forwarded["config"].server.device is None
     assert forwarded["action"] == "device connection"
 
 

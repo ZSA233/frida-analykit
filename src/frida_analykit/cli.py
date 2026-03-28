@@ -10,6 +10,7 @@ from typing import Any
 import click
 import frida
 
+from ._version import __version__
 from .compat import FridaCompat
 from .config import AppConfig
 from .dev_env import (
@@ -187,7 +188,7 @@ def _resolve_runtime_device(config: AppConfig, compat: FridaCompat):
         return compat.get_device(host)
     if host in {"usb", "usb://"}:
         return compat.get_device(host, device_id=config.server.device)
-    if config.server.device:
+    if config.server.is_remote:
         try:
             FridaServerManager().ensure_remote_forward(config, action="device connection")
         except ServerManagerError as exc:
@@ -230,6 +231,7 @@ class _DownloadProgressReporter:
 
 
 @click.group()
+@click.version_option(__version__, prog_name="frida-analykit")
 def cli() -> None:
     """Frida-Analykit v2 CLI."""
 

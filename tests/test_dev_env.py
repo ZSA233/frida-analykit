@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from frida_analykit._version import __version__
 from frida_analykit.dev_env import (
     DevEnvError,
     DevEnvManager,
@@ -90,6 +91,7 @@ def test_repo_create_invokes_uv_commands_in_order_and_updates_registry(
     assert registry["current"] == "legacy-16"
     assert registry["envs"][0]["name"] == "legacy-16"
     assert registry["envs"][0]["frida_version"] == "16.5.9"
+    assert registry["envs"][0]["frida_analykit_version"] == __version__
     assert registry["envs"][0]["source_kind"] == "profile"
 
 
@@ -332,11 +334,13 @@ def test_list_envs_repairs_partial_registry_entries(
         encoding="utf-8",
     )
     monkeypatch.setattr(manager, "_detect_installed_frida_version", lambda _: "16.5.9")
+    monkeypatch.setattr(manager, "_detect_installed_frida_analykit_version", lambda _: __version__)
 
     envs = manager.list_envs()
 
     assert [env.name for env in envs] == ["frida-16.5.9"]
     assert envs[0].frida_version == "16.5.9"
+    assert envs[0].frida_analykit_version == __version__
     assert envs[0].source_kind == "version"
     assert envs[0].source_value == "16.5.9"
     assert envs[0].legacy is False
@@ -346,6 +350,7 @@ def test_list_envs_repairs_partial_registry_entries(
     assert len(payload["envs"]) == 1
     assert payload["envs"][0]["legacy"] is False
     assert payload["envs"][0]["last_updated"]
+    assert payload["envs"][0]["frida_analykit_version"] == __version__
 
 
 def test_render_list_does_not_rewrite_registry_when_payload_is_unchanged(
@@ -362,6 +367,7 @@ def test_render_list_does_not_rewrite_registry_when_payload_is_unchanged(
                 "name": "frida-16.5.9",
                 "path": str(env_dir),
                 "frida_version": "16.5.9",
+                "frida_analykit_version": __version__,
                 "source_kind": "version",
                 "source_value": "16.5.9",
                 "last_updated": "2026-03-26T00:00:00Z",
@@ -383,6 +389,43 @@ def test_render_list_does_not_rewrite_registry_when_payload_is_unchanged(
     output = manager.render_list()
 
     assert "frida-16.5.9" in output
+    assert __version__ in output
+
+
+def test_render_list_refreshes_cached_frida_analykit_version(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = DevEnvManager.for_repo(tmp_path)
+    env_dir = tmp_path / ".frida-analykit" / "envs" / "frida-16.5.9"
+    env_dir.mkdir(parents=True)
+    registry = {
+        "current": "frida-16.5.9",
+        "envs": [
+            {
+                "name": "frida-16.5.9",
+                "path": str(env_dir),
+                "frida_version": "16.5.9",
+                "frida_analykit_version": "1.9.0",
+                "source_kind": "version",
+                "source_value": "16.5.9",
+                "last_updated": "2026-03-26T00:00:00Z",
+                "legacy": False,
+            }
+        ],
+    }
+    manager.registry_path.parent.mkdir(parents=True, exist_ok=True)
+    manager.registry_path.write_text(
+        json.dumps(registry, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(manager, "_detect_installed_frida_analykit_version", lambda _: "2.0.1")
+
+    output = manager.render_list()
+
+    assert "2.0.1" in output
+    payload = json.loads(manager.registry_path.read_text(encoding="utf-8"))
+    assert payload["envs"][0]["frida_analykit_version"] == "2.0.1"
 
 
 def test_save_registry_keeps_previous_contents_when_replace_fails(
@@ -424,6 +467,7 @@ def test_install_frida_updates_managed_env_metadata(
         return subprocess.CompletedProcess(command, 0, "", "")
 
     manager = DevEnvManager.for_repo(tmp_path, subprocess_run=_run)
+    monkeypatch.setattr(manager, "_detect_installed_frida_analykit_version", lambda _: __version__)
     manager.registry_path.parent.mkdir(parents=True, exist_ok=True)
     manager.registry_path.write_text(
         json.dumps(
@@ -434,6 +478,7 @@ def test_install_frida_updates_managed_env_metadata(
                         "name": "frida-17.8.2",
                         "path": str(env_dir),
                         "frida_version": "17.8.2",
+                        "frida_analykit_version": __version__,
                         "source_kind": "version",
                         "source_value": "17.8.2",
                         "last_updated": "2026-03-26T00:00:00Z",
@@ -460,6 +505,7 @@ def test_install_frida_updates_managed_env_metadata(
     ]
     registry = json.loads(manager.registry_path.read_text(encoding="utf-8"))
     assert registry["envs"][0]["frida_version"] == "16.5.9"
+    assert registry["envs"][0]["frida_analykit_version"] == __version__
 
 
 def test_create_refuses_to_recreate_symlinked_env_dir(tmp_path: Path) -> None:

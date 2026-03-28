@@ -186,6 +186,12 @@ def test_boot_remote_server_forwards_port_and_starts_foreground_process(tmp_path
         adb_calls.append(args)
         if args[-3:] == ["forward", "tcp:27042", "tcp:27042"]:
             return _completed(args)
+        if _su0_shell(args, "id -u"):
+            return _completed(args, returncode=1, stderr="su: unknown id 0\n")
+        if _suroot_shell(args, "id -u"):
+            return _completed(args, returncode=1, stderr="su: unknown id root\n")
+        if _suc_shell(args, "id -u"):
+            return _completed(args, returncode=1, stderr="su: invalid uid/gid '-c'\n")
         if _plain_shell(args, "pidof /data/local/tmp/frida-server"):
             return _completed(args, returncode=1)
         if _plain_shell(args, "pidof frida-server"):
@@ -240,6 +246,12 @@ def test_boot_remote_server_interrupt_kills_new_remote_process_and_removes_forwa
         adb_calls.append(args)
         if args[-3:] == ["forward", "tcp:27042", "tcp:27042"]:
             return _completed(args)
+        if _su0_shell(args, "id -u"):
+            return _completed(args, returncode=1, stderr="su: unknown id 0\n")
+        if _suroot_shell(args, "id -u"):
+            return _completed(args, returncode=1, stderr="su: unknown id root\n")
+        if _suc_shell(args, "id -u"):
+            return _completed(args, returncode=1, stderr="su: invalid uid/gid '-c'\n")
         if _plain_shell(args, "/data/local/tmp/frida-server --version"):
             return _completed(args, stdout="17.8.1\n")
         if args[-3:] == ["forward", "--remove", "tcp:27042"]:
@@ -271,7 +283,7 @@ def test_boot_remote_server_interrupt_kills_new_remote_process_and_removes_forwa
     assert adb_calls[-1] == ["adb", "-s", "emulator-5554", "forward", "--remove", "tcp:27042"]
 
 
-def test_boot_remote_server_retries_with_root_after_immediate_permission_failure(tmp_path: Path) -> None:
+def test_boot_remote_server_prefers_root_when_available(tmp_path: Path) -> None:
     config = _remote_config(tmp_path, version="17.8.1")
     adb_calls: list[list[str]] = []
     popen_calls: list[list[str]] = []
@@ -280,6 +292,12 @@ def test_boot_remote_server_retries_with_root_after_immediate_permission_failure
         adb_calls.append(args)
         if args[-3:] == ["forward", "tcp:27042", "tcp:27042"]:
             return _completed(args)
+        if _su0_shell(args, "id -u"):
+            return _completed(args, stdout="0\n")
+        if _suroot_shell(args, "id -u"):
+            return _completed(args, returncode=1, stderr="su: unknown id root\n")
+        if _suc_shell(args, "id -u"):
+            return _completed(args, returncode=1, stderr="su: invalid uid/gid '-c'\n")
         if _plain_shell(args, "pidof /data/local/tmp/frida-server"):
             return _completed(args, returncode=1)
         if _plain_shell(args, "pidof frida-server"):
@@ -296,8 +314,6 @@ def test_boot_remote_server_retries_with_root_after_immediate_permission_failure
 
     def fake_popen(args: list[str], **kwargs):
         popen_calls.append(args)
-        if args[:4] == ["adb", "-s", "emulator-5554", "shell"] and args[-1].startswith("sh -c "):
-            return _FakeProcess(returncode=1, stderr="Permission denied\n", running=False)
         if args[:4] == ["adb", "-s", "emulator-5554", "shell"] and args[-1].startswith("su 0 sh -c "):
             return _FakeProcess()
         raise AssertionError(f"unexpected adb popen command: {args}")
@@ -311,11 +327,10 @@ def test_boot_remote_server_retries_with_root_after_immediate_permission_failure
 
     manager.boot_remote_server(config)
 
-    assert len(popen_calls) == 2
+    assert any(_su0_shell(args, "id -u") for args in adb_calls)
+    assert len(popen_calls) == 1
     assert popen_calls[0][:4] == ["adb", "-s", "emulator-5554", "shell"]
-    assert popen_calls[0][-1].startswith("sh -c ")
-    assert popen_calls[1][:4] == ["adb", "-s", "emulator-5554", "shell"]
-    assert popen_calls[1][-1].startswith("su 0 sh -c ")
+    assert popen_calls[0][-1].startswith("su 0 sh -c ")
 
 
 def test_boot_remote_server_rejects_existing_process_without_force_restart(
@@ -346,6 +361,12 @@ def test_boot_remote_server_force_restart_kills_existing_process_first(
     def fake_run(args: list[str], *, check: bool, capture_output: bool, text: bool):
         if args[-3:] == ["forward", "tcp:27042", "tcp:27042"]:
             return _completed(args)
+        if _su0_shell(args, "id -u"):
+            return _completed(args, returncode=1, stderr="su: unknown id 0\n")
+        if _suroot_shell(args, "id -u"):
+            return _completed(args, returncode=1, stderr="su: unknown id root\n")
+        if _suc_shell(args, "id -u"):
+            return _completed(args, returncode=1, stderr="su: invalid uid/gid '-c'\n")
         if _plain_shell(args, "/data/local/tmp/frida-server --version"):
             return _completed(args, stdout="17.8.1\n")
         if args[-3:] == ["forward", "--remove", "tcp:27042"]:
