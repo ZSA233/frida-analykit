@@ -187,7 +187,7 @@ def _resolve_runtime_device(config: AppConfig, compat: FridaCompat):
         return compat.get_device(host)
     if host in {"usb", "usb://"}:
         return compat.get_device(host, device_id=config.server.device)
-    if config.server.device:
+    if config.server.is_remote:
         try:
             FridaServerManager().ensure_remote_forward(config, action="device connection")
         except ServerManagerError as exc:

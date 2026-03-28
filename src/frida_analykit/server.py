@@ -801,6 +801,28 @@ class FridaServerManager:
             _ShellCommand(args=("su", "-c", command), label="su -c"),
         )
 
+    def _boot_shell_commands(
+        self,
+        config: AppConfig,
+        command: str,
+    ) -> tuple[_ShellCommand, ...]:
+        root_commands = self._root_shell_commands(command)
+        usable_root_commands: list[_ShellCommand] = []
+
+        for probe_command, root_command in zip(self._root_shell_commands("id -u"), root_commands):
+            result = self._run_shell_command(config, probe_command, check=False)
+            probe_output = (result.stdout or "").strip()
+            if result.returncode == 0 and probe_output.splitlines()[:1] == ["0"]:
+                usable_root_commands.append(root_command)
+                verbose_echo(f"using root shell candidate `{root_command.label}` for server boot")
+            elif self._should_retry_su_command(result):
+                verbose_echo(f"root shell candidate `{root_command.label}` unavailable for server boot")
+
+        if usable_root_commands:
+            return tuple(usable_root_commands)
+        verbose_echo("no usable root shell candidate detected for server boot; falling back to plain shell")
+        return (self._plain_shell_command(command),)
+
     @staticmethod
     def _render_shell_command(shell_command: _ShellCommand) -> str:
         return shlex.join(shell_command.args)
@@ -921,9 +943,9 @@ class FridaServerManager:
             )
 
     def _start_boot_process(self, config: AppConfig, command: str) -> _BootExecutionResult:
-        attempts = [self._plain_shell_command(command), *self._root_shell_commands(command)]
+        attempts = list(self._boot_shell_commands(config, command))
         last_error: OSError | None = None
-        for shell_command in attempts:
+        for index, shell_command in enumerate(attempts):
             adb_command = [
                 *_adb_prefix(config, adb_executable=self._adb_executable),
                 "shell",
@@ -954,6 +976,8 @@ class FridaServerManager:
                     stdout=stdout or "",
                     stderr=stderr or "",
                 )
+                if returncode == 0 and index < len(attempts) - 1:
+                    continue
                 if shell_command.label == "plain" and self._should_retry_with_root(completed):
                     continue
                 if shell_command.label != "plain" and self._should_retry_su_command(completed):

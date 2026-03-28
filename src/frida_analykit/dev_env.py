@@ -47,6 +47,7 @@ class ManagedEnv:
     source_kind: str
     source_value: str
     last_updated: str
+    frida_analykit_version: str = __version__
     legacy: bool = False
 
     @property
@@ -78,6 +79,7 @@ class ManagedEnv:
             "name": self.name,
             "path": self.path,
             "frida_version": self.frida_version,
+            "frida_analykit_version": self.frida_analykit_version,
             "source_kind": self.source_kind,
             "source_value": self.source_value,
             "last_updated": self.last_updated,
@@ -111,6 +113,7 @@ def render_env_summary(env: ManagedEnv, *, action: str = "ready") -> str:
         f"python: {env.python_path}",
         f"activate: {env.activate_path}",
         f"frida: {env.frida_version}",
+        f"frida-analykit version: {env.frida_analykit_version}",
         f"source: {env.source_label}",
     ]
     if env.frida_cli_path.exists():
@@ -140,6 +143,7 @@ def render_remove_summary(env: ManagedEnv) -> str:
             f"removed managed env `{env.name}`",
             f"path: {env.env_dir}",
             f"frida: {env.frida_version}",
+            f"frida-analykit version: {env.frida_analykit_version}",
             f"source: {env.source_label}",
         ]
     )
@@ -351,6 +355,7 @@ class DevEnvManager:
             source_kind=source_kind,
             source_value=source_value,
             last_updated=_utc_now(),
+            frida_analykit_version=__version__,
             legacy=False,
         )
         registry, _ = self._refresh_registry()
@@ -394,12 +399,13 @@ class DevEnvManager:
             return "No managed Frida environments found."
 
         current = registry.get("current")
-        headers = ("*", "name", "frida", "source", "path", "updated")
+        headers = ("*", "name", "frida", "analykit", "source", "path", "updated")
         rows = [
             (
                 "*" if env.name == current else "",
                 env.name,
                 env.frida_version,
+                env.frida_analykit_version,
                 env.source_label,
                 env.path,
                 env.last_updated,
@@ -537,6 +543,7 @@ class DevEnvManager:
                     source_kind=item["source_kind"],
                     source_value=item["source_value"],
                     last_updated=item["last_updated"],
+                    frida_analykit_version=item.get("frida_analykit_version", __version__),
                     legacy=bool(item.get("legacy", False)),
                 )
             )
@@ -605,6 +612,7 @@ class DevEnvManager:
                     source_kind=source_kind,
                     source_value=source_value,
                     last_updated=_timestamp_for_path(candidate),
+                    frida_analykit_version=self._detect_installed_frida_analykit_version(candidate) or __version__,
                     legacy=True,
                 )
             )
@@ -620,6 +628,23 @@ class DevEnvManager:
             capture_output=True,
             text=True,
         )
+        if result.returncode != 0:
+            return None
+        return result.stdout.strip() or None
+
+    def _detect_installed_frida_analykit_version(self, env_dir: Path) -> str | None:
+        python_path = _python_path(env_dir)
+        if not python_path.exists():
+            return None
+        try:
+            result = self._subprocess_run(
+                [str(python_path), "-c", "import frida_analykit; print(frida_analykit.__version__)"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        except OSError:
+            return None
         if result.returncode != 0:
             return None
         return result.stdout.strip() or None
@@ -668,6 +693,7 @@ class DevEnvManager:
                     source_kind=env.source_kind,
                     source_value=env.source_value,
                     last_updated=now,
+                    frida_analykit_version=env.frida_analykit_version,
                     legacy=env.legacy,
                 )
                 updated = True
@@ -706,6 +732,18 @@ class DevEnvManager:
             frida_version = self._detect_installed_frida_version(env_dir) or "unknown"
             changed = True
 
+        stored_frida_analykit_version = item.get("frida_analykit_version")
+        if not isinstance(stored_frida_analykit_version, str) or not stored_frida_analykit_version:
+            stored_frida_analykit_version = None
+            changed = True
+        detected_frida_analykit_version = self._detect_installed_frida_analykit_version(env_dir)
+        if detected_frida_analykit_version is not None:
+            frida_analykit_version = detected_frida_analykit_version
+            if frida_analykit_version != stored_frida_analykit_version:
+                changed = True
+        else:
+            frida_analykit_version = stored_frida_analykit_version or "unknown"
+
         source_kind = item.get("source_kind")
         if not isinstance(source_kind, str) or not source_kind:
             source_kind = "version"
@@ -737,6 +775,7 @@ class DevEnvManager:
                 source_kind=source_kind,
                 source_value=source_value,
                 last_updated=last_updated,
+                frida_analykit_version=frida_analykit_version,
                 legacy=legacy,
             ),
             changed,

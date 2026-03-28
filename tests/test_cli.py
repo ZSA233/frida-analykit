@@ -531,6 +531,77 @@ def test_spawn_forwards_remote_port_for_configured_device(tmp_path: Path, monkey
     assert forwarded["action"] == "device connection"
 
 
+def test_spawn_forwards_remote_port_without_configured_device(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    runner = CliRunner()
+    compat = _FakeCompat()
+    forwarded: dict[str, object] = {}
+
+    class FakeManager:
+        def ensure_remote_forward(self, config, *, action="remote port forward"):
+            forwarded["config"] = config
+            forwarded["action"] = action
+            return "27042"
+
+    monkeypatch.setattr("frida_analykit.cli.FridaCompat", lambda: compat)
+    monkeypatch.setattr(
+        "frida_analykit.cli._load_config",
+        lambda _: _remote_runtime_config(tmp_path, app="com.example.demo", device=None),
+    )
+    monkeypatch.setattr("frida_analykit.cli.FridaServerManager", lambda *args, **kwargs: FakeManager())
+    monkeypatch.setattr("frida_analykit.cli._prepare_frontend_assets", lambda **kwargs: None)
+    monkeypatch.setattr(
+        "frida_analykit.cli._prepare_session",
+        lambda config, device, pid: (device, object(), object()),
+    )
+    monkeypatch.setattr("frida_analykit.cli._post_attach", lambda **kwargs: None)
+
+    result = runner.invoke(
+        cli,
+        ["spawn", "--config", str(tmp_path / "config.yml"), "--detach-on-load"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert compat.calls == [("127.0.0.1:27042", None)]
+    assert forwarded["config"].server.device is None
+    assert forwarded["action"] == "device connection"
+
+
+def test_attach_forwards_remote_port_without_configured_device(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    runner = CliRunner()
+    compat = _FakeCompatWithAttach()
+    forwarded: dict[str, object] = {}
+
+    class FakeManager:
+        def ensure_remote_forward(self, config, *, action="remote port forward"):
+            forwarded["config"] = config
+            forwarded["action"] = action
+            return "27042"
+
+    monkeypatch.setattr("frida_analykit.cli.FridaCompat", lambda: compat)
+    monkeypatch.setattr(
+        "frida_analykit.cli._load_config",
+        lambda _: _remote_runtime_config(tmp_path, app="com.example.demo", device=None),
+    )
+    monkeypatch.setattr("frida_analykit.cli.FridaServerManager", lambda *args, **kwargs: FakeManager())
+    monkeypatch.setattr("frida_analykit.cli._prepare_frontend_assets", lambda **kwargs: None)
+    monkeypatch.setattr(
+        "frida_analykit.cli._prepare_session",
+        lambda config, device, pid: (device, object(), object()),
+    )
+    monkeypatch.setattr("frida_analykit.cli._find_app_pid", lambda device, compat, app_id: 123)
+    monkeypatch.setattr("frida_analykit.cli._post_attach", lambda **kwargs: None)
+
+    result = runner.invoke(
+        cli,
+        ["attach", "--config", str(tmp_path / "config.yml"), "--detach-on-load"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert compat.calls == [("127.0.0.1:27042", None)]
+    assert forwarded["config"].server.device is None
+    assert forwarded["action"] == "device connection"
+
+
 def test_spawn_prints_resolved_agent_log_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     runner = CliRunner()
     compat = _FakeCompatWithAttach()
