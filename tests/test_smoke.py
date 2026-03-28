@@ -158,7 +158,11 @@ def test_attach_smoke_with_local_device(tmp_path: Path) -> None:
             check=False,
         )
         assert result.returncode == 0, result.stderr
-        assert "frida-analykit" in result.stdout
+        assert "➜  Host:" in result.stdout
+        assert "➜  Script:" in result.stdout
+        assert "➜  Log Output:" in result.stdout
+        assert agent_path.name in result.stdout
+        assert log_path.name in result.stdout
     finally:
         target.terminate()
         target.wait(timeout=10)
