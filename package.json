@@ -7,7 +7,7 @@
   ],
   "scripts": {
     "agent:pack": "npm pack ./packages/frida-analykit-agent",
-    "agent:build": "npm --prefix packages/frida-analykit-agent run check"
+    "agent:build": "npm --prefix packages/frida-analykit-agent run build && npm --prefix packages/frida-analykit-agent run check"
   },
   "dependencies": {
     "@zsa233/frida-analykit-agent": "^2.0.0"
