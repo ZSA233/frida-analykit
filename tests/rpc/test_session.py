@@ -1,3 +1,4 @@
+import asyncio
 import io
 from datetime import datetime
 from pathlib import Path
@@ -26,10 +27,28 @@ def _config(
     ).resolve_paths(tmp_path, source_path=tmp_path / "config.yml")
 
 
+class _FakeSyncExports:
+    def plain_payload(self) -> dict[str, str]:
+        return {"type": "demo"}
+
+    def scope_del(self, *args, **kwargs) -> None:
+        del args, kwargs
+
+
+class _FakeAsyncExports:
+    async def plain_payload(self) -> dict[str, str]:
+        return {"type": "demo"}
+
+    async def scope_clear(self, *args, **kwargs) -> None:
+        del args, kwargs
+
+
 class _FakeScript:
     def __init__(self) -> None:
         self.handlers: dict[str, object] = {}
         self.log_handler = None
+        self.exports_sync = _FakeSyncExports()
+        self.exports_async = _FakeAsyncExports()
 
     def on(self, signal: str, callback) -> None:
         self.handlers[signal] = callback
@@ -37,15 +56,42 @@ class _FakeScript:
     def set_log_handler(self, handler) -> None:
         self.log_handler = handler
 
+    def list_exports_sync(self) -> list[str]:
+        return ["plainPayload"]
+
+    async def list_exports_async(self) -> list[str]:
+        return ["plainPayload"]
+
 
 class _FakeSession:
     def __init__(self) -> None:
         self.script = _FakeScript()
         self.last_source: str | None = None
+        self.is_detached = False
 
     def create_script(self, source: str, name=None, snapshot=None, runtime=None):
+        del name, snapshot, runtime
         self.last_source = source
         return self.script
+
+    def on(self, signal: str, callback) -> None:
+        self.handlers = getattr(self, "handlers", {})
+        self.handlers[signal] = callback
+
+    def off(self, signal: str, callback) -> None:
+        del signal, callback
+
+    def detach(self) -> None:
+        self.is_detached = True
+
+    def resume(self) -> None:
+        pass
+
+    def enable_child_gating(self) -> None:
+        pass
+
+    def disable_child_gating(self) -> None:
+        pass
 
 
 def test_try_inject_environ_wraps_module_import_with_bootstrap_guard() -> None:
@@ -76,7 +122,7 @@ def test_session_wrapper_reuses_existing_logger_bundle(monkeypatch, tmp_path: Pa
     script.set_logger()
 
     assert len(calls) == 1
-    session._resolver._registry.handle_exception({"description": "boom"}, None)
+    session._runtime.resolver._registry.handle_exception({"description": "boom"}, None)
     session._session.script.log_handler("info", "hello")
     session._session.script.log_handler("error", "trace")
     output = shared.getvalue()
@@ -126,3 +172,11 @@ def test_render_session_banner_includes_core_metadata(tmp_path: Path) -> None:
     assert "com.example.demo" in banner
     assert "_agent.js" in banner
     assert "outerr.log" in banner
+
+
+def test_script_wrapper_public_exports_remain_transparent(tmp_path: Path) -> None:
+    session = SessionWrapper(_FakeSession(), config=_config(tmp_path))
+    script = session.create_script("16 /index.js\n✄\n")
+
+    assert script.exports_sync.plain_payload() == {"type": "demo"}
+    assert asyncio.run(script.exports_async.plain_payload()) == {"type": "demo"}

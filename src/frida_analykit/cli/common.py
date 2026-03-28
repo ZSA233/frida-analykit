@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import atexit
+import asyncio
 import os
 import time
 from pathlib import Path
@@ -101,7 +102,7 @@ def _run_repl(namespace: dict[str, ReplNamespaceValue]) -> None:
         ) from exc
 
     os.environ["REPL"] = "1"
-    embed(globals(), namespace)
+    asyncio.run(embed(globals(), namespace, return_asyncio_coroutine=True))
 
 
 def _wait_forever() -> None:
@@ -126,8 +127,14 @@ def _on_session_detached(reason: str, crash: frida._frida.Crash | None) -> None:
         click.echo(crash.report, err=True)
 
 
-def _prepare_session(config: AppConfig, device: RuntimeDevice, pid: int) -> tuple[RuntimeDevice, SessionWrapper, ScriptWrapper]:
-    session = SessionWrapper.from_session(device.attach(pid), config=config)
+def _prepare_session(
+    config: AppConfig,
+    device: RuntimeDevice,
+    pid: int,
+    *,
+    interactive: bool = False,
+) -> tuple[RuntimeDevice, SessionWrapper, ScriptWrapper]:
+    session = SessionWrapper.from_session(device.attach(pid), config=config, interactive=interactive)
     session.on("detached", _on_session_detached)
     script = session.open_script(str(config.jsfile))
     script.set_logger()

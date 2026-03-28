@@ -32,20 +32,23 @@ class RPCMsgScopeCall(BaseModel):
     id: str
     type: str
     result: Any | None = None
+    has_result: bool = False
 
 
 class RPCMsgScopeEval(BaseModel):
     id: str
     type: str
     result: Any | None = None
+    has_result: bool = False
 
 
 class RPCMsgScopeGet(BaseModel):
     value: Any | None = None
+    has_value: bool = False
 
 
 class RPCMsgEnumerateObjProps(BaseModel):
-    props: list[dict[str, Any]] = Field(default_factory=lambda: [{}])
+    props: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class RPCMsgSaveFile(BaseModel):

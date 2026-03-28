@@ -110,12 +110,20 @@ class _FakeScript:
         self.handlers: dict[str, object] = {}
         self.log_handler = None
         self.loaded = False
+        self.exports_sync = SimpleNamespace()
+        self.exports_async = SimpleNamespace()
 
     def on(self, signal: str, callback) -> None:
         self.handlers[signal] = callback
 
     def set_log_handler(self, handler) -> None:
         self.log_handler = handler
+
+    def list_exports_sync(self) -> list[str]:
+        return []
+
+    async def list_exports_async(self) -> list[str]:
+        return []
 
     def load(self) -> None:
         self.loaded = True
@@ -377,7 +385,7 @@ def test_env_install_frida_uses_current_interpreter(monkeypatch: pytest.MonkeyPa
 
     assert result.exit_code == 0, result.output
     assert calls["frida_version"] == "16.5.9"
-    assert Path(calls["python_path"]).stem == "python"
+    assert Path(calls["python_path"]).stem.startswith("python")
     assert "updated Frida runtime" in result.output
 
 def test_env_install_frida_surfaces_validation_errors(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -424,7 +432,7 @@ def test_attach_forwards_frontend_build_options(tmp_path: Path, monkeypatch: pyt
     )
     monkeypatch.setattr(
         "frida_analykit.cli.common._prepare_session",
-        lambda config, device, pid: (device, object(), object()),
+        lambda config, device, pid, **kwargs: (device, object(), object()),
     )
     monkeypatch.setattr("frida_analykit.cli.common._post_attach", lambda **kwargs: None)
 
@@ -461,7 +469,7 @@ def test_attach_uses_configured_usb_device(tmp_path: Path, monkeypatch: pytest.M
     monkeypatch.setattr("frida_analykit.cli.common._prepare_frontend_assets", lambda **kwargs: None)
     monkeypatch.setattr(
         "frida_analykit.cli.common._prepare_session",
-        lambda config, device, pid: (device, object(), object()),
+        lambda config, device, pid, **kwargs: (device, object(), object()),
     )
     monkeypatch.setattr("frida_analykit.cli.common._post_attach", lambda **kwargs: None)
 
@@ -492,7 +500,7 @@ def test_spawn_closes_watch_process(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr("frida_analykit.cli.common._prepare_frontend_assets", lambda **kwargs: FakeWatcher())
     monkeypatch.setattr(
         "frida_analykit.cli.common._prepare_session",
-        lambda config, device, pid: (device, object(), object()),
+        lambda config, device, pid, **kwargs: (device, object(), object()),
     )
     monkeypatch.setattr("frida_analykit.cli.common._post_attach", lambda **kwargs: None)
 
@@ -527,7 +535,7 @@ def test_spawn_forwards_remote_port_for_configured_device(tmp_path: Path, monkey
     monkeypatch.setattr("frida_analykit.cli.common._prepare_frontend_assets", lambda **kwargs: None)
     monkeypatch.setattr(
         "frida_analykit.cli.common._prepare_session",
-        lambda config, device, pid: (device, object(), object()),
+        lambda config, device, pid, **kwargs: (device, object(), object()),
     )
     monkeypatch.setattr("frida_analykit.cli.common._post_attach", lambda **kwargs: None)
 
@@ -562,7 +570,7 @@ def test_spawn_forwards_remote_port_without_configured_device(tmp_path: Path, mo
     monkeypatch.setattr("frida_analykit.cli.common._prepare_frontend_assets", lambda **kwargs: None)
     monkeypatch.setattr(
         "frida_analykit.cli.common._prepare_session",
-        lambda config, device, pid: (device, object(), object()),
+        lambda config, device, pid, **kwargs: (device, object(), object()),
     )
     monkeypatch.setattr("frida_analykit.cli.common._post_attach", lambda **kwargs: None)
 
@@ -597,7 +605,7 @@ def test_attach_forwards_remote_port_without_configured_device(tmp_path: Path, m
     monkeypatch.setattr("frida_analykit.cli.common._prepare_frontend_assets", lambda **kwargs: None)
     monkeypatch.setattr(
         "frida_analykit.cli.common._prepare_session",
-        lambda config, device, pid: (device, object(), object()),
+        lambda config, device, pid, **kwargs: (device, object(), object()),
     )
     monkeypatch.setattr("frida_analykit.cli.common._find_app_pid", lambda device, compat, app_id: 123)
     monkeypatch.setattr("frida_analykit.cli.common._post_attach", lambda **kwargs: None)

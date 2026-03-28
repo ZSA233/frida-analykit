@@ -84,7 +84,7 @@ def spawn(
     try:
         device = cli_common._resolve_runtime_device(config, compat)
         pid = device.spawn([config.app])
-        device, session, script = cli_common._prepare_session(config, device, pid)
+        device, session, script = cli_common._prepare_session(config, device, pid, interactive=repl)
         device.resume(pid)
         cli_common._post_attach(
             config=config,
@@ -139,7 +139,7 @@ def attach(
         if resolved_pid is None:
             raise click.ClickException("unable to resolve a target pid; set config.app or pass --pid")
 
-        _, session, script = cli_common._prepare_session(config, device, resolved_pid)
+        _, session, script = cli_common._prepare_session(config, device, resolved_pid, interactive=repl)
         cli_common._post_attach(
             config=config,
             device=device,

@@ -168,6 +168,10 @@ CLI 目前支持两类前端编排动作：
 - 如果 `attach` 未传 `--pid`，且 `config.app` 存在，则会尝试通过应用标识自动解析 PID。
 - `--repl` 会进入 `ptpython` REPL。
 - REPL 中会注入 `config`、`device`、`pid`、`session`、`script` 等对象。
+- `--repl` 当前已经切到 async ptpython 模式，允许在会话内直接 `await script.eval_async(...)`、`await handle.call_async(...)`、`await handle.resolve_async()`。
+- `script.eval(...)` / `script.eval_async(...)` 当前会优先把输入当作“表达式”求值，因此像 `Process.arch`、`Promise.resolve(Process.arch)` 这类 REPL 常见写法会直接返回表达式结果；如果输入本身是多语句 body，则会回退到原始函数体执行方式。
+- REPL 句柄与 scope 相关调用在首次使用前会先做一次 agent runtime 协议握手。
+- 如果加载到设备上的 `_agent.js` 仍是旧 bundle，Python 侧会直接抛出 `RPC runtime mismatch`，提示用户重新用当前仓库打包本地 runtime 并 rebuild `_agent.js`，而不是再把底层 Frida `TypeError: value is not iterable` 直接暴露给用户。
 - 如果未开启 `--repl`，CLI 默认保持会话存活，适合持续收集日志和数据。
 
 当前实现里还有一个隐藏参数 `--detach-on-load`，主要用于 smoke/device 测试验证“脚本成功加载后立即退出”，不应作为 README 主线公开能力来强调，但应记得它存在。
@@ -192,6 +196,12 @@ CLI 目前支持两类前端编排动作：
 
 Python 侧目前已经有一套 RPC message / handler 体系。
 
+当前结构已经明确拆成：
+
+- `SessionWrapper` / `ScriptWrapper`：负责会话装配、脚本加载、banner 与 logger 接线。
+- `RPCClient`：负责 sync/async exports 包装、scope 调用、取值和句柄释放。
+- `HandleRef` / `JsHandle`：负责 REPL 句柄、链式引用和惰性取值。
+
 已知消息类型包括：
 
 - `SCOPE_CALL`
@@ -211,6 +221,30 @@ Python 侧目前已经有一套 RPC message / handler 体系。
 - 未专门注册的消息会按默认处理器打印摘要。
 - 如果消息带有二进制 payload，且 `agent.datadir` 已配置，会把数据落到该目录下，文件名类似 `SAVE_FILE_<timestamp>`。
 - 如果未设置 `agent.datadir`，则会提示 payload 被丢弃。
+- Python 与 agent runtime 之间现在有显式 `rpcRuntimeInfo()` 协议预检，当前要求的关键特性至少包括结构化 `HandleRef` 和 async scope 镜像能力。
+
+### 7. 设备回归与 pre-release runtime 验证
+
+当前设备测试已不只验证“能注入一段 marker 脚本”，还覆盖了 REPL 核心路径：
+
+- `script.jsh("Process")` 的 seed path 句柄创建
+- 同步链式调用和 `.value_` 取值
+- `eval_async(...)` + `resolve_async()` 的 Promise-aware 路径
+
+当前用于 pre-release 协议校验的真机测试原则：
+
+- 不直接复用脚手架默认发布版 `@zsa233/frida-analykit-agent`
+- 先对当前仓库内 `packages/frida-analykit-agent` 执行 `npm pack`
+- 再以 `file:<tarball>` 形式生成临时 TS workspace
+- 最后 build 出新的 `_agent.js` 后再做真机验证
+
+这样真机测试验证的是“当前 Python 工作树 + 当前 agent 工作树”的真实组合，而不是某个已发布版本的历史 bundle。
+
+当前设备测试额外支持：
+
+- 通过 `FRIDA_ANALYKIT_DEVICE_FRIDA_VERSION=<version>` 指定设备测试所使用的 Frida Python 环境；当前默认回落到 `16.6.6`
+- `tests/device` 会优先解析本机 managed env 中与该版本匹配的 Python，可不要求当前 pytest 主进程本身就跑在对应 Frida 版本下
+- 生成的 device test `config.yml` 会自动写入 `server.version=<same version>`，确保 `frida-server` 与 Python 侧 Frida 版本保持一致
 
 这意味着当前 CLI 不只是一个“跑脚本”的入口，它已经承担了：
 
@@ -228,12 +262,40 @@ Python 侧目前已经有一套 RPC message / handler 体系。
 - `scope_call`
 - `enumerate_obj_props`
 
+当前这一层已经补充了 async 镜像：
+
+- `script.eval_async(...)`
+- `await handle.call_async(...)`
+- `await handle.resolve_async()`
+
 这套机制允许在 REPL 中通过 `script.eval(...)`、`script.jsh(...)` 等方式对 JS 侧对象进行句柄化访问和延迟取值。
+
+当前还应明确区分两条能力面：
+
+- `script.exports_sync` / `script.exports_async` 仍是公开脚本导出接口，保持近似 Frida 原生的透明返回值语义。
+- RPC payload 归一化、`JsHandle` 参数序列化和协议握手只发生在 `RPCClient` 内部链路，不应污染公共 exports 面。
+
+当前需要特别记住的 breaking change：
+
+- 句柄元信息不再使用 `.value` / `.type`。
+- 当前元信息访问方式改为 `.value_` / `.type_`。
+- `.value` / `.type` 现在重新表示真实 JS 属性，避免占用用户对象字段名。
+
+当前内部实现还做了两点重要调整：
+
+- Python <-> agent 之间传递句柄时，内部已经改为结构化 `HandleRef`，不再依赖旧的 slash-string + JSON monkeypatch 方案。
+- `script.jsh("Process/foo/bar")` 这种入口字符串仍然保留，但只在入口做一次 split，后续链式访问都走结构化 ref。
+- `script.eval("Process").getCurrentThreadId()` 这类 scope-backed 根句柄的一级方法调用，当前已要求 agent 侧显式绑定到 scope 根对象本身，避免把方法当未绑定函数调用。
 
 这部分能力更偏高级调试/交互辅助，不一定要在对外 README 里大量展开，但在项目能力层面已经存在，后续整理 README 时不应忘记：
 
 - v2 不只有“attach 一个脚本”
 - 它还具备一套可交互的 Python <-> JS scope 操作能力
+
+测试组织也已经按这套职责调整：
+
+- RPC / session / REPL 相关 Python 单测当前集中到 `tests/rpc/`
+- `tests/rpc/` 当前覆盖 message、exports、registry、resolver、JsHandle、session banner 和 async REPL 路径
 
 ### 8. frida-server 生命周期管理
 

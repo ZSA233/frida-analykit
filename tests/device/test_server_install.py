@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 
-import frida
 import pytest
 
 
@@ -17,7 +16,7 @@ def test_server_install_with_version(device_helpers, tmp_path) -> None:
             "--config",
             str(workspace.config_path),
             "--version",
-            frida.__version__,
+            device_helpers.frida_version,
         ],
         timeout=300,
     )
