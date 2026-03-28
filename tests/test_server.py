@@ -272,9 +272,9 @@ def test_boot_remote_server_interrupt_kills_new_remote_process_and_removes_forwa
             return pid_snapshots.pop(0)
         return set()
 
-    monkeypatch.setattr(manager, "list_remote_server_pids", fake_list_remote_server_pids)
-    monkeypatch.setattr(manager, "_terminate_process", lambda process: terminated.update(called=True))
-    monkeypatch.setattr(manager, "_kill_remote_pids", lambda _config, pids: killed.append(set(pids)))
+    monkeypatch.setattr(manager._boot, "list_remote_server_pids", fake_list_remote_server_pids)
+    monkeypatch.setattr(manager._adb, "terminate_process", lambda process: terminated.update(called=True))
+    monkeypatch.setattr(manager._boot, "_kill_remote_pids", lambda _config, pids: killed.append(set(pids)))
 
     manager.boot_remote_server(config)
 
@@ -344,7 +344,7 @@ def test_boot_remote_server_rejects_existing_process_without_force_restart(
         cache_dir=tmp_path / "cache",
     )
 
-    monkeypatch.setattr(manager, "list_remote_server_pids", lambda _config: {31337})
+    monkeypatch.setattr(manager._boot, "list_remote_server_pids", lambda _config: {31337})
 
     with pytest.raises(ServerManagerError, match="already running"):
         manager.boot_remote_server(config)
@@ -381,11 +381,11 @@ def test_boot_remote_server_force_restart_kills_existing_process_first(
     )
 
     monkeypatch.setattr(
-        manager,
+        manager._boot,
         "list_remote_server_pids",
         lambda _config: pid_snapshots.pop(0) if pid_snapshots else set(),
     )
-    monkeypatch.setattr(manager, "_kill_remote_pids", lambda _config, pids: killed.append(set(pids)))
+    monkeypatch.setattr(manager._boot, "_kill_remote_pids", lambda _config, pids: killed.append(set(pids)))
 
     manager.boot_remote_server(config, force_restart=True)
 
@@ -412,8 +412,8 @@ def test_stop_remote_server_kills_matching_processes_and_removes_forward(
         cache_dir=tmp_path / "cache",
     )
 
-    monkeypatch.setattr(manager, "list_remote_server_pids", lambda _config: {111, 222})
-    monkeypatch.setattr(manager, "_kill_remote_pids", lambda _config, pids: killed.append(set(pids)))
+    monkeypatch.setattr(manager._boot, "list_remote_server_pids", lambda _config: {111, 222})
+    monkeypatch.setattr(manager._boot, "_kill_remote_pids", lambda _config, pids: killed.append(set(pids)))
 
     stopped = manager.stop_remote_server(config)
 
@@ -438,7 +438,7 @@ def test_stop_remote_server_returns_success_when_nothing_running(tmp_path: Path,
         cache_dir=tmp_path / "cache",
     )
 
-    monkeypatch.setattr(manager, "list_remote_server_pids", lambda _config: set())
+    monkeypatch.setattr(manager._boot, "list_remote_server_pids", lambda _config: set())
 
     assert manager.stop_remote_server(config) == set()
     assert adb_calls[-1] == ["adb", "-s", "emulator-5554", "forward", "--remove", "tcp:27042"]
@@ -729,7 +729,7 @@ def test_shell_with_auto_root_falls_back_when_plain_and_su_c_fail(tmp_path: Path
         cache_dir=tmp_path / "cache",
     )
 
-    result = manager._shell_with_auto_root(config, "ls /vendor/bin/frida-server", check=False)
+    result = manager._adb.shell_with_auto_root(config, "ls /vendor/bin/frida-server", check=False)
 
     assert result.stdout.strip() == "/vendor/bin/frida-server"
     assert any(_plain_shell(args, "ls /vendor/bin/frida-server") for args in calls)
