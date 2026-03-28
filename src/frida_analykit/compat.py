@@ -147,12 +147,15 @@ class FridaCompat:
                 return profile
         return None
 
-    def get_device(self, host: str):
+    def get_device(self, host: str, *, device_id: str | None = None):
+        manager = self._frida.get_device_manager()
         if host in {"local", "local://"}:
             return self._frida.get_local_device()
         if host in {"usb", "usb://"}:
+            if device_id:
+                return manager.get_device(device_id, timeout=5000)
             return self._frida.get_usb_device()
-        return self._frida.get_device_manager().add_remote_device(host)
+        return manager.add_remote_device(host)
 
     def enumerate_applications(self, device, *, scope: str = "minimal"):
         try:

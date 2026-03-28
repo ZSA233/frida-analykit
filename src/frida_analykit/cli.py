@@ -181,6 +181,20 @@ def _configure_verbose(verbose: bool) -> None:
     set_verbose(verbose)
 
 
+def _resolve_runtime_device(config: AppConfig, compat: FridaCompat):
+    host = config.server.host
+    if host in {"local", "local://"}:
+        return compat.get_device(host)
+    if host in {"usb", "usb://"}:
+        return compat.get_device(host, device_id=config.server.device)
+    if config.server.device:
+        try:
+            FridaServerManager().ensure_remote_forward(config, action="device connection")
+        except ServerManagerError as exc:
+            raise click.ClickException(str(exc)) from exc
+    return compat.get_device(host)
+
+
 def _global_env_manager() -> DevEnvManager:
     return DevEnvManager.for_global()
 
@@ -417,11 +431,21 @@ def server_install(
     finally:
         if progress is not None:
             progress.close()
-    click.echo(f"installed frida-server {result.installed_version or result.selected_version}")
+    click.echo(f"installed frida-server {result.installed_version}")
     click.echo(f"remote path: {result.remote_path}")
-    click.echo(f"device abi: {result.device_abi} ({result.asset_arch})")
+    if result.device_abi and result.asset_arch:
+        click.echo(f"device abi: {result.device_abi} ({result.asset_arch})")
+    elif result.local_source is not None:
+        click.echo("device abi: skipped (local server source)")
+    else:
+        click.echo("device abi: unknown")
     if result.local_source is not None:
         click.echo(f"local source: {result.local_source}")
+        if result.local_source_abi_hint and result.local_source_asset_arch_hint:
+            click.echo(
+                "local source arch hint: "
+                f"{result.local_source_abi_hint} ({result.local_source_asset_arch_hint})"
+            )
     else:
         click.echo(f"local cache: {result.local_binary}")
 
@@ -498,7 +522,7 @@ def spawn(
     )
 
     try:
-        device = compat.get_device(config.server.host)
+        device = _resolve_runtime_device(config, compat)
         pid = device.spawn([config.app])
         device, session, script = _prepare_session(config, device, pid)
         device.resume(pid)
@@ -548,7 +572,7 @@ def attach(
         install=install,
     )
     try:
-        device = compat.get_device(config.server.host)
+        device = _resolve_runtime_device(config, compat)
         resolved_pid = pid
         if resolved_pid is None and config.app:
             resolved_pid = _find_app_pid(device, compat, config.app)
@@ -596,6 +620,7 @@ def doctor(config_path: str, verbose: bool) -> None:
     click.echo(f"Config: {config.source_path}")
     click.echo(f"Configured server path: {config.server.servername}")
     click.echo(f"Configured server host: {config.server.host}")
+    click.echo(f"Configured server device: {config.server.device or 'none'}")
     click.echo(f"Configured server version: {config.server.version or 'none'}")
 
     if not config.server.is_remote:
@@ -610,6 +635,7 @@ def doctor(config_path: str, verbose: bool) -> None:
         return
 
     click.echo(f"Install target version: {status.selected_version}")
+    click.echo(f"ADB target device: {status.adb_target or 'unknown'}")
     if status.device_abi and status.asset_arch:
         click.echo(f"Device ABI: {status.device_abi} ({status.asset_arch})")
     elif status.error:

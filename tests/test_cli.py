@@ -55,6 +55,42 @@ def _remote_config(base_dir: Path, *, version: str | None = None) -> AppConfig:
     ).resolve_paths(base_dir, source_path=base_dir / "config.yml")
 
 
+def _usb_config(base_dir: Path, *, app: str | None = None, device: str | None = "emulator-5554") -> AppConfig:
+    return AppConfig.model_validate(
+        {
+            "app": app,
+            "jsfile": "_agent.js",
+            "server": {
+                "host": "usb",
+                "device": device,
+            },
+            "agent": {},
+            "script": {"nettools": {}},
+        }
+    ).resolve_paths(base_dir, source_path=base_dir / "config.yml")
+
+
+def _remote_runtime_config(
+    base_dir: Path,
+    *,
+    app: str | None = None,
+    device: str | None = "emulator-5554",
+) -> AppConfig:
+    return AppConfig.model_validate(
+        {
+            "app": app,
+            "jsfile": "_agent.js",
+            "server": {
+                "host": "127.0.0.1:27042",
+                "servername": "/data/local/tmp/frida-server",
+                "device": device,
+            },
+            "agent": {},
+            "script": {"nettools": {}},
+        }
+    ).resolve_paths(base_dir, source_path=base_dir / "config.yml")
+
+
 class _FakeDevice:
     def __init__(self) -> None:
         self.spawned: list[str] | None = None
@@ -111,8 +147,10 @@ class _FakeAttachDevice(_FakeDevice):
 class _FakeCompat:
     def __init__(self) -> None:
         self.device = _FakeDevice()
+        self.calls: list[tuple[str, str | None]] = []
 
-    def get_device(self, host: str) -> _FakeDevice:
+    def get_device(self, host: str, *, device_id: str | None = None) -> _FakeDevice:
+        self.calls.append((host, device_id))
         return self.device
 
     def enumerate_applications(self, device: _FakeDevice, scope: str = "minimal"):
@@ -122,8 +160,10 @@ class _FakeCompat:
 class _FakeCompatWithAttach:
     def __init__(self) -> None:
         self.device = _FakeAttachDevice()
+        self.calls: list[tuple[str, str | None]] = []
 
-    def get_device(self, host: str) -> _FakeAttachDevice:
+    def get_device(self, host: str, *, device_id: str | None = None) -> _FakeAttachDevice:
+        self.calls.append((host, device_id))
         return self.device
 
     def enumerate_applications(self, device: _FakeAttachDevice, scope: str = "minimal"):
@@ -147,7 +187,7 @@ def test_gen_dev_creates_v2_workspace(tmp_path: Path) -> None:
 
 
 def test_default_agent_package_spec_maps_python_rc_to_npm_rc() -> None:
-    assert default_agent_package_spec("2.0.0rc1") == "^2.0.0-rc.1"
+    assert default_agent_package_spec("2.0.0rc1") == "2.0.0-rc.1"
 
 
 def test_env_group_prints_help_when_no_subcommand() -> None:
@@ -326,9 +366,8 @@ def test_env_install_frida_uses_current_interpreter(monkeypatch: pytest.MonkeyPa
 
     assert result.exit_code == 0, result.output
     assert calls["frida_version"] == "16.5.9"
-    assert str(calls["python_path"]).endswith("python")
+    assert Path(calls["python_path"]).stem == "python"
     assert "updated Frida runtime" in result.output
-
 
 def test_env_install_frida_surfaces_validation_errors(monkeypatch: pytest.MonkeyPatch) -> None:
     runner = CliRunner()
@@ -402,6 +441,28 @@ def test_attach_forwards_frontend_build_options(tmp_path: Path, monkeypatch: pyt
     assert calls["install"] is True
 
 
+def test_attach_uses_configured_usb_device(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    runner = CliRunner()
+    compat = _FakeCompatWithAttach()
+
+    monkeypatch.setattr("frida_analykit.cli.FridaCompat", lambda: compat)
+    monkeypatch.setattr("frida_analykit.cli._load_config", lambda _: _usb_config(tmp_path))
+    monkeypatch.setattr("frida_analykit.cli._prepare_frontend_assets", lambda **kwargs: None)
+    monkeypatch.setattr(
+        "frida_analykit.cli._prepare_session",
+        lambda config, device, pid: (device, object(), object()),
+    )
+    monkeypatch.setattr("frida_analykit.cli._post_attach", lambda **kwargs: None)
+
+    result = runner.invoke(
+        cli,
+        ["attach", "--config", str(tmp_path / "config.yml"), "--pid", "123", "--detach-on-load"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert compat.calls == [("usb", "emulator-5554")]
+
+
 def test_spawn_closes_watch_process(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     runner = CliRunner()
     compat = _FakeCompat()
@@ -433,6 +494,41 @@ def test_spawn_closes_watch_process(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     assert compat.device.spawned == ["com.example.demo"]
     assert compat.device.resumed == 4321
     assert watch_state["closed"] is True
+
+
+def test_spawn_forwards_remote_port_for_configured_device(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    runner = CliRunner()
+    compat = _FakeCompat()
+    forwarded: dict[str, object] = {}
+
+    class FakeManager:
+        def ensure_remote_forward(self, config, *, action="remote port forward"):
+            forwarded["config"] = config
+            forwarded["action"] = action
+            return "27042"
+
+    monkeypatch.setattr("frida_analykit.cli.FridaCompat", lambda: compat)
+    monkeypatch.setattr(
+        "frida_analykit.cli._load_config",
+        lambda _: _remote_runtime_config(tmp_path, app="com.example.demo"),
+    )
+    monkeypatch.setattr("frida_analykit.cli.FridaServerManager", lambda *args, **kwargs: FakeManager())
+    monkeypatch.setattr("frida_analykit.cli._prepare_frontend_assets", lambda **kwargs: None)
+    monkeypatch.setattr(
+        "frida_analykit.cli._prepare_session",
+        lambda config, device, pid: (device, object(), object()),
+    )
+    monkeypatch.setattr("frida_analykit.cli._post_attach", lambda **kwargs: None)
+
+    result = runner.invoke(
+        cli,
+        ["spawn", "--config", str(tmp_path / "config.yml"), "--detach-on-load"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert compat.calls == [("127.0.0.1:27042", None)]
+    assert forwarded["config"].server.device == "emulator-5554"
+    assert forwarded["action"] == "device connection"
 
 
 def test_spawn_prints_resolved_agent_log_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -535,6 +631,8 @@ def test_server_install_forwards_version_override(tmp_path: Path, monkeypatch: p
                 asset_arch="android-arm64",
                 local_binary=local_binary,
                 local_source=None,
+                local_source_abi_hint=None,
+                local_source_asset_arch_hint=None,
             )
 
     monkeypatch.setattr("frida_analykit.cli._load_config", lambda _: _remote_config(tmp_path, version="17.8.1"))
@@ -590,10 +688,12 @@ def test_server_install_supports_local_server(tmp_path: Path, monkeypatch: pytes
                 installed_version="16.5.9",
                 selected_version="local",
                 remote_path=config.server.servername,
-                device_abi="arm64-v8a",
-                asset_arch="android-arm64",
+                device_abi=None,
+                asset_arch=None,
                 local_binary=local_binary,
                 local_source=local_server,
+                local_source_abi_hint="arm64-v8a",
+                local_source_asset_arch_hint="android-arm64",
             )
 
     monkeypatch.setattr("frida_analykit.cli._load_config", lambda _: _remote_config(tmp_path, version="17.8.1"))
@@ -616,6 +716,8 @@ def test_server_install_supports_local_server(tmp_path: Path, monkeypatch: pytes
     assert calls["local_server_path"] == local_server
     assert calls["force_download"] is False
     assert calls["download_progress"] is None
+    assert "device abi: skipped (local server source)" in result.output
+    assert "local source arch hint: arm64-v8a (android-arm64)" in result.output
     assert f"local source: {local_server}" in result.output
 
 
@@ -687,6 +789,7 @@ def test_doctor_reports_remote_server_status_when_config_exists(
         def inspect_remote_server(self, config):
             return SimpleNamespace(
                 selected_version="17.8.1",
+                adb_target="emulator-5554",
                 device_abi="arm64-v8a",
                 asset_arch="android-arm64",
                 exists=True,
@@ -705,8 +808,10 @@ def test_doctor_reports_remote_server_status_when_config_exists(
     assert result.exit_code == 0, result.output
     assert "Support status: tested" in result.output
     assert "Supported range: >=16.5.9, <18.0.0" in result.output
+    assert "Configured server device: emulator-5554" in result.output
     assert "Configured server version: 17.8.1" in result.output
     assert "Install target version: 17.8.1" in result.output
+    assert "ADB target device: emulator-5554" in result.output
     assert "Device ABI: arm64-v8a (android-arm64)" in result.output
     assert "Remote server version: 17.8.0" in result.output
     assert "Remote server supported: yes" in result.output

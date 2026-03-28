@@ -140,7 +140,8 @@ frida-analykit attach --config config.yml --watch --repl
 - `--repl` 会打开 `ptpython`，可以直接拿到 `device`、`session`、`script` 等对象。
 - `--verbose` 会打印实际执行的 adb/npm 子进程命令、退出码和捕获到的 stdout/stderr，适合排查设备端命令判断为什么与预期不一致。
 - `server.host` 除了 `host:port`，也支持 `local` 和 `usb` 这类本地/USB 设备简写。
-- `doctor --config` 会读取 `config.yml`，检查 `server.servername` 对应的设备端文件、版本、以及当前 ABI 推导出的下载资产类型。
+- `server.device` 用来固定目标设备序列号；`doctor`、`spawn`、`attach` 以及 `server` 子命令都会优先使用它，避免多设备场景串到错误目标。
+- `doctor --config` 会读取 `config.yml`，显示 `server.device` / 实际 adb 目标设备，检查 `server.servername` 对应的设备端文件、版本、以及当前 ABI 推导出的下载资产类型。
 - `server boot` 默认不会自动杀掉已经存在的远端 `frida-server`；检测到同名进程时会直接报错，并提示你执行 `server stop` 或改用 `server boot --force-restart`。
 - `server stop` 是正式清理入口；即使设备上当前没有匹配进程，也会返回成功并尝试清理对应的 adb forward。
 - `server install` 支持两种来源：`--version` 从 GitHub 下载并显示进度，`--local-server` 直接推送本地可执行文件或 `.xz` 资产。版本模式下会优先使用 `--version`，否则使用 `server.version`，再否则退回当前已安装的 Python `frida` 版本；下载文件会缓存到本机缓存目录，后续重复安装会复用。
@@ -193,7 +194,7 @@ cd my-agent
 npm install
 ```
 
-默认生成的 `package.json` 会直接依赖 npmjs 上对应版本的 `@zsa233/frida-analykit-agent`，只需要普通的 `npm install`，不需要 `.npmrc` 或额外 token。
+默认生成的 `package.json` 会直接精确依赖 npmjs 上与当前 CLI 匹配的 `@zsa233/frida-analykit-agent` 版本，只需要普通的 `npm install`，不需要 `.npmrc` 或额外 token。
 
 ### 3. 自定义你的 agent
 

@@ -37,9 +37,32 @@ _UNAME_TO_ASSET = {
     "x86_64": ("x86_64", "android-x86_64"),
 }
 
+_ASSET_TO_DISPLAY_ABI = {
+    "android-arm64": "arm64-v8a",
+    "android-arm": "armeabi-v7a",
+    "android-x86_64": "x86_64",
+    "android-x86": "x86",
+}
+
+_ABI_PROPERTY_PREFIXES = (
+    "ro.product.cpu",
+    "ro.odm.product.cpu",
+    "ro.vendor.product.cpu",
+    "ro.system.product.cpu",
+)
+
+_ABI_PROPERTY_SUFFIXES = (
+    "abilist64",
+    "abilist",
+    "abilist32",
+    "abi",
+    "abi2",
+)
+
 _VERSION_PATTERN = re.compile(r"\d+\.\d+\.\d+(?:-[0-9A-Za-z._-]+)?")
 _ABI_TOKEN_PATTERN = re.compile(
-    r"(?<![A-Za-z0-9_])(arm64-v8a|armeabi-v7a|armeabi|x86_64|x86|aarch64|armv8l|armv7l|armv7|i686|i386)(?![A-Za-z0-9_])"
+    r"(?<![A-Za-z0-9_])(arm64-v8a|armeabi-v7a|armeabi|x86_64|x86|aarch64|armv8l|armv7l|armv7|i686|i386)(?![A-Za-z0-9_])",
+    flags=re.IGNORECASE,
 )
 
 
@@ -48,6 +71,20 @@ class ServerManagerError(RuntimeError):
 
 
 DownloadProgressCallback = Callable[[int, int | None], None]
+
+_ROOT_FAILURE_MARKERS = (
+    "permission denied",
+    "operation not permitted",
+    "read-only file system",
+)
+
+_SU_FAILURE_MARKERS = (
+    "invalid uid/gid",
+    "not found",
+    "unknown id",
+    "usage:",
+    "permission denied",
+)
 
 
 @dataclass(frozen=True)
@@ -66,6 +103,7 @@ class RemoteServerStatus:
     selected_version: str
     configured_version: str | None
     server_path: str
+    adb_target: str | None
     exists: bool
     executable: bool
     installed_version: str | None
@@ -79,12 +117,30 @@ class RemoteServerStatus:
 @dataclass(frozen=True)
 class ServerInstallResult:
     selected_version: str
-    device_abi: str
-    asset_arch: str
+    device_abi: str | None
+    asset_arch: str | None
     local_binary: Path
     remote_path: str
     installed_version: str | None
     local_source: Path | None = None
+    local_source_abi_hint: str | None = None
+    local_source_asset_arch_hint: str | None = None
+
+
+@dataclass(frozen=True)
+class _ShellCommand:
+    args: tuple[str, ...]
+    label: str
+
+
+@dataclass(frozen=True)
+class _BootExecutionResult:
+    command: list[str]
+    process: Any
+    root_label: str
+    returncode: int | None = None
+    stdout: str | None = None
+    stderr: str | None = None
 
 
 def _default_cache_dir() -> Path:
@@ -116,7 +172,37 @@ def _extract_version_from_local_source(path: Path) -> str | None:
 
 
 def _iter_abi_candidates(raw: str) -> list[str]:
-    return [match.group(1) for match in _ABI_TOKEN_PATTERN.finditer(raw)]
+    return [match.group(1).lower() for match in _ABI_TOKEN_PATTERN.finditer(raw)]
+
+
+def _extract_local_asset_arch(path: Path) -> str | None:
+    name = path.name
+    if name.endswith(".xz"):
+        name = name[: -len(".xz")]
+    prefix = "frida-server-"
+    if not name.startswith(prefix):
+        return None
+    payload = name[len(prefix) :]
+    asset_arches = sorted(set(_ANDROID_ABI_TO_ASSET.values()), key=len, reverse=True)
+    for asset_arch in asset_arches:
+        suffix = f"-{asset_arch}"
+        if payload.endswith(suffix):
+            return asset_arch
+    return None
+
+
+def _describe_local_asset(path: Path) -> tuple[str | None, str | None]:
+    asset_arch = _extract_local_asset_arch(path)
+    if asset_arch is None:
+        return None, None
+    return _ASSET_TO_DISPLAY_ABI.get(asset_arch), asset_arch
+
+
+def _summarize_probe_output(command: str, output: str, *, limit: int = 160) -> str:
+    normalized = " ".join(output.split())
+    if len(normalized) > limit:
+        normalized = f"{normalized[: limit - 3]}..."
+    return f"{command}: {normalized}"
 
 
 def _adb_prefix(config: AppConfig, adb_executable: str = "adb") -> list[str]:
@@ -140,6 +226,15 @@ def _tail_text(text: str | None, *, limit: int = 20) -> str | None:
     if not lines:
         return None
     return "\n".join(lines[-limit:])
+
+
+def _combined_output(result: subprocess.CompletedProcess[str]) -> str:
+    return "\n".join(part for part in (result.stdout, result.stderr) if part)
+
+
+def _contains_any_marker(text: str, markers: tuple[str, ...]) -> bool:
+    lowered = text.lower()
+    return any(marker in lowered for marker in markers)
 
 
 class FridaServerManager:
@@ -175,24 +270,24 @@ class FridaServerManager:
         )
         return resolved
 
-    def inspect_remote_server(self, config: AppConfig) -> RemoteServerStatus:
+    def inspect_remote_server(self, config: AppConfig, *, probe_abi: bool = True) -> RemoteServerStatus:
         self._ensure_remote_config(config, action="remote server inspection")
         selected_version = self.resolve_server_version(config)
+        adb_target = self.resolve_adb_target(config)
         device_abi: str | None = None
         asset_arch: str | None = None
         abi_error: str | None = None
 
-        try:
-            device_abi, asset_arch = self.detect_device_abi(config)
-        except ServerManagerError as exc:
-            abi_error = str(exc)
+        if probe_abi:
+            try:
+                device_abi, asset_arch = self.detect_device_abi(config)
+            except ServerManagerError as exc:
+                abi_error = str(exc)
 
         remote_path = config.server.servername
-        quoted_path = shlex.quote(remote_path)
-        exists_probe = self._shell(
+        exists_probe = self._shell_with_auto_root(
             config,
-            f"ls {quoted_path}",
-            as_root=True,
+            f"ls {shlex.quote(remote_path)}",
             check=False,
         )
         exists = exists_probe.returncode == 0
@@ -200,12 +295,7 @@ class FridaServerManager:
         installed_version: str | None = None
 
         if exists:
-            version_output = self._shell(
-                config,
-                f"{quoted_path} --version",
-                as_root=True,
-                check=False,
-            )
+            version_output = self._probe_remote_binary_version(config, remote_path)
             installed_version = _extract_version(
                 "\n".join(part for part in (version_output.stdout, version_output.stderr) if part)
             )
@@ -222,6 +312,7 @@ class FridaServerManager:
             selected_version=selected_version,
             configured_version=config.server.version,
             server_path=remote_path,
+            adb_target=adb_target,
             exists=exists,
             executable=executable,
             installed_version=installed_version,
@@ -251,14 +342,19 @@ class FridaServerManager:
             raise ServerManagerError("`--force-download` requires an explicit `--version`")
 
         local_source = _resolve_local_source(local_server_path) if local_server_path is not None else None
+        local_source_abi_hint: str | None = None
+        local_source_asset_arch_hint: str | None = None
         if local_source is not None:
             selected_version = _extract_version_from_local_source(local_source) or "local"
+            local_source_abi_hint, local_source_asset_arch_hint = _describe_local_asset(local_source)
+            device_abi = None
+            asset_arch = None
         else:
             selected_version = self.resolve_server_version(config, version_override=version_override)
-        device_abi, asset_arch = self.detect_device_abi(config)
+            device_abi, asset_arch = self.detect_device_abi(config)
         if asset_arch_override is not None:
             asset_arch = asset_arch_override
-            device_abi = asset_arch_override
+            device_abi = _ASSET_TO_DISPLAY_ABI.get(asset_arch_override)
             verbose_echo(f"overriding detected asset arch with `{asset_arch_override}`")
 
         if local_source is not None:
@@ -287,18 +383,24 @@ class FridaServerManager:
             quoted_temp = shlex.quote(temp_remote_path)
             quoted_remote = shlex.quote(remote_path)
             quoted_remote_dir = shlex.quote(remote_dir)
-            self._shell(config, f"mkdir -p {quoted_remote_dir}", as_root=True)
-            self._shell(config, f"mv {quoted_temp} {quoted_remote}", as_root=True)
-            self._shell(config, f"chmod 755 {quoted_remote}", as_root=True)
+            self._shell_with_auto_root(config, f"mkdir -p {quoted_remote_dir}")
+            self._shell_with_auto_root(config, f"mv {quoted_temp} {quoted_remote}")
+            self._shell_with_auto_root(config, f"chmod 755 {quoted_remote}")
         finally:
-            self._shell(
+            self._shell_with_auto_root(
                 config,
                 f"rm -f {shlex.quote(temp_remote_path)}",
-                as_root=True,
                 check=False,
             )
 
-        status = self.inspect_remote_server(config)
+        status = self.inspect_remote_server(config, probe_abi=local_source is None)
+        self._validate_installed_server(
+            status,
+            selected_version=selected_version,
+            local_source=local_source,
+            local_source_abi_hint=local_source_abi_hint,
+            local_source_asset_arch_hint=local_source_asset_arch_hint,
+        )
         return ServerInstallResult(
             selected_version=selected_version,
             device_abi=device_abi,
@@ -307,6 +409,8 @@ class FridaServerManager:
             remote_path=remote_path,
             installed_version=status.installed_version,
             local_source=local_source,
+            local_source_abi_hint=local_source_abi_hint,
+            local_source_asset_arch_hint=local_source_asset_arch_hint,
         )
 
     def boot_remote_server(self, config: AppConfig, *, force_restart: bool = False) -> None:
@@ -325,20 +429,10 @@ class FridaServerManager:
             self._kill_remote_pids(config, existing_pids)
 
         try:
-            self._run_adb(
-                config,
-                ["forward", f"tcp:{port}", f"tcp:{port}"],
-                check=True,
-            )
+            self.ensure_remote_forward(config, action="server boot")
             before_pids = self.list_remote_server_pids(config)
 
-            server_path = shlex.quote(config.server.servername)
-            version_probe = self._shell(
-                config,
-                f"{server_path} --version",
-                as_root=True,
-                check=False,
-            )
+            version_probe = self._probe_remote_binary_version(config, config.server.servername)
             installed_version = _extract_version(
                 "\n".join(part for part in (version_probe.stdout, version_probe.stderr) if part)
             )
@@ -352,28 +446,31 @@ class FridaServerManager:
                 )
 
             launch_command = self._build_boot_command(config.server.servername, port)
-            command, process = self._popen_adb(
-                config,
-                ["shell", self._remote_shell_command(launch_command, as_root=True)],
-            )
-            try:
-                returncode = process.wait()
-                stdout, stderr = self._collect_process_output(process)
-                self._log_process_result(
-                    command=command,
-                    returncode=returncode,
-                    stdout=stdout,
-                    stderr=stderr,
-                )
-            except KeyboardInterrupt:
-                verbose_echo("keyboard interrupt received while waiting for remote frida-server")
-                self._terminate_process(process)
-                self.cleanup_booted_remote_server(config, before_pids=before_pids)
-                return
-            except BaseException:
-                self._terminate_process(process)
-                self.cleanup_booted_remote_server(config, before_pids=before_pids)
-                raise
+            execution = self._start_boot_process(config, launch_command)
+            command, process = execution.command, execution.process
+            if execution.returncode is not None:
+                returncode = execution.returncode
+                stdout = execution.stdout
+                stderr = execution.stderr
+            else:
+                try:
+                    returncode = process.wait()
+                    stdout, stderr = self._collect_process_output(process)
+                    self._log_process_result(
+                        command=command,
+                        returncode=returncode,
+                        stdout=stdout,
+                        stderr=stderr,
+                    )
+                except KeyboardInterrupt:
+                    verbose_echo("keyboard interrupt received while waiting for remote frida-server")
+                    self._terminate_process(process)
+                    self.cleanup_booted_remote_server(config, before_pids=before_pids)
+                    return
+                except BaseException:
+                    self._terminate_process(process)
+                    self.cleanup_booted_remote_server(config, before_pids=before_pids)
+                    raise
 
             if returncode != 0:
                 self.cleanup_booted_remote_server(config, before_pids=before_pids)
@@ -401,20 +498,25 @@ class FridaServerManager:
 
     def detect_device_abi(self, config: AppConfig) -> tuple[str, str]:
         self._ensure_remote_config(config, action="device ABI detection")
-        commands = (
-            "getprop ro.product.cpu.abilist64",
-            "getprop ro.product.cpu.abilist",
-            "getprop ro.product.cpu.abi",
-            "uname -m",
-        )
         seen_outputs: list[str] = []
+        property_commands = [
+            f"getprop {prefix}.{suffix}"
+            for prefix in _ABI_PROPERTY_PREFIXES
+            for suffix in _ABI_PROPERTY_SUFFIXES
+        ]
+        commands = [
+            *property_commands,
+            "getprop",
+            "uname -m",
+            "cat /proc/cpuinfo",
+        ]
         for command in commands:
             verbose_echo(f"probing device ABI with `{command}`")
             result = self._shell(config, command, check=False)
             output = result.stdout.strip()
             if not output:
                 continue
-            seen_outputs.append(output)
+            seen_outputs.append(_summarize_probe_output(command, output))
             for candidate in _iter_abi_candidates(output):
                 if candidate in _ANDROID_ABI_TO_ASSET:
                     return candidate, _ANDROID_ABI_TO_ASSET[candidate]
@@ -422,6 +524,31 @@ class FridaServerManager:
                     return _UNAME_TO_ASSET[candidate]
         details = ", ".join(seen_outputs) if seen_outputs else "no ABI properties returned"
         raise ServerManagerError(f"unable to map device ABI to a Frida server asset ({details})")
+
+    def resolve_adb_target(self, config: AppConfig) -> str | None:
+        self._ensure_remote_config(config, action="adb target resolution")
+        result = self._run_adb(
+            config,
+            ["get-serialno"],
+            capture_output=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            return None
+        serial = result.stdout.strip()
+        if not serial or serial == "unknown":
+            return None
+        return serial
+
+    def ensure_remote_forward(self, config: AppConfig, *, action: str = "remote port forward") -> str:
+        self._ensure_remote_config(config, action=action)
+        port = self._require_host_port(config.server.host, action=action)
+        self._run_adb(
+            config,
+            ["forward", f"tcp:{port}", f"tcp:{port}"],
+            check=True,
+        )
+        return port
 
     def list_remote_server_pids(self, config: AppConfig) -> set[int]:
         self._ensure_remote_config(config, action="remote server pid lookup")
@@ -433,10 +560,9 @@ class FridaServerManager:
             pidof_candidates.append(basename)
 
         for candidate in pidof_candidates:
-            result = self._shell(
+            result = self._shell_with_auto_root(
                 config,
                 f"pidof {shlex.quote(candidate)}",
-                as_root=True,
                 check=False,
             )
             pids = self._parse_pid_list(result.stdout)
@@ -445,7 +571,7 @@ class FridaServerManager:
                 return pids
 
         for command in ("ps -A", "ps"):
-            result = self._shell(config, command, as_root=True, check=False)
+            result = self._shell_with_auto_root(config, command, check=False)
             pids = self._parse_ps_pid_list(result.stdout, identifiers=identifiers)
             if pids:
                 verbose_echo(f"resolved remote server pids via `{command}`: {sorted(pids)}")
@@ -641,10 +767,9 @@ class FridaServerManager:
         config: AppConfig,
         command: str,
         *,
-        as_root: bool = False,
         check: bool = True,
     ) -> subprocess.CompletedProcess[str]:
-        shell_args = ["shell", self._remote_shell_command(command, as_root=as_root)]
+        shell_args = ["shell", self._render_shell_command(self._plain_shell_command(command))]
         verbose_echo(f"remote shell command: {command}")
         return self._run_adb(config, shell_args, capture_output=True, check=check)
 
@@ -665,10 +790,188 @@ class FridaServerManager:
             ) from exc
 
     @staticmethod
-    def _remote_shell_command(command: str, *, as_root: bool) -> str:
-        if not as_root:
-            return command
-        return f"su -c {shlex.quote(command)}"
+    def _plain_shell_command(command: str) -> _ShellCommand:
+        return _ShellCommand(args=("sh", "-c", command), label="plain")
+
+    @staticmethod
+    def _root_shell_commands(command: str) -> tuple[_ShellCommand, ...]:
+        return (
+            _ShellCommand(args=("su", "0", "sh", "-c", command), label="su 0"),
+            _ShellCommand(args=("su", "root", "sh", "-c", command), label="su root"),
+            _ShellCommand(args=("su", "-c", command), label="su -c"),
+        )
+
+    @staticmethod
+    def _render_shell_command(shell_command: _ShellCommand) -> str:
+        return shlex.join(shell_command.args)
+
+    @staticmethod
+    def _should_retry_with_root(result: subprocess.CompletedProcess[str]) -> bool:
+        combined = _combined_output(result)
+        if result.returncode == 0:
+            return False
+        return _contains_any_marker(combined, _ROOT_FAILURE_MARKERS)
+
+    @staticmethod
+    def _should_retry_su_command(result: subprocess.CompletedProcess[str]) -> bool:
+        return _contains_any_marker(_combined_output(result), _SU_FAILURE_MARKERS)
+
+    def _run_shell_command(
+        self,
+        config: AppConfig,
+        shell_command: _ShellCommand,
+        *,
+        check: bool,
+    ) -> subprocess.CompletedProcess[str]:
+        return self._run_adb(
+            config,
+            ["shell", self._render_shell_command(shell_command)],
+            capture_output=True,
+            check=check,
+        )
+
+    def _shell_with_auto_root(
+        self,
+        config: AppConfig,
+        command: str,
+        *,
+        check: bool = True,
+    ) -> subprocess.CompletedProcess[str]:
+        verbose_echo(f"remote shell command: {command}")
+        plain_command = self._plain_shell_command(command)
+        plain_result = self._run_shell_command(config, plain_command, check=False)
+        if not self._should_retry_with_root(plain_result):
+            if check and plain_result.returncode != 0:
+                raise subprocess.CalledProcessError(
+                    plain_result.returncode,
+                    [
+                        *_adb_prefix(config, adb_executable=self._adb_executable),
+                        "shell",
+                        self._render_shell_command(plain_command),
+                    ],
+                    output=plain_result.stdout,
+                    stderr=plain_result.stderr,
+                )
+            return plain_result
+
+        last_result = plain_result
+        for root_command in self._root_shell_commands(command):
+            result = self._run_shell_command(config, root_command, check=False)
+            last_result = result
+            if result.returncode == 0:
+                return result
+            if not self._should_retry_su_command(result):
+                break
+
+        if check:
+            raise subprocess.CalledProcessError(
+                last_result.returncode,
+                [
+                    *_adb_prefix(config, adb_executable=self._adb_executable),
+                    "shell",
+                    self._render_shell_command(self._plain_shell_command(command)),
+                ],
+                output=last_result.stdout,
+                stderr=last_result.stderr,
+            )
+        return last_result
+
+    def _probe_remote_binary_version(self, config: AppConfig, remote_path: str) -> subprocess.CompletedProcess[str]:
+        return self._shell_with_auto_root(
+            config,
+            f"{shlex.quote(remote_path)} --version",
+            check=False,
+        )
+
+    def _validate_installed_server(
+        self,
+        status: RemoteServerStatus,
+        *,
+        selected_version: str,
+        local_source: Path | None,
+        local_source_abi_hint: str | None,
+        local_source_asset_arch_hint: str | None,
+    ) -> None:
+        if not status.exists:
+            raise ServerManagerError(
+                f"installed server validation failed at `{status.server_path}`: "
+                f"exists={status.exists}, executable={status.executable}"
+            )
+        if not status.executable or status.installed_version is None:
+            details = (
+                f"exists={status.exists}, executable={status.executable}, "
+                f"installed_version={status.installed_version or 'unknown'}"
+            )
+            hint = ""
+            if local_source is not None:
+                if local_source_abi_hint and local_source_asset_arch_hint:
+                    hint = (
+                        f"; local source hint {local_source_abi_hint} "
+                        f"({local_source_asset_arch_hint}) from `{local_source}`"
+                    )
+                else:
+                    hint = f"; local source `{local_source}`"
+            raise ServerManagerError(
+                f"installed server validation failed at `{status.server_path}`: {details}{hint}"
+            )
+        if local_source is None and status.installed_version != selected_version:
+            raise ServerManagerError(
+                f"installed server version mismatch at `{status.server_path}`: expected {selected_version}, "
+                f"found {status.installed_version}"
+            )
+
+    def _start_boot_process(self, config: AppConfig, command: str) -> _BootExecutionResult:
+        attempts = [self._plain_shell_command(command), *self._root_shell_commands(command)]
+        last_error: OSError | None = None
+        for shell_command in attempts:
+            adb_command = [
+                *_adb_prefix(config, adb_executable=self._adb_executable),
+                "shell",
+                self._render_shell_command(shell_command),
+            ]
+            verbose_echo(f"starting adb process: {format_command(adb_command)}")
+            try:
+                process = self._subprocess_popen(
+                    adb_command,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+                try:
+                    returncode = process.wait(timeout=0.2)
+                except subprocess.TimeoutExpired:
+                    return _BootExecutionResult(command=adb_command, process=process, root_label=shell_command.label)
+                stdout, stderr = self._collect_process_output(process)
+                self._log_process_result(
+                    command=adb_command,
+                    returncode=returncode,
+                    stdout=stdout,
+                    stderr=stderr,
+                )
+                completed = subprocess.CompletedProcess(
+                    adb_command,
+                    returncode,
+                    stdout=stdout or "",
+                    stderr=stderr or "",
+                )
+                if shell_command.label == "plain" and self._should_retry_with_root(completed):
+                    continue
+                if shell_command.label != "plain" and self._should_retry_su_command(completed):
+                    continue
+                return _BootExecutionResult(
+                    command=adb_command,
+                    process=process,
+                    root_label=shell_command.label,
+                    returncode=returncode,
+                    stdout=stdout,
+                    stderr=stderr,
+                )
+            except OSError as exc:
+                last_error = exc
+                continue
+        if last_error is None:
+            raise ServerManagerError("failed to start remote shell command")
+        raise ServerManagerError(f"failed to start remote shell command: {last_error}") from last_error
 
     @staticmethod
     def _parse_pid_list(raw: str) -> set[int]:
@@ -705,14 +1008,14 @@ class FridaServerManager:
     def _kill_remote_pids(self, config: AppConfig, pids: set[int]) -> None:
         remaining = set(pids)
         for pid in sorted(remaining):
-            self._shell(config, f"kill {pid}", as_root=True, check=False)
+            self._shell_with_auto_root(config, f"kill {pid}", check=False)
         after_term = self.list_remote_server_pids(config)
         remaining &= after_term
         if not remaining:
             return
         verbose_echo(f"force killing remote frida-server pids: {sorted(remaining)}")
         for pid in sorted(remaining):
-            self._shell(config, f"kill -9 {pid}", as_root=True, check=False)
+            self._shell_with_auto_root(config, f"kill -9 {pid}", check=False)
 
     @staticmethod
     def _build_boot_command(server_path: str, port: str) -> str:

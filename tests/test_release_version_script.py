@@ -233,7 +233,7 @@ def test_sync_release_version_updates_files_and_runs_lockfile_regeneration(
         (repo_root / release_version_script.ROOT_PACKAGE_JSON_PATH).read_text(encoding="utf-8")
     )
     assert root_package["version"] == "2.0.0-rc.1"
-    assert root_package["dependencies"][release_version_script.AGENT_PACKAGE_NAME] == "^2.0.0-rc.1"
+    assert root_package["dependencies"][release_version_script.AGENT_PACKAGE_NAME] == "2.0.0-rc.1"
     agent_package = json.loads(
         (repo_root / release_version_script.AGENT_PACKAGE_JSON_PATH).read_text(encoding="utf-8")
     )
@@ -487,11 +487,11 @@ def test_sync_release_version_rolls_back_when_preflight_is_interrupted(
                         )
                     ),
                     "dependencies": {
-                        release_version_script.AGENT_PACKAGE_NAME: "^2.0.0",
+                        release_version_script.AGENT_PACKAGE_NAME: "2.0.0",
                     },
                 },
             ),
-            "package.json dependency @zsa233/frida-analykit-agent must be ^2.0.0-rc.1, found ^2.0.0",
+            "package.json dependency @zsa233/frida-analykit-agent must be 2.0.0-rc.1, found 2.0.0",
         ),
         (
             "v2.0.0-rc.1",

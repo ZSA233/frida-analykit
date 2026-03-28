@@ -370,6 +370,10 @@ def release_summary(config: ReleaseVersionConfig) -> dict[str, str]:
     }
 
 
+def _display_path(path: Path) -> str:
+    return path.as_posix()
+
+
 def check_release_sync(repo_root: Path, *, tag: str) -> dict[str, str]:
     config = load_release_version_config(repo_root)
     expected = config.release
@@ -381,7 +385,7 @@ def check_release_sync(repo_root: Path, *, tag: str) -> dict[str, str]:
     errors: list[str] = []
     if parsed_tag != expected:
         errors.append(
-            f"{RELEASE_VERSION_PATH} expects tag {expected.tag}, found {tag}"
+            f"{_display_path(RELEASE_VERSION_PATH)} expects tag {expected.tag}, found {tag}"
         )
 
     state = collect_repository_version_state(repo_root)
@@ -390,50 +394,50 @@ def check_release_sync(repo_root: Path, *, tag: str) -> dict[str, str]:
         python_release = parse_python_release_version(state.python_version)
     except ReleaseVersionError as exc:
         raise ReleaseVersionToolError(
-            f"{VERSION_FILE_PATH} does not contain a supported release version"
+            f"{_display_path(VERSION_FILE_PATH)} does not contain a supported release version"
         ) from exc
 
     try:
         root_npm_release = parse_npm_release_version(state.root_npm_version)
     except ReleaseVersionError as exc:
         raise ReleaseVersionToolError(
-            f"{ROOT_PACKAGE_JSON_PATH} version does not use a supported npm release format"
+            f"{_display_path(ROOT_PACKAGE_JSON_PATH)} version does not use a supported npm release format"
         ) from exc
 
     try:
         agent_npm_release = parse_npm_release_version(state.agent_npm_version)
     except ReleaseVersionError as exc:
         raise ReleaseVersionToolError(
-            f"{AGENT_PACKAGE_JSON_PATH} version does not use a supported npm release format"
+            f"{_display_path(AGENT_PACKAGE_JSON_PATH)} version does not use a supported npm release format"
         ) from exc
 
     if python_release != expected:
         errors.append(
-            f"{VERSION_FILE_PATH} must be {expected.python_version}, found {state.python_version}"
+            f"{_display_path(VERSION_FILE_PATH)} must be {expected.python_version}, found {state.python_version}"
         )
     if root_npm_release != expected:
         errors.append(
-            f"{ROOT_PACKAGE_JSON_PATH} version must be {expected.npm_version}, found {state.root_npm_version}"
+            f"{_display_path(ROOT_PACKAGE_JSON_PATH)} version must be {expected.npm_version}, found {state.root_npm_version}"
         )
     if agent_npm_release != expected:
         errors.append(
-            f"{AGENT_PACKAGE_JSON_PATH} version must be {expected.npm_version}, found {state.agent_npm_version}"
+            f"{_display_path(AGENT_PACKAGE_JSON_PATH)} version must be {expected.npm_version}, found {state.agent_npm_version}"
         )
     if state.root_agent_dependency != expected.agent_package_spec:
         errors.append(
-            f"{ROOT_PACKAGE_JSON_PATH} dependency {AGENT_PACKAGE_NAME} must be {expected.agent_package_spec}, found {state.root_agent_dependency}"
+            f"{_display_path(ROOT_PACKAGE_JSON_PATH)} dependency {AGENT_PACKAGE_NAME} must be {expected.agent_package_spec}, found {state.root_agent_dependency}"
         )
     if state.lock_root_version != expected.npm_version:
         errors.append(
-            f"{PACKAGE_LOCK_PATH} root version must be {expected.npm_version}, found {state.lock_root_version or '<missing>'}"
+            f"{_display_path(PACKAGE_LOCK_PATH)} root version must be {expected.npm_version}, found {state.lock_root_version or '<missing>'}"
         )
     if state.lock_root_agent_dependency != expected.agent_package_spec:
         errors.append(
-            f"{PACKAGE_LOCK_PATH} root dependency {AGENT_PACKAGE_NAME} must be {expected.agent_package_spec}, found {state.lock_root_agent_dependency or '<missing>'}"
+            f"{_display_path(PACKAGE_LOCK_PATH)} root dependency {AGENT_PACKAGE_NAME} must be {expected.agent_package_spec}, found {state.lock_root_agent_dependency or '<missing>'}"
         )
     if state.lock_agent_version != expected.npm_version:
         errors.append(
-            f"{PACKAGE_LOCK_PATH} workspace version must be {expected.npm_version}, found {state.lock_agent_version or '<missing>'}"
+            f"{_display_path(PACKAGE_LOCK_PATH)} workspace version must be {expected.npm_version}, found {state.lock_agent_version or '<missing>'}"
         )
 
     if errors:

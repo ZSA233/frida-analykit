@@ -78,7 +78,7 @@ def _make_release_repo(tmp_path: Path) -> Path:
           "private": true,
           "workspaces": ["packages/*"],
           "dependencies": {
-            "@zsa233/frida-analykit-agent": "^0.5.0"
+            "@zsa233/frida-analykit-agent": "0.5.0"
           }
         }
         """,
@@ -95,7 +95,7 @@ def _make_release_repo(tmp_path: Path) -> Path:
               "name": "demo-monorepo",
               "version": "0.5.0",
               "dependencies": {
-                "@zsa233/frida-analykit-agent": "^0.5.0"
+                "@zsa233/frida-analykit-agent": "0.5.0"
               }
             },
             "packages/frida-analykit-agent": {
@@ -287,7 +287,7 @@ def test_validate_release_version_accepts_rc_mapping(tmp_path: Path) -> None:
         (repo_root / "package.json")
         .read_text(encoding="utf-8")
         .replace('"version": "0.5.0"', '"version": "0.5.0-rc.1"', 1)
-        .replace('"^0.5.0"', '"^0.5.0-rc.1"'),
+        .replace('"0.5.0"', '"0.5.0-rc.1"', 1),
         encoding="utf-8",
     )
     (repo_root / "packages/frida-analykit-agent/package.json").write_text(
@@ -302,7 +302,7 @@ def test_validate_release_version_accepts_rc_mapping(tmp_path: Path) -> None:
     assert payload["kind"] == "rc"
     assert payload["python_version"] == "0.5.0rc1"
     assert payload["npm_version"] == "0.5.0-rc.1"
-    assert payload["agent_package_spec"] == "^0.5.0-rc.1"
+    assert payload["agent_package_spec"] == "0.5.0-rc.1"
 
 
 def test_validate_promotion_allows_only_version_metadata_changes(tmp_path: Path) -> None:
@@ -316,7 +316,7 @@ def test_validate_promotion_allows_only_version_metadata_changes(tmp_path: Path)
         (repo_root / "package.json")
         .read_text(encoding="utf-8")
         .replace('"version": "0.5.0"', '"version": "0.5.0-rc.1"', 1)
-        .replace('"^0.5.0"', '"^0.5.0-rc.1"'),
+        .replace('"0.5.0"', '"0.5.0-rc.1"', 1),
         encoding="utf-8",
     )
     (repo_root / "packages/frida-analykit-agent/package.json").write_text(
@@ -330,7 +330,7 @@ def test_validate_promotion_allows_only_version_metadata_changes(tmp_path: Path)
         .read_text(encoding="utf-8")
         .replace('"version": "0.5.0"', '"version": "0.5.0-rc.1"', 1)
         .replace('"version": "0.5.0"', '"version": "0.5.0-rc.1"', 1)
-        .replace('"^0.5.0"', '"^0.5.0-rc.1"'),
+        .replace('"0.5.0"', '"0.5.0-rc.1"', 1),
         encoding="utf-8",
     )
     _git_init(repo_root)
@@ -345,7 +345,7 @@ def test_validate_promotion_allows_only_version_metadata_changes(tmp_path: Path)
         (repo_root / "package.json")
         .read_text(encoding="utf-8")
         .replace('"version": "0.5.0-rc.1"', '"version": "0.5.0"', 1)
-        .replace('"^0.5.0-rc.1"', '"^0.5.0"'),
+        .replace('"0.5.0-rc.1"', '"0.5.0"', 1),
         encoding="utf-8",
     )
     (repo_root / "packages/frida-analykit-agent/package.json").write_text(
@@ -359,7 +359,7 @@ def test_validate_promotion_allows_only_version_metadata_changes(tmp_path: Path)
         .read_text(encoding="utf-8")
         .replace('"version": "0.5.0-rc.1"', '"version": "0.5.0"', 1)
         .replace('"version": "0.5.0-rc.1"', '"version": "0.5.0"', 1)
-        .replace('"^0.5.0-rc.1"', '"^0.5.0"'),
+        .replace('"0.5.0-rc.1"', '"0.5.0"', 1),
         encoding="utf-8",
     )
 

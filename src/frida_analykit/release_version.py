@@ -48,7 +48,7 @@ class ReleaseVersion:
 
     @property
     def agent_package_spec(self) -> str:
-        return f"^{self.npm_version}"
+        return self.npm_version
 
 
 def _parse_release_parts(raw: str) -> tuple[str, int | None]:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import textwrap
 from pathlib import Path
@@ -12,6 +13,7 @@ from frida_analykit.dev_env import (
     DevEnvManager,
     ManagedEnv,
     _env_root_for_python,
+    _activate_path,
     _python_path,
     load_profiles,
 )
@@ -66,14 +68,14 @@ def test_repo_create_invokes_uv_commands_in_order_and_updates_registry(
     env = manager.create(name="legacy-16", profile="legacy-16")
 
     env_dir = tmp_path / ".frida-analykit" / "envs" / "legacy-16"
-    python_path = env_dir / "bin" / "python"
+    python_path = _python_path(env_dir)
     assert env.env_dir == env_dir
     assert calls[0][0] == ["uv", "venv", str(env_dir), "--python", "3.11"]
     assert calls[1][0] == ["uv", "sync", "--active", "--extra", "repl", "--dev"]
     assert calls[1][1] == tmp_path
     assert calls[1][2] is not None
     assert calls[1][2]["VIRTUAL_ENV"] == str(env_dir)
-    assert calls[1][2]["PATH"].split(":")[0] == str(env_dir / "bin")
+    assert calls[1][2]["PATH"].split(os.pathsep)[0] == str(python_path.parent)
     assert calls[2][0] == [
         "uv",
         "pip",
@@ -117,7 +119,7 @@ def test_global_create_installs_repl_only_by_default(tmp_path: Path) -> None:
     env = manager.create(name="frida-16.5.9", frida_version="16.5.9")
 
     env_dir = manager.env_root / "frida-16.5.9"
-    python_path = env_dir / "bin" / "python"
+    python_path = _python_path(env_dir)
     install_source = Path(__file__).resolve().parents[1]
     assert env.env_dir == env_dir
     assert calls[1][0] == [
@@ -174,7 +176,7 @@ def test_create_streams_uv_progress_output(tmp_path: Path) -> None:
                 "pip",
                 "install",
                 "--python",
-                str(tmp_path / ".frida-analykit" / "envs" / "frida-16.5.9" / "bin" / "python"),
+                str(_python_path(tmp_path / ".frida-analykit" / "envs" / "frida-16.5.9")),
                 "frida==16.5.9",
                 "frida-tools",
             ],
@@ -539,6 +541,7 @@ def test_remove_legacy_env_requires_repo_local_path(tmp_path: Path) -> None:
         manager.remove(".venv-frida-16.5.9")
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX zsh wrapper behavior is not used on Windows")
 def test_open_shell_uses_zsh_wrapper_that_reactivates_after_user_rc(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -595,6 +598,7 @@ def test_open_shell_uses_zsh_wrapper_that_reactivates_after_user_rc(
     assert calls[0][1]["UV_PROJECT"] == str(tmp_path)
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX zsh wrapper behavior is not used on Windows")
 def test_open_shell_prefers_explicit_zdotdir_for_zsh_startup_files(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -649,6 +653,7 @@ def test_open_shell_prefers_explicit_zdotdir_for_zsh_startup_files(
     assert ". " + str(activate_path) in calls[0][3]
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX generic shell fallback is not used on Windows")
 def test_open_shell_fallback_exports_virtualenv_for_generic_shell(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -680,7 +685,48 @@ def test_open_shell_fallback_exports_virtualenv_for_generic_shell(
     assert calls[0][0] == ["/bin/sh", "-i"]
     assert calls[0][1] is not None
     assert calls[0][1]["VIRTUAL_ENV"] == str(env_dir)
-    assert calls[0][1]["PATH"].split(":")[0] == str(env_dir / "bin")
+    assert calls[0][1]["PATH"].split(os.pathsep)[0] == str(_python_path(env_dir).parent)
+    assert calls[0][1]["FRIDA_ANALYKIT_ENV_NAME"] == "frida-16.5.9"
+    assert calls[0][1]["FRIDA_ANALYKIT_ENV_DIR"] == str(env_dir)
+    assert calls[0][1]["UV_PROJECT"] == str(tmp_path)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows cmd activation behavior only applies on Windows")
+def test_open_shell_uses_cmd_activation_on_windows(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env_dir = tmp_path / ".frida-analykit" / "envs" / "frida-16.5.9"
+    env_dir.mkdir(parents=True)
+    activate_path = _activate_path(env_dir)
+    activate_path.parent.mkdir(parents=True, exist_ok=True)
+    activate_path.write_text("", encoding="utf-8")
+    manager = DevEnvManager.for_repo(tmp_path)
+    calls: list[tuple[list[str], dict[str, str] | None]] = []
+
+    monkeypatch.setenv("COMSPEC", r"C:\Windows\System32\cmd.exe")
+    monkeypatch.setenv("SHELL", "/bin/zsh")
+
+    def _run(command, cwd=None, env=None, check=False, capture_output=False, text=False):
+        calls.append((command, env))
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    manager._subprocess_run = _run
+    managed_env = ManagedEnv(
+        name="frida-16.5.9",
+        path=str(env_dir),
+        frida_version="16.5.9",
+        source_kind="version",
+        source_value="16.5.9",
+        last_updated="2026-03-26T00:00:00Z",
+    )
+
+    manager._open_shell(managed_env)
+
+    assert calls[0][0] == [r"C:\Windows\System32\cmd.exe", "/K", str(activate_path)]
+    assert calls[0][1] is not None
+    assert calls[0][1]["VIRTUAL_ENV"] == str(env_dir)
+    assert calls[0][1]["PATH"].split(os.pathsep)[0] == str(activate_path.parent)
     assert calls[0][1]["FRIDA_ANALYKIT_ENV_NAME"] == "frida-16.5.9"
     assert calls[0][1]["FRIDA_ANALYKIT_ENV_DIR"] == str(env_dir)
     assert calls[0][1]["UV_PROJECT"] == str(tmp_path)
