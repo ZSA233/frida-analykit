@@ -4,10 +4,15 @@ from frida_analykit.compat import FridaCompat, SupportRange, Version
 class _FakeDeviceManager:
     def __init__(self) -> None:
         self.remote_hosts = []
+        self.device_ids = []
 
     def add_remote_device(self, host: str):
         self.remote_hosts.append(host)
         return ("remote", host)
+
+    def get_device(self, device_id: str, timeout: int = 0):
+        self.device_ids.append((device_id, timeout))
+        return ("device", device_id, timeout)
 
 
 class _FakeFrida:
@@ -95,4 +100,5 @@ def test_device_resolution_supports_special_hosts() -> None:
 
     assert compat.get_device("local")[0] == "local"
     assert compat.get_device("usb")[0] == "usb"
+    assert compat.get_device("usb", device_id="emulator-5554") == ("device", "emulator-5554", 5000)
     assert compat.get_device("127.0.0.1:27042") == ("remote", "127.0.0.1:27042")

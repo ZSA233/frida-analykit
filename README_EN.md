@@ -122,7 +122,8 @@ Notes:
 - `--repl` opens `ptpython` and exposes `device`, `session`, `script`, and `config`.
 - `--verbose` prints the actual adb/npm subprocess commands, exit codes, and captured stdout/stderr so you can diagnose mismatches between expected and observed device state.
 - `server.host` also supports `local` and `usb` shortcuts in addition to `host:port`.
-- `doctor --config` reads `config.yml`, checks the device-side `server.servername`, reports the detected server version, and shows the resolved asset arch for the current device ABI.
+- `server.device` pins the target device serial; `doctor`, `spawn`, `attach`, and the `server` subcommands all prefer it so multi-device setups do not drift onto the wrong target.
+- `doctor --config` reads `config.yml`, shows the configured `server.device` and resolved adb target, checks the device-side `server.servername`, reports the detected server version, and shows the resolved asset arch for the current device ABI.
 - `server boot` does not kill an existing remote `frida-server` by default. If a matching process is already running, the command fails and points you to `server stop` or `server boot --force-restart`.
 - `server stop` is the supported cleanup path. It succeeds even when no matching remote process is running, and still attempts to remove the configured adb forward.
 - `server install` supports two sources: `--version` downloads from GitHub with progress output, while `--local-server` pushes a local executable or `.xz` archive. Version-based installs prefer `--version`, then `server.version`, then the installed Python `frida` version. Downloaded archives are cached locally and reused.
@@ -175,7 +176,7 @@ cd my-agent
 npm install
 ```
 
-The generated `package.json` depends on the matching `@zsa233/frida-analykit-agent` version from npmjs, so a normal `npm install` is enough. No `.npmrc` or extra token is required.
+The generated `package.json` pins the exact `@zsa233/frida-analykit-agent` version that matches the current CLI release on npmjs, so a normal `npm install` is enough. No `.npmrc` or extra token is required.
 
 ### 3. Customize The Agent
 

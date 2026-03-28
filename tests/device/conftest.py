@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shlex
 import subprocess
 import sys
 import textwrap
@@ -126,14 +127,22 @@ class DeviceHelpers:
         pytest.fail(f"timed out waiting for `{package}` to start")
 
     def pidof_remote_server(self, *, timeout: int = 30) -> int | None:
-        result = self.adb_run(["shell", "su", "-c", f"pidof {DEFAULT_REMOTE_SERVERNAME}"], timeout=timeout)
-        if result.returncode != 0:
-            return None
-        output = result.stdout.strip()
-        if not output:
-            return None
-        token = output.split()[0]
-        return int(token) if token.isdigit() else None
+        commands = [
+            ["shell", shlex.join(("sh", "-c", f"pidof {DEFAULT_REMOTE_SERVERNAME}"))],
+            ["shell", shlex.join(("su", "0", "sh", "-c", f"pidof {DEFAULT_REMOTE_SERVERNAME}"))],
+            ["shell", shlex.join(("su", "root", "sh", "-c", f"pidof {DEFAULT_REMOTE_SERVERNAME}"))],
+            ["shell", shlex.join(("su", "-c", f"pidof {DEFAULT_REMOTE_SERVERNAME}"))],
+        ]
+        for command in commands:
+            result = self.adb_run(command, timeout=timeout)
+            if result.returncode != 0:
+                continue
+            output = result.stdout.strip()
+            if not output:
+                continue
+            token = output.split()[0]
+            return int(token) if token.isdigit() else None
+        return None
 
     def wait_for_remote_server_pid(self, *, timeout: int = 30) -> int:
         deadline = time.monotonic() + timeout
@@ -377,4 +386,3 @@ def booted_device_workspace(
         yield workspace
     finally:
         device_helpers.stop_boot_process(process, workspace.config_path)
-
