@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 from click.testing import CliRunner
 
+from frida_analykit._version import __version__
 from frida_analykit.cli import cli
 from frida_analykit.config import AppConfig
 from frida_analykit.dev_env import DevEnvError, ManagedEnv
@@ -188,6 +189,16 @@ def test_gen_dev_creates_v2_workspace(tmp_path: Path) -> None:
 
 def test_default_agent_package_spec_maps_python_rc_to_npm_rc() -> None:
     assert default_agent_package_spec("2.0.0rc1") == "2.0.0-rc.1"
+
+
+def test_cli_version_option_reports_installed_version() -> None:
+    runner = CliRunner()
+
+    result = runner.invoke(cli, ["--version"])
+
+    assert result.exit_code == 0, result.output
+    assert __version__ in result.output
+    assert "frida-analykit" in result.output
 
 
 def test_env_group_prints_help_when_no_subcommand() -> None:
