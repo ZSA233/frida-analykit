@@ -29,7 +29,7 @@ Python 包只通过 GitHub 仓库 / GitHub Release 分发，不发布到 PyPI。
 推荐直接用 `uv` 安装：
 
 ```sh
-uv tool install "git+https://github.com/ZSA233/frida-analykit@v2.0.3"
+uv tool install "git+https://github.com/ZSA233/frida-analykit@v2.0.5"
 ```
 
 如果你希望锁定到某个精确 Frida 版本，推荐在独立环境里显式安装：
@@ -38,7 +38,7 @@ uv tool install "git+https://github.com/ZSA233/frida-analykit@v2.0.3"
 uv venv .venv-frida-17.8.2
 uv pip install --python .venv-frida-17.8.2/bin/python \
   "frida==17.8.2" \
-  "git+https://github.com/ZSA233/frida-analykit@v2.0.3"
+  "git+https://github.com/ZSA233/frida-analykit@v2.0.5"
 ```
 
 也可以用内置环境管理来维护多套 Frida 版本环境：
@@ -188,21 +188,25 @@ import { help } from "@zsa233/frida-analykit-agent/helper"
 import "@zsa233/frida-analykit-agent/process"
 import { JNIEnv } from "@zsa233/frida-analykit-agent/jni"
 import { SSLTools } from "@zsa233/frida-analykit-agent/ssl"
+import { Libssl } from "@zsa233/frida-analykit-agent/native/libssl"
 
 setImmediate(() => {
   console.log("pid =", Process.id)
-  console.log("api level =", help.androidGetApiLevel())
+  console.log("api level =", help.runtime.androidApiLevel())
   console.log("env =", JNIEnv.$handle)
   console.log("ssl guesses =", SSLTools.guess().length)
   console.log("maps =", proc.loadProcMap().items.length)
+  console.log("libssl module =", Libssl.$getModule().name)
 })
 ```
 
 当前导入边界：
 
 - `@zsa233/frida-analykit-agent/rpc` 只安装最小 RPC / REPL 基础
+- 包根 `@zsa233/frida-analykit-agent` 现在也是瘦入口，只导出 `config/helper/process` 这类轻量基础能力
+- `bridges`、`jni`、`ssl`、`elf`、`native/libssl`、`native/libc` 都需要显式 subpath import
 - 它不会再自动 import `help`、`proc`、`JNIEnv`、`SSLTools`、`ElfTools`、`Libssl`
-- 只有在你自己的 `index.ts` 中显式 import 对应 capability 后，这些能力才会进入 bundle，并出现在 RPC eval context
+- 只有在你自己的 `index.ts` 中显式 import 对应 capability 后，这些能力才会进入 bundle，并出现在 RPC eval context 中
 
 这意味着 `_agent.js` 的体积主要由你的显式导入面决定，而不是被 `/rpc` 默认拖重。
 

@@ -17,19 +17,19 @@
 
 ### 分支与版本状态
 
-- 当前工作分支：`release/v2.0.3`
+- 当前工作分支：`release/v2.0.5`
 - 当前版本真源：`release-version.toml`
-- 当前声明发布版本：`2.0.2`
+- 当前声明发布版本：`2.0.4`
 - 当前声明发布通道：`stable`
-- 当前 Python 包版本：`src/frida_analykit/_version.py` 中为 `2.0.2`
-- 当前根 `package.json` 版本：`2.0.2`
-- 当前 npm runtime 包 `@zsa233/frida-analykit-agent` 版本：`2.0.2`
+- 当前 Python 包版本：`src/frida_analykit/_version.py` 中为 `2.0.4`
+- 当前根 `package.json` 版本：`2.0.4`
+- 当前 npm runtime 包 `@zsa233/frida-analykit-agent` 版本：`2.0.4`
 
 需要特别记录的一点：
 
-- 分支名已经进入 `release/v2.0.3`，但版本真源仍然是 `2.0.2 stable`。
-- 这意味着仓库 HEAD 已经包含了 post-`v2.0.2` 的持续变更，但正式版本号尚未切换到 `2.0.3`。
-- 后续如果要进行 release 收束，需要先确认届时究竟是发布 `v2.0.3`，还是继续在 `2.0.2` 线上做文档修订。
+- 分支名已经进入 `release/v2.0.5`，但版本真源仍然是 `2.0.4 stable`。
+- 这意味着仓库 HEAD 已经包含了 post-`v2.0.4` 的持续变更，但正式版本号尚未切换到 `2.0.5`。
+- 后续如果要进行 release 收束，需要先确认届时究竟是发布 `v2.0.5`，还是继续在 `2.0.4` 线上做文档修订。
 
 ### 当前已存在的 v2 tag
 
@@ -256,10 +256,26 @@ Python 侧目前已经有一套 RPC message / handler 体系。
 
 当前私有 agent 单测 suite 已至少包括：
 
+- `helper_core`
+- `helper_runtime`
 - `jni_env_wrappers`
 - `jni_member_facade`
 - `jni_member_facade_arrays`
 - `jni_member_facade_nonvirtual`
+
+其中 `helper_core` 当前专门覆盖：
+
+- `LoggerState`
+- `BatchSender`
+- `ProgressNotify` 的注入式 sender
+- `help` facade alias 与 grouped API 对齐
+
+其中 `helper_runtime` 当前专门覆盖：
+
+- `help.fs.getLogFile(...)` 的本地文件回归
+- `help.proc.readMaps()` / `readCmdline()`
+- `help.mem.scan(...)` 与 `withReadableRange(...)`
+- `help.runtime.androidApiLevel()` / `newBatchSender(...)`
 
 其中 `jni_member_facade` 当前专门覆盖：
 
@@ -446,11 +462,8 @@ Python 侧目前已经有一套 RPC message / handler 体系。
 
 ### 12. npm runtime 已暴露的能力面
 
-`@zsa233/frida-analykit-agent` 当前已经导出：
+`@zsa233/frida-analykit-agent` 的包根 `.` 当前已经收成瘦入口，只导出轻量基础能力：
 
-- `Java`
-- `ObjC`
-- `Swift`
 - `Config`
 - `LogLevel`
 - `setGlobalProperties`
@@ -461,10 +474,6 @@ Python 侧目前已经有一套 RPC message / handler 体系。
 - `LoggerState`
 - `FileHelper`
 - `proc`
-- `JNIEnv`
-- `SSLTools`
-- `ElfTools`
-- `Libssl`
 
 当前还新增了一组显式 capability subpath，供轻量 bundle 按需导入：
 
@@ -475,7 +484,8 @@ Python 侧目前已经有一套 RPC message / handler 体系。
 - `@zsa233/frida-analykit-agent/jni`
 - `@zsa233/frida-analykit-agent/ssl`
 - `@zsa233/frida-analykit-agent/elf`
-- `@zsa233/frida-analykit-agent/libssl`
+- `@zsa233/frida-analykit-agent/native/libssl`
+- `@zsa233/frida-analykit-agent/native/libc`
 
 当前 runtime 的定位不是“只有一个 rpc shim”，而是已经开始积累逆向辅助能力，尤其包括：
 
@@ -483,14 +493,41 @@ Python 侧目前已经有一套 RPC message / handler 体系。
 - process/maps helper
 - SSL/BoringSSL 相关 helper
 - ELF 解析与辅助工具
+- native lib binding helper
 - RPC 作用域调用支持
+
+当前 helper 也已经从大静态类重构为分组 facade。主线接口现在是：
+
+- `help.log.debug/info/warn/error`
+- `help.progress.create(tag)`
+- `help.fs.read/readText/write/open/save/getLogFile/joinPath/isFilePath`
+- `help.proc.readMaps/readCmdline/getFdLink/getFileStreamLink`
+- `help.mem.scan/withReadableRange/withReadablePages/backtrace/downAlign/upAlign/pageStart/pageEnd`
+- `help.runtime.assert/send/setOutputDir/getOutputDir/getDataDir/androidApiLevel/newBatchSender`
+
+当前仍保留的 flat alias 只包括：
+
+- `help.$debug`
+- `help.$info`
+- `help.$warn`
+- `help.$error`
+- `help.assert`
+- `help.$send`
 
 其中有一个本轮需要特别强调的导入边界变化：
 
 - `@zsa233/frida-analykit-agent/rpc` 现在只安装最小 RPC / REPL 基础能力
 - 它不再为了 REPL / eval context 自动 import `JNIEnv`、`SSLTools`、`ElfTools`、`Libssl`、`help`、`proc`
+- 包根 `@zsa233/frida-analykit-agent` 也不再承担 capability barrel；它不会再顺手导出 `Java`、`JNIEnv`、`SSLTools`、`ElfTools`、`Libssl`
 - 这些能力只有在用户自己的 `index.ts` 中显式 import 对应 capability 模块后，才会进入 bundle 并出现在 RPC eval context 中
 - 这使得 `_agent.js` 的体积主要由用户的显式导入面决定，而不是被 `/rpc` 默认拖重
+
+当前 `native/*` 家族的职责边界也已经明确：
+
+- `ssl` 负责高层 hook / workflow，如 `SSLTools` 与 `BoringSSL`
+- `native/libssl` 负责 `Libssl` 这类低层符号绑定
+- `native/libc` 负责 `Libc` / `libc`
+- RPC eval context 会按需暴露 `Libssl` 与 `Libc`，前提仍然是用户已经显式 import 对应模块
 
 当前 `JNIEnv` 之上已经有一层 JNI member facade，当前已完成第一阶段基础访问面与第二阶段 nonvirtual slice，定位是“显式 `sig` 驱动的高层访问面”，主要特征如下：
 
@@ -557,6 +594,7 @@ const after = pointClass.$getField(point, "x", "I").toInt();
 
 - 正式 public entry 仍保留包根 `@zsa233/frida-analykit-agent`
 - 同时新增了一组显式 capability subpath 与副入口 `@zsa233/frida-analykit-agent/rpc`
+- `@zsa233/frida-analykit-agent/libssl` 已退出主线 public shape，迁移到 `@zsa233/frida-analykit-agent/native/libssl`
 - 不再通过 `./*` 通配子路径默认暴露内部实现文件
 - 这意味着内部 `jni/*`、`elf/*`、`net/*` 等文件形态可以继续重构，但不再承诺作为公开导入面兼容
 
@@ -730,18 +768,13 @@ script:
 - 不发布到 PyPI
 - 通过 GitHub 仓库 / GitHub Release 分发
 
-README 当前示例仍然展示通过 git tag 安装，例如：
+README 当前主线示例应展示通过 git tag 安装，例如：
 
 ```sh
-uv tool install "git+https://github.com/ZSA233/frida-analykit@v2.0.0"
+uv tool install "git+https://github.com/ZSA233/frida-analykit@v2.0.5"
 ```
 
-但这条示例当前存在文档漂移问题：
-
-- 仓库版本真源已经是 `2.0.2`
-- README 安装示例仍停留在 `v2.0.0`
-
-这应当被记录为后续 README 收束时必须处理的事项。
+这轮 release 收束目标是把根 README / README_EN 的安装示例统一到 `v2.0.5`。
 
 ### npm runtime
 
@@ -943,16 +976,16 @@ docs/                              release 相关文档
 
 上面最后一点是基于当前分支与提交状态的推断：
 
-- 当前分支名为 `release/v2.0.3`
-- 但版本真源仍是 `2.0.2`
+- 当前分支名为 `release/v2.0.5`
+- 但版本真源仍是 `2.0.4`
 
 ## 当前文档差异与下次 README 收束提醒
 
 这些内容不一定都应该直接进入对外 `README.md`，但必须在收束时被重新检查：
 
-- `README.md` 当前安装示例仍然写的是 `v2.0.0`，与当前版本真源 `2.0.2` 不一致。
+- `README.md` 当前安装示例应与目标发布版本 `2.0.5` 保持一致。
 - `README.md` 已覆盖主线能力，但对 `watch` 独立命令、RPC/REPL 深层能力、repo-local env 与 global env 的区别仍可继续优化。
-- 当前仓库 HEAD 处于 `release/v2.0.3` 分支，但版本真源尚未切换，这会影响后续 release 文案该写成“当前 stable”还是“下一版准备中”。
+- 当前仓库 HEAD 处于 `release/v2.0.5` 分支，但版本真源尚未切换，这会影响后续 release 文案该写成“当前 stable”还是“下一版准备中”。
 - `README.md` 面向对外说明时，应保持主线清晰；但在收束时不要遗漏：
   - v2 的双产物定位
   - TS 工作区是主线开发模式

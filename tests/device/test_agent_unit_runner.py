@@ -161,6 +161,8 @@ def test_agent_unit_runner_reports_jni_wrapper_suite_on_device(
     assert "list_agent_unit_suites" in exports
     assert "run_agent_unit_suite" in exports
     assert suites == [
+        "helper_core",
+        "helper_runtime",
         "jni_env_wrappers",
         "jni_member_facade",
         "jni_member_facade_arrays",
@@ -191,6 +193,8 @@ def test_agent_unit_runner_reports_member_facade_suite_on_device(
     result = payload["result"]
 
     assert suites == [
+        "helper_core",
+        "helper_runtime",
         "jni_env_wrappers",
         "jni_member_facade",
         "jni_member_facade_arrays",
@@ -220,6 +224,8 @@ def test_agent_unit_runner_reports_array_member_facade_suite_on_device(
     result = payload["result"]
 
     assert suites == [
+        "helper_core",
+        "helper_runtime",
         "jni_env_wrappers",
         "jni_member_facade",
         "jni_member_facade_arrays",
@@ -249,6 +255,8 @@ def test_agent_unit_runner_reports_nonvirtual_member_facade_suite_on_device(
     result = payload["result"]
 
     assert suites == [
+        "helper_core",
+        "helper_runtime",
         "jni_env_wrappers",
         "jni_member_facade",
         "jni_member_facade_arrays",
@@ -257,5 +265,67 @@ def test_agent_unit_runner_reports_nonvirtual_member_facade_suite_on_device(
     assert result["suite"] == "jni_member_facade_nonvirtual"
     assert result["failed"] == 0
     assert result["passed"] >= 2
+    for case in result["cases"]:
+        assert case["ok"] is True, case
+
+
+@pytest.mark.device
+def test_agent_unit_runner_reports_helper_core_suite_on_device(
+    device_helpers: 'DeviceHelpers',
+    booted_device_agent_unit_workspace,
+    running_device_agent_unit_app_pid: int,
+) -> None:
+    payload = _run_agent_unit_probe(
+        device_helpers,
+        booted_device_agent_unit_workspace,
+        "helper_core",
+        pid=running_device_agent_unit_app_pid,
+    )
+
+    suites = payload["suites"]
+    result = payload["result"]
+
+    assert suites == [
+        "helper_core",
+        "helper_runtime",
+        "jni_env_wrappers",
+        "jni_member_facade",
+        "jni_member_facade_arrays",
+        "jni_member_facade_nonvirtual",
+    ]
+    assert result["suite"] == "helper_core"
+    assert result["failed"] == 0
+    assert result["passed"] >= 4
+    for case in result["cases"]:
+        assert case["ok"] is True, case
+
+
+@pytest.mark.device
+def test_agent_unit_runner_reports_helper_runtime_suite_on_device(
+    device_helpers: 'DeviceHelpers',
+    booted_device_agent_unit_workspace,
+    running_device_agent_unit_app_pid: int,
+) -> None:
+    payload = _run_agent_unit_probe(
+        device_helpers,
+        booted_device_agent_unit_workspace,
+        "helper_runtime",
+        pid=running_device_agent_unit_app_pid,
+    )
+
+    suites = payload["suites"]
+    result = payload["result"]
+
+    assert suites == [
+        "helper_core",
+        "helper_runtime",
+        "jni_env_wrappers",
+        "jni_member_facade",
+        "jni_member_facade_arrays",
+        "jni_member_facade_nonvirtual",
+    ]
+    assert result["suite"] == "helper_runtime"
+    assert result["failed"] == 0
+    assert result["passed"] >= 5
     for case in result["cases"]:
         assert case["ok"] is True, case

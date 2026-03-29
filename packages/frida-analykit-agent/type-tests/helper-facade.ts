@@ -1,0 +1,61 @@
+import { BatchSender, FileHelper, LoggerState, ProgressNotify, help } from "../src/helper/index.js";
+
+declare const base: NativePointer;
+
+const logState: LoggerState = new LoggerState(2);
+const progress: ProgressNotify = help.progress.create("helper");
+const batchSender: BatchSender = help.runtime.newBatchSender("helper");
+const logfile: FileHelper = help.fs.getLogFile("/tmp/helper.log", "a");
+const joinedPath: string = help.fs.joinPath("/tmp", "helper.log");
+const isPath: boolean = help.fs.isFilePath("/tmp/helper.log");
+const mapsText: string = help.proc.readMaps();
+const cmdlineText: string = help.proc.readCmdline();
+const fdLink: string | null = help.proc.getFdLink(1);
+const apiLevel: number = help.runtime.androidApiLevel();
+const outputDir: string = help.runtime.getOutputDir();
+const dataDir: string = help.runtime.getDataDir();
+const matches: MemoryScanMatch[] = help.mem.scan({ base, size: 0x40 }, "41 42", { limit: 0x10 });
+const pageStartValue: number = help.mem.pageStart(0x1234);
+const pageEndValue: number = help.mem.pageEnd(0x1234);
+const alignedDown: number = help.mem.downAlign(17, 4);
+const alignedUp: number = help.mem.upAlign(17, 4);
+
+help.$debug("debug");
+help.$info("info");
+help.$warn("warn");
+help.$error("error");
+help.assert(true);
+help.$send({ ok: true });
+help.log.debug("debug");
+help.log.info("info");
+help.log.warn("warn");
+help.log.error("error");
+help.fs.write("/tmp/helper.txt", "ok");
+help.mem.withReadableRange(base, 8, (makeReadable, makeRecovery) => {
+    makeReadable();
+    makeRecovery();
+});
+help.mem.withReadablePages(base, Process.pageSize, () => false);
+help.mem.backtrace();
+batchSender.send({ hello: "world" });
+batchSender.rpcResponse();
+progress.notify({ stage: "ok" });
+progress.log("helper", "ok");
+logfile.writeLine("hello");
+logfile.flush();
+logfile.close();
+
+void logState;
+void joinedPath;
+void isPath;
+void mapsText;
+void cmdlineText;
+void fdLink;
+void apiLevel;
+void outputDir;
+void dataDir;
+void matches;
+void pageStartValue;
+void pageEndValue;
+void alignedDown;
+void alignedUp;

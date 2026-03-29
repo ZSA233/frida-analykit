@@ -1,4 +1,4 @@
-import { Java } from "@zsa233/frida-analykit-agent";
+import { Java } from "@zsa233/frida-analykit-agent/bridges";
 
 import type { AgentUnitCase, AgentUnitCaseResult, AgentUnitSuiteResult } from "./types.js";
 

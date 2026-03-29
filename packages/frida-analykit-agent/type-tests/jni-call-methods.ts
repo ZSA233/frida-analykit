@@ -6,9 +6,9 @@ import type {
     JniNonvirtualVariadicMethod,
     JniStaticArrayMethod,
     JniStaticVariadicMethod,
-} from "../src/capabilities/jni/call_methods.js";
-import type { JniEnv } from "../src/capabilities/jni/env.js";
-import type { jbyte, jclass, jdouble, jfloat, jlong, jmethodID, jobject, jvalue } from "../src/capabilities/jni/refs.js";
+} from "../src/jni/call_methods.js";
+import type { JniEnv } from "../src/jni/env.js";
+import type { jbyte, jclass, jdouble, jfloat, jlong, jmethodID, jobject, jvalue } from "../src/jni/refs.js";
 
 type Assert<T extends true> = T;
 

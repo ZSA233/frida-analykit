@@ -20,14 +20,20 @@ npx frida-compile index.ts -o _agent.js -c
 
 ## 入口设计
 
-当前包暴露两类入口：
+包根 `@zsa233/frida-analykit-agent` 现在是瘦入口，只导出轻量基础能力：
 
-- 包根 `@zsa233/frida-analykit-agent`
-  兼容 / 便利入口，会带出较完整的 runtime 能力面
-- capability subpath
-  推荐用于轻量 bundle，由你的显式 import 决定最终 `_agent.js` 体积
+- `Config`
+- `LogLevel`
+- `setGlobalProperties`
+- `help`
+- `NativePointerObject`
+- `BatchSender`
+- `ProgressNotify`
+- `LoggerState`
+- `FileHelper`
+- `proc`
 
-当前显式 subpath：
+较重 capability 改为显式 subpath：
 
 - `@zsa233/frida-analykit-agent/rpc`
 - `@zsa233/frida-analykit-agent/config`
@@ -37,7 +43,8 @@ npx frida-compile index.ts -o _agent.js -c
 - `@zsa233/frida-analykit-agent/jni`
 - `@zsa233/frida-analykit-agent/ssl`
 - `@zsa233/frida-analykit-agent/elf`
-- `@zsa233/frida-analykit-agent/libssl`
+- `@zsa233/frida-analykit-agent/native/libssl`
+- `@zsa233/frida-analykit-agent/native/libc`
 
 当前不再提供 `./*` 通配 export，也不承诺任何内部深层路径兼容。
 
@@ -57,6 +64,7 @@ import "@zsa233/frida-analykit-agent/rpc"
 - `SSLTools`
 - `ElfTools`
 - `Libssl`
+- `Libc`
 
 如果你没有在自己的 `index.ts` 里显式 import 对应 capability，它们就不会被打进 `_agent.js`，也不会自动出现在 RPC eval context 中。
 
@@ -81,50 +89,51 @@ import "@zsa233/frida-analykit-agent/process"
 import { JNIEnv } from "@zsa233/frida-analykit-agent/jni"
 import { SSLTools } from "@zsa233/frida-analykit-agent/ssl"
 import { ElfTools } from "@zsa233/frida-analykit-agent/elf"
-import { Libssl } from "@zsa233/frida-analykit-agent/libssl"
+import { Libssl } from "@zsa233/frida-analykit-agent/native/libssl"
+import { libc } from "@zsa233/frida-analykit-agent/native/libc"
 
 setImmediate(() => {
-  console.log("api level =", help.androidGetApiLevel())
+  console.log("api level =", help.runtime.androidApiLevel())
   console.log("maps =", proc.loadProcMap().items.length)
+  console.log("cmdline =", help.proc.readCmdline())
   console.log("jni env =", JNIEnv.$handle)
   console.log("ssl guesses =", SSLTools.guess().length)
   console.log("main module =", ElfTools.findModuleByName("libc.so")?.name)
-  console.log("libssl =", Libssl.name)
+  console.log("libssl module =", Libssl.$getModule().name)
+  console.log("cwd =", libc.getcwd())
 })
 ```
 
-如果你更偏好便利入口，包根仍然可用：
+如果你只需要轻量基础能力，包根可以直接用：
 
 ```ts
 import "@zsa233/frida-analykit-agent/rpc"
-import { help, proc, JNIEnv, SSLTools } from "@zsa233/frida-analykit-agent"
+import { help, proc } from "@zsa233/frida-analykit-agent"
 ```
 
 但当前推荐主线是显式 subpath，因为它更容易控制 bundle 体积和导入边界。
 
-## 已暴露能力面
+## Helper Facade
 
-包根 `.` 当前导出：
+`helper` 现在主线是分组 facade：
 
-- `Java`
-- `ObjC`
-- `Swift`
-- `Config`
-- `LogLevel`
-- `setGlobalProperties`
-- `help`
-- `NativePointerObject`
-- `BatchSender`
-- `ProgressNotify`
-- `LoggerState`
-- `FileHelper`
-- `proc`
-- `JNIEnv`
-- `SSLTools`
-- `ElfTools`
-- `Libssl`
+- `help.log.debug/info/warn/error`
+- `help.progress.create(tag)`
+- `help.fs.read/readText/write/open/save/getLogFile/joinPath/isFilePath`
+- `help.proc.readMaps/readCmdline/getFdLink/getFileStreamLink`
+- `help.mem.scan/withReadableRange/withReadablePages/backtrace/downAlign/upAlign/pageStart/pageEnd`
+- `help.runtime.assert/send/setOutputDir/getOutputDir/getDataDir/androidApiLevel/newBatchSender`
 
-其中较重要的 capability：
+当前仍保留的 flat alias 只包括：
+
+- `help.$debug`
+- `help.$info`
+- `help.$warn`
+- `help.$error`
+- `help.assert`
+- `help.$send`
+
+## Capability 概览
 
 - `jni`
   提供 `JNIEnv`、JNI wrapper、string helper，以及显式 `sig` 驱动的 member facade
@@ -132,10 +141,12 @@ import { help, proc, JNIEnv, SSLTools } from "@zsa233/frida-analykit-agent"
   提供 `SSLTools`、`BoringSSL` 与 SSL keylog/定位相关能力
 - `elf`
   提供 `ElfTools` 和 ELF 解析辅助能力
+- `native/libssl`
+  提供 `Libssl` 低层符号绑定；导入后会注册全局 `Libssl`
+- `native/libc`
+  提供 `Libc` / `libc`；导入后会注册全局 `Libc`
 - `process`
   导入后会注册全局 `proc`
-- `libssl`
-  导入后会注册全局 `Libssl`
 
 ## RPC / REPL 行为
 
@@ -144,12 +155,13 @@ import { help, proc, JNIEnv, SSLTools } from "@zsa233/frida-analykit-agent"
 当前行为要点：
 
 - RPC eval context 每次执行时都会动态读取 `globalThis`
-- 因此 capability 是否可见，取决于你是否已经在 `index.ts` 里显式 import 了对应模块
+- capability 是否可见，取决于你是否已经在 `index.ts` 里显式 import 了对应模块
 - `/rpc` 不再默认拖入整套 runtime，只保留最小基础
+- `Libssl` / `Libc` 也遵循同样的按需可见规则
 
 ## JNI 能力说明
 
-`@zsa233/frida-analykit-agent/jni` 当前除了 `JNIEnv` wrapper 外，还提供了第一阶段 member facade：
+`@zsa233/frida-analykit-agent/jni` 当前除了 `JNIEnv` wrapper 外，还提供 member facade：
 
 - `jobject.$method(name, sig)` / `.$call(name, sig, ...args)`
 - `jobject.$field(name, sig)` / `.$getField(...)` / `.$setField(...)`

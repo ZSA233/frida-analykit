@@ -158,16 +158,37 @@
 
 - 本项目有两份面向发布的 README，且它们职责不同。
 - 根文档 `README.md`：面向整体用户，描述整个 `frida-analykit` 项目的主线使用方式、CLI 接口、环境准备、接入流程和整体发布物。
+- `README_EN.md`：是根文档 `README.md` 的英文翻译版本，不是独立事实来源；其内容应跟随根 `README.md` 的最终收束结果同步翻译。
 - 包文档 `packages/frida-analykit-agent/README.md`：面向 npmjs 上的 `@zsa233/frida-analykit-agent` 用户，只描述这个包自身的定位、安装、导出能力、使用方式和与 agent 工作区直接相关的细节。
 - `PRE_README.MD` 是这两份 README 共同的中间来源文档，用于持续记录当前项目真实支持的能力、接口、使用方式、约束、版本变化和文档差异。
 - 只要本次改动影响了用户可见能力、CLI 行为、配置方式、接入流程、runtime 导出、限制条件、使用示例或对外接口，AI agent 就应先更新 `PRE_README.MD`，而不是直接零散修改两份 README。
 - 不要把 `README.md` 和 `packages/frida-analykit-agent/README.md` 视为同一份文档的不同副本；两者面向的发布面和读者不同，不应机械同步。
 - 当用户要求进行整体项目的 release 文档收束时，应基于 `PRE_README.MD` 更新根 `README.md`，并保持其更简洁、更稳定、更偏接口与主流程说明。
+- 当根 `README.md` 收束完成后，应再同步更新 `README_EN.md`，保持其作为根文档的英文翻译版本，而不是重新发明另一套结构或事实口径。
 - 当用户要求进行 npm 包发布或 npmjs 文档收束时，应基于 `PRE_README.MD` 更新 `packages/frida-analykit-agent/README.md`，并只提取与 `@zsa233/frida-analykit-agent` 这个包直接相关的信息。
 - 根 `README.md` 不应过度展开包内部细节、runtime 细枝末节或只对 npm 包读者有意义的说明。
 - `packages/frida-analykit-agent/README.md` 不应承担整个项目的环境管理、远端 `frida-server` 运维、完整 CLI 工作流或整体 release 说明；只有当这些信息与该包的实际使用直接相关时才简要提及。
 - release 前更新任一 README 时，不要只是把最近几次变更机械拼接进去；应先判断目标发布面，再统一检查主线是否清晰、章节顺序是否合理、术语是否一致、示例是否准确。
 - 如果某项能力已经实现，但尚未写入 `PRE_README.MD`，则视为文档维护未完成；如果已经写入 `PRE_README.MD`，但尚未收束到对应 README，则说明还处于中间态，而不是最终对外态。
+
+## 发版流程规则
+
+- AI agent 不应在用户只说“发版一下”时自行猜测目标版本号；只有当用户明确给出要发布的版本号后，才进入正式发版准备。
+- 如果用户给出的目标版本号与当前线上已发布版本不构成合理递增关系，或与当前仓库版本状态明显不一致，AI agent 必须先向用户确认版本号是否说错，再继续。
+- 用户明确提出发版请求后，正式版本切换、打 tag、dry-run、发布前检查之前，必须先基于 `PRE_README.MD` 收束文档。
+- 该文档收束顺序应为：
+- 先更新根 `README.md`
+- 再同步更新 `README_EN.md` 作为根文档的英文翻译
+- 再按需要更新 `packages/frida-analykit-agent/README.md`
+- 文档收束完成后，才进入 `docs/release-process.md` 中定义的 release-version、preflight、RC、stable、publish 流程。
+- 发版过程中如果发现严重 bug，不要立刻边发版边修；应立即停止当前发版流程，明确告诉用户问题出在哪里、影响范围是什么、发布风险是否高。
+- “严重 bug” 包括但不限于：
+- 会导致产物无法安装或无法运行
+- 会导致关键主流程失效
+- 会导致 release 契约、版本元数据或发布物明显错误
+- 会导致高风险兼容性回退或公开错误发布
+- 如果只是很小的 bug，且当前仍处于 RC 阶段，可以在 RC 分支修复后继续验证和发布；必要时递增 `rc.N` 重新走 RC 流程。
+- stable 提升阶段应尽量避免再混入功能性修复；如果在 stable 提升时发现问题严重到影响发布正确性，应停止 stable 发布，而不是临时补丁后直接继续。
 
 ## 结合本项目的落地建议
 
@@ -191,3 +212,6 @@
 - 测试是否 patch 在真实拥有者上，而不是隐藏私有面？
 - 如果这次改动影响了用户可见行为，`PRE_README.MD` 是否已经同步更新？
 - 如果需要收束 README，这次目标到底是根 `README.md` 还是 `packages/frida-analykit-agent/README.md`？
+- 如果这是一次发版操作，用户是否已经明确给出目标版本号？
+- 如果这是一次发版操作，目标版本号是否与当前已发布版本形成合理递增？
+- 如果这是一次发版操作，`README.md`、`README_EN.md` 和 `packages/frida-analykit-agent/README.md` 是否已经先基于 `PRE_README.MD` 完成收束？
