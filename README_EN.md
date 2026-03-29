@@ -29,7 +29,7 @@ The Python package is distributed through GitHub only, not PyPI.
 Recommended installation with `uv`:
 
 ```sh
-uv tool install "git+https://github.com/ZSA233/frida-analykit@v2.0.0"
+uv tool install "git+https://github.com/ZSA233/frida-analykit@v2.0.5"
 ```
 
 This path keeps the tag-defined range dependency from `pyproject.toml`, which is currently `frida>=16.5.9,<18`.
@@ -40,7 +40,7 @@ If you prefer an exact Frida pin, install into an isolated environment explicitl
 uv venv .venv-frida-17.8.2
 uv pip install --python .venv-frida-17.8.2/bin/python \
   "frida==17.8.2" \
-  "git+https://github.com/ZSA233/frida-analykit@v2.0.0"
+  "git+https://github.com/ZSA233/frida-analykit@v2.0.5"
 ```
 
 If `frida --version` does not change after you switch environments, you are usually still hitting a global `frida-tools` binary. Managed environments install `frida`, `frida-tools`, and `frida-analykit` together so the shell command follows the selected environment.
@@ -190,13 +190,19 @@ Then you can extend it:
 
 ```ts
 import "@zsa233/frida-analykit-agent/rpc"
-import { help, proc, SSLTools } from "@zsa233/frida-analykit-agent"
+import { help } from "@zsa233/frida-analykit-agent/helper"
+import "@zsa233/frida-analykit-agent/process"
+import { SSLTools } from "@zsa233/frida-analykit-agent/ssl"
+import { Libssl } from "@zsa233/frida-analykit-agent/native/libssl"
 
 console.log("pid =", Process.id)
-console.log("api level =", help.androidGetApiLevel())
-console.log("maps =", proc.mapCache.length)
+console.log("api level =", help.runtime.androidApiLevel())
+console.log("maps =", proc.loadProcMap().items.length)
+console.log("libssl module =", Libssl.$getModule().name)
 SSLTools.guess().forEach((item) => console.log(item))
 ```
+
+`@zsa233/frida-analykit-agent/rpc` only installs the minimal RPC / REPL runtime. The package root `@zsa233/frida-analykit-agent` is also slim now, so heavier capability areas such as `bridges`, `jni`, `ssl`, `elf`, `native/libssl`, and `native/libc` should be imported through explicit subpaths.
 
 ### 4. Let The CLI Drive The Compile Flow
 

@@ -6,7 +6,7 @@ import type {
     JniConstructorAccessor,
     JniUnboundInstanceField,
     JniUnboundInstanceMethod,
-} from "../src/capabilities/jni/members.js";
+} from "../src/jni/members.js";
 import type {
     jclass,
     jintArray,
@@ -16,8 +16,8 @@ import type {
     jmethodID,
     jobject,
     jobjectArray,
-} from "../src/capabilities/jni/refs.js";
-import type { jstring } from "../src/capabilities/jni/strings.js";
+} from "../src/jni/refs.js";
+import type { jstring } from "../src/jni/strings.js";
 
 declare const obj: jobject;
 declare const clazz: jclass;

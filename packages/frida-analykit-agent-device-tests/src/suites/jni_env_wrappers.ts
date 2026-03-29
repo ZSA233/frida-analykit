@@ -1,4 +1,4 @@
-import { JNIEnv } from "@zsa233/frida-analykit-agent";
+import { JNIEnv } from "@zsa233/frida-analykit-agent/jni";
 
 import { readCharElementsText, readUtf16PointerText } from "../readers.js";
 import { assertCondition, runJavaSuite } from "../support.js";

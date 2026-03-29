@@ -1,5 +1,5 @@
-import type { JniCallArgument } from "../src/capabilities/jni/call_methods.js";
-import type { JniEnv } from "../src/capabilities/jni/env.js";
+import type { JniCallArgument } from "../src/jni/call_methods.js";
+import type { JniEnv } from "../src/jni/env.js";
 import type {
     JniClassMemberLookupMethod,
     JniDecodeJObjectMethod,
@@ -7,7 +7,7 @@ import type {
     JniObjectReference,
     JniRuntimeMethods,
     JniStringReleaseMethod,
-} from "../src/capabilities/jni/runtime_methods.js";
+} from "../src/jni/runtime_methods.js";
 import type {
     jclass,
     jfieldID,
@@ -17,8 +17,8 @@ import type {
     jmethodID,
     jobject,
     MirrorObject,
-} from "../src/capabilities/jni/refs.js";
-import type { jstring } from "../src/capabilities/jni/strings.js";
+} from "../src/jni/refs.js";
+import type { jstring } from "../src/jni/strings.js";
 
 type Assert<T extends true> = T;
 

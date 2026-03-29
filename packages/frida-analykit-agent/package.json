@@ -31,44 +31,48 @@
       "default": "./dist/index.js"
     },
     "./config": {
-      "types": "./dist/config.d.ts",
-      "default": "./dist/config.js"
+      "types": "./dist/config/index.d.ts",
+      "default": "./dist/config/index.js"
     },
     "./bridges": {
-      "types": "./dist/bridges.d.ts",
-      "default": "./dist/bridges.js"
+      "types": "./dist/bridges/index.d.ts",
+      "default": "./dist/bridges/index.js"
     },
     "./helper": {
-      "types": "./dist/helper.d.ts",
-      "default": "./dist/helper.js"
+      "types": "./dist/helper/index.d.ts",
+      "default": "./dist/helper/index.js"
     },
     "./process": {
-      "types": "./dist/process.d.ts",
-      "default": "./dist/process.js"
+      "types": "./dist/process/index.d.ts",
+      "default": "./dist/process/index.js"
     },
     "./jni": {
-      "types": "./dist/jni.d.ts",
-      "default": "./dist/jni.js"
+      "types": "./dist/jni/index.d.ts",
+      "default": "./dist/jni/index.js"
     },
     "./ssl": {
-      "types": "./dist/ssl.d.ts",
-      "default": "./dist/ssl.js"
+      "types": "./dist/ssl/index.d.ts",
+      "default": "./dist/ssl/index.js"
     },
     "./elf": {
-      "types": "./dist/elf.d.ts",
-      "default": "./dist/elf.js"
+      "types": "./dist/elf/index.d.ts",
+      "default": "./dist/elf/index.js"
     },
-    "./libssl": {
-      "types": "./dist/libssl.d.ts",
-      "default": "./dist/libssl.js"
+    "./native/libssl": {
+      "types": "./dist/native/libssl/index.d.ts",
+      "default": "./dist/native/libssl/index.js"
+    },
+    "./native/libc": {
+      "types": "./dist/native/libc/index.d.ts",
+      "default": "./dist/native/libc/index.js"
     },
     "./rpc": {
-      "types": "./dist/rpc.d.ts",
-      "default": "./dist/rpc.js"
+      "types": "./dist/rpc/index.d.ts",
+      "default": "./dist/rpc/index.js"
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.build.json",
     "prepack": "npm run build",
     "check": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.type-tests.json --noEmit"
   },

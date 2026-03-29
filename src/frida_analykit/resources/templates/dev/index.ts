@@ -5,6 +5,8 @@ import "${agent_package_name}/rpc"
 // For example:
 // import { help } from "${agent_package_name}/helper"
 // import "${agent_package_name}/process"
+// import { Java } from "${agent_package_name}/bridges"
 // import { JNIEnv } from "${agent_package_name}/jni"
 // import { SSLTools } from "${agent_package_name}/ssl"
 // import { ElfTools } from "${agent_package_name}/elf"
+// import { Libssl } from "${agent_package_name}/native/libssl"
