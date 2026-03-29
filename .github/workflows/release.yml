@@ -75,6 +75,16 @@ jobs:
           node-version: "22.14.0"
           registry-url: "https://registry.npmjs.org"
 
+      - name: Upgrade npm for trusted publishing
+        shell: bash
+        run: npm install -g npm@latest
+
+      - name: Print publish tool versions
+        shell: bash
+        run: |
+          node --version
+          npm --version
+
       - name: Download release bundle
         uses: actions/download-artifact@v4
         with:
@@ -101,4 +111,4 @@ jobs:
             printf '  %s\n' "${tgz_files[@]}" >&2
             exit 1
           fi
-          npm publish "${tgz_files[0]}" --access public --provenance
+          npm publish "${tgz_files[0]}" --access public
