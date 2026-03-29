@@ -1,0 +1,273 @@
+from __future__ import annotations
+
+import importlib.util
+import json
+import sys
+from types import SimpleNamespace
+from pathlib import Path
+
+import pytest
+from frida_analykit.config import AppConfig
+
+
+def _load_device_helpers_type():
+    conftest_path = Path(__file__).resolve().parent / "device" / "conftest.py"
+    spec = importlib.util.spec_from_file_location("frida_analykit_device_conftest", conftest_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module.DeviceHelpers
+
+
+DeviceHelpers = _load_device_helpers_type()
+
+
+def test_agent_device_tests_package_build_uses_dedicated_build_config() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    package_json = json.loads(
+        (repo_root / "packages/frida-analykit-agent-device-tests/package.json").read_text(encoding="utf-8")
+    )
+    build_config = json.loads(
+        (repo_root / "packages/frida-analykit-agent-device-tests/tsconfig.build.json").read_text(encoding="utf-8")
+    )
+
+    assert package_json["private"] is True
+    assert package_json["main"] == "./dist/index.js"
+    assert package_json["types"] == "./dist/index.d.ts"
+    assert "dist/**/*" in package_json["files"]
+    assert package_json["exports"]["."]["default"] == "./dist/index.js"
+    assert package_json["exports"]["."]["types"] == "./dist/index.d.ts"
+    assert package_json["peerDependencies"]["@zsa233/frida-analykit-agent"] == "*"
+    assert package_json["scripts"]["build"] == "tsc -p tsconfig.build.json"
+    assert package_json["scripts"]["prepack"] == "npm run build"
+    assert build_config["extends"] == "./tsconfig.json"
+    assert build_config["compilerOptions"]["noEmit"] is False
+    assert build_config["compilerOptions"]["outDir"] == "./dist"
+    assert build_config["compilerOptions"]["declaration"] is True
+
+
+def test_device_helpers_workspace_accepts_extra_dependencies(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    helpers = DeviceHelpers(
+        repo_root=repo_root,
+        env={},
+        serial=None,
+        python_executable=Path("/usr/bin/python3"),
+        frida_version="16.6.6",
+    )
+
+    helpers.create_ts_workspace_with_local_runtime(
+        tmp_path,
+        app=None,
+        agent_package_spec="file:/tmp/runtime.tgz",
+        extra_dependencies={
+            "@zsa233/frida-analykit-agent-device-tests": "file:/tmp/device-tests.tgz",
+        },
+    )
+
+    package_json = json.loads((tmp_path / "package.json").read_text(encoding="utf-8"))
+    assert package_json["dependencies"]["@zsa233/frida-analykit-agent"] == "file:/tmp/runtime.tgz"
+    assert (
+        package_json["dependencies"]["@zsa233/frida-analykit-agent-device-tests"]
+        == "file:/tmp/device-tests.tgz"
+    )
+
+
+def test_device_helpers_pack_local_package_uses_workspace_local_npm_cache(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    helpers = DeviceHelpers(
+        repo_root=repo_root,
+        env={"BASE_ENV": "1"},
+        serial=None,
+        python_executable=Path("/usr/bin/python3"),
+        frida_version="16.6.6",
+    )
+
+    package_dir = repo_root / "packages" / "frida-analykit-agent-device-tests"
+    expected_tarball = tmp_path / "device-tests.tgz"
+    expected_tarball.write_text("stub", encoding="utf-8")
+    captured: dict[str, object] = {}
+
+    def fake_run(*args, **kwargs):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return SimpleNamespace(
+            returncode=0,
+            stdout="device-tests.tgz\n",
+            stderr="",
+        )
+
+    pack_globals = DeviceHelpers.pack_local_package.__globals__
+    monkeypatch.setitem(pack_globals, "shutil", SimpleNamespace(which=lambda name: "/usr/bin/npm"))
+    monkeypatch.setitem(pack_globals, "subprocess", SimpleNamespace(run=fake_run))
+
+    tarball = helpers.pack_local_package(tmp_path, package_dir)
+
+    assert tarball == expected_tarball
+    assert captured["args"] == (["npm", "pack", str(package_dir)],)
+    env = captured["kwargs"]["env"]
+    assert env["BASE_ENV"] == "1"
+    assert env["npm_config_cache"] == str(tmp_path / ".npm-cache")
+    assert Path(env["npm_config_cache"]).is_dir()
+
+
+def test_device_helpers_workspace_config_keeps_server_device_nested(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    helpers = DeviceHelpers(
+        repo_root=repo_root,
+        env={},
+        serial="SERIAL123",
+        python_executable=Path("/usr/bin/python3"),
+        frida_version="16.6.6",
+    )
+
+    workspace = helpers.create_workspace(tmp_path, app="com.example.demo")
+    config = AppConfig.from_yaml(workspace.config_path)
+
+    assert config.app == "com.example.demo"
+    assert config.server.device == "SERIAL123"
+    assert config.agent.stdout == workspace.log_path
+    assert config.jsfile == workspace.agent_path
+
+
+def test_device_helpers_ts_workspace_config_keeps_server_device_nested(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    helpers = DeviceHelpers(
+        repo_root=repo_root,
+        env={},
+        serial="SERIAL123",
+        python_executable=Path("/usr/bin/python3"),
+        frida_version="16.6.6",
+    )
+
+    workspace = helpers.create_ts_workspace_with_local_runtime(
+        tmp_path,
+        app="com.example.demo",
+        agent_package_spec="file:/tmp/runtime.tgz",
+    )
+    config = AppConfig.from_yaml(workspace.config_path)
+
+    assert config.app == "com.example.demo"
+    assert config.server.device == "SERIAL123"
+    assert config.agent.stdout == workspace.log_path
+    assert config.jsfile == workspace.root / "_agent.js"
+
+
+def test_device_helpers_launch_app_falls_back_to_am_start_when_monkey_fails() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    helpers = DeviceHelpers(
+        repo_root=repo_root,
+        env={},
+        serial=None,
+        python_executable=Path("/usr/bin/python3"),
+        frida_version="16.6.6",
+    )
+
+    calls: list[list[str]] = []
+    monkey_result = SimpleNamespace(returncode=1, stdout="", stderr="Unable to connect to window manager")
+    resolve_result = SimpleNamespace(
+        returncode=0,
+        stdout="priority=0 preferredOrder=0 match=0x108000 specificIndex=-1 isDefault=true\ncom.demo/.MainActivity\n",
+        stderr="",
+    )
+    fallback_result = SimpleNamespace(returncode=0, stdout="Starting: Intent { cmp=com.demo/.MainActivity }\n", stderr="")
+
+    def fake_adb_run(args: list[str], *, timeout: int = 30):
+        calls.append(args)
+        if args[:3] == ["shell", "monkey", "-p"]:
+            return monkey_result
+        if args[:4] == ["shell", "cmd", "package", "resolve-activity"]:
+            return resolve_result
+        if args[:4] == ["shell", "am", "start", "-W"]:
+            return fallback_result
+        raise AssertionError(f"unexpected adb args: {args}")
+
+    helpers.adb_run = fake_adb_run  # type: ignore[method-assign]
+
+    result = helpers.launch_app("com.demo")
+
+    assert result is fallback_result
+    assert calls == [
+        ["shell", "monkey", "-p", "com.demo", "-c", "android.intent.category.LAUNCHER", "1"],
+        ["shell", "cmd", "package", "resolve-activity", "--brief", "com.demo"],
+        ["shell", "am", "start", "-W", "-n", "com.demo/.MainActivity"],
+    ]
+
+
+def test_device_helpers_find_attachable_app_pid_keeps_polling_after_nonzero_launch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    helpers = DeviceHelpers(
+        repo_root=repo_root,
+        env={},
+        serial=None,
+        python_executable=Path("/usr/bin/python3"),
+        frida_version="16.6.6",
+    )
+
+    launch_result = SimpleNamespace(returncode=1, stdout="", stderr="transient launch failure")
+    pid_sequence = iter([None, 4321])
+    probe_calls: list[int] = []
+
+    monkeypatch.setattr(helpers, "launch_app", lambda package, timeout=30: launch_result)
+    monkeypatch.setattr(helpers, "pidof_app", lambda package, timeout=30: next(pid_sequence))
+    monkeypatch.setattr(
+        helpers,
+        "_probe_attachable_pid",
+        lambda pid, host="127.0.0.1:27042", timeout=10: (probe_calls.append(pid), None)[1],
+    )
+    monkeypatch.setattr(DeviceHelpers.find_attachable_app_pid.__globals__["time"], "sleep", lambda _: None)
+
+    pid, error = helpers.find_attachable_app_pid("com.demo", timeout=10)
+
+    assert pid == 4321
+    assert error is None
+    assert probe_calls == [4321]
+
+
+def test_device_helpers_find_attachable_app_pid_retries_launch_until_pid_is_visible(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    helpers = DeviceHelpers(
+        repo_root=repo_root,
+        env={},
+        serial=None,
+        python_executable=Path("/usr/bin/python3"),
+        frida_version="16.6.6",
+    )
+
+    launch_results = iter([
+        SimpleNamespace(returncode=1, stdout="", stderr="activity manager unavailable"),
+        SimpleNamespace(returncode=0, stdout="started", stderr=""),
+    ])
+    pid_sequence = iter([None, None, None, 5678])
+    probe_calls: list[int] = []
+    launch_calls: list[str] = []
+
+    monkeypatch.setattr(
+        helpers,
+        "launch_app",
+        lambda package, timeout=30: (launch_calls.append(package), next(launch_results))[1],
+    )
+    monkeypatch.setattr(helpers, "pidof_app", lambda package, timeout=30: next(pid_sequence))
+    monkeypatch.setattr(
+        helpers,
+        "_probe_attachable_pid",
+        lambda pid, host="127.0.0.1:27042", timeout=10: (probe_calls.append(pid), None)[1],
+    )
+    monotonic_values = iter([0.0, 0.0, 0.5, 2.5, 2.5, 5.0, 5.0, 5.5, 5.5])
+    monkeypatch.setattr(DeviceHelpers.find_attachable_app_pid.__globals__["time"], "monotonic", lambda: next(monotonic_values))
+    monkeypatch.setattr(DeviceHelpers.find_attachable_app_pid.__globals__["time"], "sleep", lambda _: None)
+
+    pid, error = helpers.find_attachable_app_pid("com.demo", timeout=10)
+
+    assert pid == 5678
+    assert error is None
+    assert launch_calls == ["com.demo", "com.demo"]
+    assert probe_calls == [5678]

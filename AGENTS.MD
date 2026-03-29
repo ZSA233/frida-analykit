@@ -156,15 +156,18 @@
 
 ## README 文档维护规则
 
-- `README.md` 是面向 release 的对外说明文档，不应在每次新增需求、功能迭代或接口微调后立即做零散增删。
-- 频繁直接修改 `README.md`，容易让文档逐步失去整体视角，导致结构不连贯、内容不准确、条目堆叠失衡。
-- 因此本项目使用 `PRE_README.MD` 作为实时维护的中间文档；它比 `README.md` 更详细，负责记录当前版本实际支持的能力、接口、使用方式、约束和变更结果。
-- 只要本次改动影响了用户可见能力、CLI 行为、配置方式、接入流程、限制条件、使用示例或对外接口，AI agent 就应同步更新 `PRE_README.MD`。
-- 不要跳过 `PRE_README.MD` 直接把零散变更写进 `README.md`，除非用户明确要求做 release 前的 README 收束。
-- `PRE_README.MD` 可以更细、更全、更偏工作文档；`README.md` 应更稳定、更精炼、更连贯。
-- 当用户明确发出 release 前收束 `README.md` 的要求时，AI agent 应以 `PRE_README.MD` 为主要依据，从整体结构出发重新整理 `README.md`。
-- release 前更新 `README.md` 时，不要只是把最近几次变更机械拼接进去；应统一检查文档主线、章节顺序、术语一致性、示例准确性和叙述连贯性。
-- 如果某项能力已经实现，但尚未写入 `PRE_README.MD`，则视为文档维护未完成。
+- 本项目有两份面向发布的 README，且它们职责不同。
+- 根文档 `README.md`：面向整体用户，描述整个 `frida-analykit` 项目的主线使用方式、CLI 接口、环境准备、接入流程和整体发布物。
+- 包文档 `packages/frida-analykit-agent/README.md`：面向 npmjs 上的 `@zsa233/frida-analykit-agent` 用户，只描述这个包自身的定位、安装、导出能力、使用方式和与 agent 工作区直接相关的细节。
+- `PRE_README.MD` 是这两份 README 共同的中间来源文档，用于持续记录当前项目真实支持的能力、接口、使用方式、约束、版本变化和文档差异。
+- 只要本次改动影响了用户可见能力、CLI 行为、配置方式、接入流程、runtime 导出、限制条件、使用示例或对外接口，AI agent 就应先更新 `PRE_README.MD`，而不是直接零散修改两份 README。
+- 不要把 `README.md` 和 `packages/frida-analykit-agent/README.md` 视为同一份文档的不同副本；两者面向的发布面和读者不同，不应机械同步。
+- 当用户要求进行整体项目的 release 文档收束时，应基于 `PRE_README.MD` 更新根 `README.md`，并保持其更简洁、更稳定、更偏接口与主流程说明。
+- 当用户要求进行 npm 包发布或 npmjs 文档收束时，应基于 `PRE_README.MD` 更新 `packages/frida-analykit-agent/README.md`，并只提取与 `@zsa233/frida-analykit-agent` 这个包直接相关的信息。
+- 根 `README.md` 不应过度展开包内部细节、runtime 细枝末节或只对 npm 包读者有意义的说明。
+- `packages/frida-analykit-agent/README.md` 不应承担整个项目的环境管理、远端 `frida-server` 运维、完整 CLI 工作流或整体 release 说明；只有当这些信息与该包的实际使用直接相关时才简要提及。
+- release 前更新任一 README 时，不要只是把最近几次变更机械拼接进去；应先判断目标发布面，再统一检查主线是否清晰、章节顺序是否合理、术语是否一致、示例是否准确。
+- 如果某项能力已经实现，但尚未写入 `PRE_README.MD`，则视为文档维护未完成；如果已经写入 `PRE_README.MD`，但尚未收束到对应 README，则说明还处于中间态，而不是最终对外态。
 
 ## 结合本项目的落地建议
 
@@ -187,3 +190,4 @@
 - 是否引入了动态入口、包根转发、或不透明依赖中转层？
 - 测试是否 patch 在真实拥有者上，而不是隐藏私有面？
 - 如果这次改动影响了用户可见行为，`PRE_README.MD` 是否已经同步更新？
+- 如果需要收束 README，这次目标到底是根 `README.md` 还是 `packages/frida-analykit-agent/README.md`？

@@ -125,6 +125,15 @@ export enum JNI_VT {
     GetLongField = 101,
     GetFloatField = 102,
     GetDoubleField = 103,
+    SetObjectField = 104,
+    SetBooleanField = 105,
+    SetByteField = 106,
+    SetCharField = 107,
+    SetShortField = 108,
+    SetIntField = 109,
+    SetLongField = 110,
+    SetFloatField = 111,
+    SetDoubleField = 112,
 
     GetStaticMethodID = 113,
     
@@ -178,6 +187,15 @@ export enum JNI_VT {
     GetStaticLongField = 151,
     GetStaticFloatField = 152,
     GetStaticDoubleField = 153,
+    SetStaticObjectField = 154,
+    SetStaticBooleanField = 155,
+    SetStaticByteField = 156,
+    SetStaticCharField = 157,
+    SetStaticShortField = 158,
+    SetStaticIntField = 159,
+    SetStaticLongField = 160,
+    SetStaticFloatField = 161,
+    SetStaticDoubleField = 162,
 
     GetStringLength = 164,
     GetStringChars = 165,
@@ -212,6 +230,7 @@ export enum JNI_VT {
     UnregisterNatives = 216,
 
     GetStringCritical = 224,
+    ReleaseStringCritical = 225,
     DeleteWeakGlobalRef = 227,
     ExceptionCheck = 228,
 }

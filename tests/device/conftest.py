@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import shlex
 import shutil
@@ -85,6 +86,35 @@ class DeviceHelpers:
         self.python_executable = python_executable
         self.frida_version = frida_version
 
+    def _write_workspace_config(
+        self,
+        config_path: Path,
+        *,
+        app: str | None,
+        jsfile: str | Path,
+        log_path: Path,
+    ) -> None:
+        lines = [
+            f"app: {app or ''}",
+            f"jsfile: {jsfile}",
+            "server:",
+            f"  host: {DEFAULT_REMOTE_HOST}",
+            f"  servername: {DEFAULT_REMOTE_SERVERNAME}",
+            f"  version: {self.frida_version}",
+        ]
+        if self.serial:
+            lines.append(f"  device: {self.serial}")
+        lines.extend(
+            [
+                "agent:",
+                f"  stdout: {log_path}",
+                f"  stderr: {log_path}",
+                "script:",
+                "  nettools: {}",
+            ]
+        )
+        config_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
     def adb_run(self, args: list[str], *, timeout: int = 30) -> subprocess.CompletedProcess[str]:
         command = ["adb"]
         if self.serial:
@@ -111,11 +141,40 @@ class DeviceHelpers:
             timeout=timeout,
         )
 
+    def _resolve_launcher_component(self, package: str, *, timeout: int = 30) -> str | None:
+        result = self.adb_run(
+            ["shell", "cmd", "package", "resolve-activity", "--brief", package],
+            timeout=timeout,
+        )
+        if result.returncode != 0:
+            return None
+        for line in reversed(result.stdout.splitlines()):
+            value = line.strip()
+            if "/" in value:
+                return value
+        return None
+
     def launch_app(self, package: str, *, timeout: int = 30) -> subprocess.CompletedProcess[str]:
-        return self.adb_run(
+        launch = self.adb_run(
             ["shell", "monkey", "-p", package, "-c", "android.intent.category.LAUNCHER", "1"],
             timeout=timeout,
         )
+        if launch.returncode == 0:
+            return launch
+
+        launcher_component = self._resolve_launcher_component(package, timeout=timeout)
+        if launcher_component is None:
+            return launch
+
+        # Some devices sporadically reject `monkey` with a transient window-manager error even though
+        # the launcher activity is resolvable. Fall back to `am start` so device suites stay deterministic.
+        fallback = self.adb_run(
+            ["shell", "am", "start", "-W", "-n", launcher_component],
+            timeout=timeout,
+        )
+        if fallback.returncode == 0:
+            return fallback
+        return launch
 
     def force_stop_app(self, package: str, *, timeout: int = 30) -> subprocess.CompletedProcess[str]:
         return self.adb_run(["shell", "am", "force-stop", package], timeout=timeout)
@@ -190,15 +249,18 @@ class DeviceHelpers:
             if attach_error is None:
                 return existing_pid, None
 
-        launch = self.launch_app(package, timeout=30)
-        if launch.returncode != 0:
-            return None, launch.stderr.strip() or launch.stdout.strip() or "failed to launch app"
-
         deadline = time.monotonic() + timeout
         last_error: str | None = None
+        next_launch_time = time.monotonic()
         while time.monotonic() < deadline:
             pid = self.pidof_app(package, timeout=5)
             if pid is None:
+                now = time.monotonic()
+                if now >= next_launch_time:
+                    launch = self.launch_app(package, timeout=30)
+                    if launch.returncode != 0:
+                        last_error = launch.stderr.strip() or launch.stdout.strip() or "failed to launch app"
+                    next_launch_time = now + 2
                 time.sleep(1)
                 continue
             attach_error = self._probe_attachable_pid(pid, host=host, timeout=10)
@@ -219,27 +281,11 @@ class DeviceHelpers:
         config_path = tmp_path / "config.yml"
         log_path = tmp_path / "logs" / "outerr.log"
         agent_path.write_text(textwrap.dedent(agent_source).strip() + "\n", encoding="utf-8")
-
-        device_line = f"  device: {self.serial}\n" if self.serial else ""
-        app_line = app or ""
-        config_path.write_text(
-            textwrap.dedent(
-                f"""
-                app: {app_line}
-                jsfile: {agent_path}
-                server:
-                  host: {DEFAULT_REMOTE_HOST}
-                  servername: {DEFAULT_REMOTE_SERVERNAME}
-                  version: {self.frida_version}
-                {device_line}agent:
-                  stdout: {log_path}
-                  stderr: {log_path}
-                script:
-                  nettools: {{}}
-                """
-            ).strip()
-            + "\n",
-            encoding="utf-8",
+        self._write_workspace_config(
+            config_path,
+            app=app,
+            jsfile=agent_path,
+            log_path=log_path,
         )
         return DeviceWorkspace(
             root=tmp_path,
@@ -249,13 +295,32 @@ class DeviceHelpers:
         )
 
     def pack_local_agent_runtime(self, tmp_path: Path, *, timeout: int = 300) -> Path:
+        return self.pack_local_package(
+            tmp_path,
+            self.repo_root / "packages" / "frida-analykit-agent",
+            timeout=timeout,
+        )
+
+    def pack_local_package(
+        self,
+        tmp_path: Path,
+        package_dir: Path,
+        *,
+        timeout: int = 300,
+    ) -> Path:
         if shutil.which("npm") is None:
-            pytest.skip("npm is required to pack the local agent runtime")
+            pytest.skip("npm is required to pack the local npm package")
+
+        env = dict(self.env)
+        npm_cache_dir = tmp_path / ".npm-cache"
+        npm_cache_dir.mkdir(parents=True, exist_ok=True)
+        # Use a workspace-local npm cache so device tests do not depend on the host user's global cache state.
+        env["npm_config_cache"] = str(npm_cache_dir)
 
         result = subprocess.run(
-            ["npm", "pack", str(self.repo_root / "packages" / "frida-analykit-agent")],
+            ["npm", "pack", str(package_dir)],
             cwd=tmp_path,
-            env=self.env,
+            env=env,
             capture_output=True,
             text=True,
             check=False,
@@ -263,7 +328,7 @@ class DeviceHelpers:
         )
         if result.returncode != 0:
             pytest.fail(
-                "failed to pack local agent runtime\n"
+                f"failed to pack local npm package `{package_dir}`\n"
                 f"stdout:\n{result.stdout}\n"
                 f"stderr:\n{result.stderr}"
             )
@@ -281,33 +346,25 @@ class DeviceHelpers:
         app: str | None,
         agent_package_spec: str,
         entry_source: str = 'import "@zsa233/frida-analykit-agent/rpc"\n',
+        extra_dependencies: dict[str, str] | None = None,
     ) -> DeviceWorkspace:
         generate_dev_workspace(tmp_path, agent_package_spec=agent_package_spec)
+        if extra_dependencies:
+            package_path = tmp_path / "package.json"
+            package = json.loads(package_path.read_text(encoding="utf-8"))
+            dependencies = package.setdefault("dependencies", {})
+            dependencies.update(extra_dependencies)
+            package_path.write_text(json.dumps(package, indent=2) + "\n", encoding="utf-8")
         (tmp_path / "index.ts").write_text(entry_source, encoding="utf-8")
 
         agent_path = tmp_path / "_agent.js"
         config_path = tmp_path / "config.yml"
         log_path = tmp_path / "logs" / "outerr.log"
-        device_line = f"  device: {self.serial}\n" if self.serial else ""
-        app_line = app or ""
-        config_path.write_text(
-            textwrap.dedent(
-                f"""
-                app: {app_line}
-                jsfile: _agent.js
-                server:
-                  host: {DEFAULT_REMOTE_HOST}
-                  servername: {DEFAULT_REMOTE_SERVERNAME}
-                  version: {self.frida_version}
-                {device_line}agent:
-                  stdout: {log_path}
-                  stderr: {log_path}
-                script:
-                  nettools: {{}}
-                """
-            ).strip()
-            + "\n",
-            encoding="utf-8",
+        self._write_workspace_config(
+            config_path,
+            app=app,
+            jsfile="_agent.js",
+            log_path=log_path,
         )
         return DeviceWorkspace(
             root=tmp_path,

@@ -230,15 +230,54 @@ Python 侧目前已经有一套 RPC message / handler 体系。
 - `script.jsh("Process")` 的 seed path 句柄创建
 - 同步链式调用和 `.value_` 取值
 - `eval_async(...)` + `resolve_async()` 的 Promise-aware 路径
+- 私有 JS 单测包驱动的 `JNIEnv` wrapper 回归路径
 
 当前用于 pre-release 协议校验的真机测试原则：
 
 - 不直接复用脚手架默认发布版 `@zsa233/frida-analykit-agent`
 - 先对当前仓库内 `packages/frida-analykit-agent` 执行 `npm pack`
+- 如需验证 agent 内部单测，还会对 `packages/frida-analykit-agent-device-tests` 执行 `npm pack`
 - 再以 `file:<tarball>` 形式生成临时 TS workspace
 - 最后 build 出新的 `_agent.js` 后再做真机验证
 
 这样真机测试验证的是“当前 Python 工作树 + 当前 agent 工作树”的真实组合，而不是某个已发布版本的历史 bundle。
+
+当前新增了一条专门的 agent 单测运行方式：
+
+- `packages/frida-analykit-agent-device-tests` 是私有 npm package，只供仓库内 `tests/device` 使用
+- 它不会进入正式 runtime 包的 `dependencies` / `exports` / 用户脚手架
+- 真机测试会在临时 workspace 中先导入 `@zsa233/frida-analykit-agent/rpc`
+- 再导入私有测试包并执行 `installAgentUnitRpcExports()`
+- 最后由 Python 侧通过结构化 RPC exports `listAgentUnitSuites()` / `runAgentUnitSuite(name)` 拉起测试并汇总结果
+
+当前私有 agent 单测 suite 已至少包括：
+
+- `jni_env_wrappers`
+- `jni_member_facade`
+- `jni_member_facade_arrays`
+- `jni_member_facade_nonvirtual`
+
+其中 `jni_member_facade` 当前专门覆盖：
+
+- `jobject` / `jclass` 的 member facade 链式调用
+- instance/static method accessor 与 direct shortcut
+- constructor accessor 与 `.$new(...)`
+- instance/static field get 路径，以及 instance field set 路径
+- accessor `withLocal(...)` 的局部引用使用方式
+- unbound accessor 漏传 target 时的 fail-fast 保护
+
+其中 `jni_member_facade_arrays` 当前专门覆盖：
+
+- object array 返回值仍按 JNI local ref 语义管理，而不是误当作 element buffer
+- primitive array 返回值先得到 array ref wrapper，再通过 `.$elements()` / `withElements(...)` 获取 raw buffer
+- array facade 返回值在 `withLocal(...)` 中的自动 `unref` 回归
+
+其中 `jni_member_facade_nonvirtual` 当前专门覆盖：
+
+- `CallNonvirtual*Method` 家族对应的 facade 分派
+- `jobject.$nonvirtualMethod(...)` / `.$nonvirtualCall(...)`
+- `jclass.$nonvirtualMethod(...)` / `.$nonvirtualCall(...)`
+- nonvirtual 路径下 declaring class 暴露与 direct shortcut 回归
 
 当前设备测试额外支持：
 
@@ -431,6 +470,74 @@ Python 侧目前已经有一套 RPC message / handler 体系。
 - ELF 解析与辅助工具
 - RPC 作用域调用支持
 
+当前 `JNIEnv` 之上已经有一层 JNI member facade，当前已完成第一阶段基础访问面与第二阶段 nonvirtual slice，定位是“显式 `sig` 驱动的高层访问面”，主要特征如下：
+
+- `jobject` 支持：
+- `.$method(name, sig)` / `.$call(name, sig, ...args)`
+- `.$nonvirtualMethod(clazz, name, sig)` / `.$nonvirtualCall(clazz, name, sig, ...args)`
+- `.$field(name, sig)` / `.$getField(name, sig)` / `.$setField(name, sig, value)`
+- `.$methodIdFor(name, sig)` / `.$fieldIdFor(name, sig)`
+- `jclass` 支持：
+- `.$method(name, sig)` / `.$call(target, name, sig, ...args)` 用于 unbound instance member
+- `.$nonvirtualMethod(name, sig)` / `.$nonvirtualCall(target, name, sig, ...args)` 用于 unbound nonvirtual instance member
+- `.$staticMethod(name, sig)` / `.$staticCall(name, sig, ...args)`
+- `.$field(name, sig)` / `.$getField(target, name, sig)` / `.$setField(target, name, sig, value)`
+- `.$staticField(name, sig)` / `.$getStaticField(name, sig)` / `.$setStaticField(name, sig, value)`
+- `.$constructor(sig)` / `.$new(sig, ...args)`
+- `.$methodIdFor(name, sig)` / `.$staticMethodIdFor(name, sig)`
+- `.$fieldIdFor(name, sig)` / `.$staticFieldIdFor(name, sig)`
+
+当前这一层的明确约束：
+
+- `sig` 必填，不做 name-only lookup，也不做 overload 猜测
+- 默认返回 JNI wrapper，不自动转 JS primitive / JS string
+- object-like 返回值可按 descriptor 收敛到已有 wrapper，例如 `jstring` / `jclass`
+- 默认仍由调用方手动管理对象生命周期
+- accessor 额外提供 `withLocal(...)`，用于在 callback 作用域内消费局部引用并自动 `unref`
+- nonvirtual facade 仍要求显式传入 declaring class，不做继承链自动推断
+- unbound method accessor 必须显式传入 target，例如 `clazz.$method(...).call(obj)` 与 `clazz.$method(...).withLocal(obj, use, ...args)`
+- unbound field accessor 必须显式传入 target，例如 `clazz.$field(...).get(obj)` / `set(obj, value)` / `withLocal(obj, use)`
+- bound instance accessor 不接受额外 target；`obj.$method(...).withLocal(obj, use)`、`obj.$field(...).get(obj)` 这类写法都是无效调用
+- bound static field accessor 不接受额外 clazz；`clazz.$staticField(...).get(clazz)` / `set(clazz, value)` 这类写法也是无效调用
+
+当前正确写法示例：
+
+```ts
+const xField = pointClass.$field("x", "I");
+const before = xField.get(point).toInt();
+xField.set(point, 1);
+const after = pointClass.$getField(point, "x", "I").toInt();
+```
+
+- 如果调用方绕过了 TypeScript 类型系统，例如使用 `as any` 或纯 JS 入口，runtime guard 仍会保留并直接抛错
+
+当前 JNI wrapper 的数组语义已经明确拆分：
+
+- `jobjectArray` 与 `jbooleanArray` ... `jdoubleArray` 统一表示 JNI array ref，本身仍然是 local/global ref，需要按 ref 生命周期管理
+- `Get*ArrayElements()` 返回的则是独立 raw buffer wrapper，例如 `jintArrayElements` / `jcharArrayElements`
+- primitive array ref 提供 `.$elements()` 与 `withElements(use, mode = 0)`，负责 acquire/release `Get*ArrayElements()` 缓冲区
+- 这两层不能复用同一个 wrapper；否则 array-returning facade 会既泄露 local ref，又把 ref handle 误当 element buffer
+
+当前 `GetStringCritical` 也已回到 JNI 原型语义：
+
+- `JNIEnv.GetStringCritical(javaString)` 返回 `NativePointer`
+- 必须配对 `JNIEnv.ReleaseStringCritical(javaString, chars)`
+- `jstring.toCriticalUTF16String()` 提供了和现有 UTF-16 helper 一致的 acquire/read/release 封装
+- 这里不再直接返回 JS string，因为 critical 区间里 VM 可能 pin 住字符串或阻塞 GC，必须尽快 release
+
+当前需要特别注意一个 breaking change：
+
+- `.$method(name, sig)` 不再返回 low-level `jmethodID`
+- 旧 lookup 语义已经迁移到 `.$methodIdFor(name, sig)`
+- `.$methodID(existingId)` 仍然保留“把已有 `jmethodID` 反射成 `java.lang.reflect.Method` 对象”的旧语义，不受这次 facade 演进影响
+
+当前应特别注意对外边界已经收口：
+
+- 正式 public entry 只保留包根 `@zsa233/frida-analykit-agent`
+- 以及副入口 `@zsa233/frida-analykit-agent/rpc`
+- 不再通过 `./*` 通配子路径默认暴露内部实现文件
+- 这意味着内部 `jni/*`、`elf/*`、`net/*` 等文件形态可以继续重构，但不再承诺作为公开导入面兼容
+
 ### 13. npm runtime 打包约束
 
 当前 `@zsa233/frida-analykit-agent` 的包发布特征：
@@ -439,12 +546,21 @@ Python 侧目前已经有一套 RPC message / handler 体系。
 - 主入口为 `./dist/index.js`
 - types 入口为 `./dist/index.d.ts`
 - `./rpc` 也有独立 export
+- 不再保留 `./*` 通配 export
 - 发布时要求打包真实构建出的 `dist/**/*`
 
 这一点很重要，因为它已经在历史版本中踩过坑：
 
 - 曾出现过 npm 包缺少 `frida-compile` 所依赖 JS 产物的问题
-- 当前测试已显式覆盖 prebuilt runtime export 和 build config 正确性
+- 当前测试已显式覆盖 prebuilt runtime export、显式导出边界和 build config 正确性
+
+当前还新增了一个只给仓库内测试使用的私有 package：
+
+- `@zsa233/frida-analykit-agent-device-tests`
+- `private: true`
+- 主入口同样指向 `dist/index.js`
+- 依赖面只通过 `peerDependencies` 引用 `@zsa233/frida-analykit-agent`
+- 用途是把 agent 内部单测逻辑独立打包给真机测试临时 workspace 使用，而不是让正式 runtime 依赖它
 
 ## 当前配置模型
 
