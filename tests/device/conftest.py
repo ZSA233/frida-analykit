@@ -241,7 +241,7 @@ class DeviceHelpers:
             if pid is not None:
                 return pid
             time.sleep(1)
-        pytest.fail(f"timed out waiting for `{DEFAULT_REMOTE_SERVERNAME}` to appear on the device")
+        raise TimeoutError(f"timed out waiting for `{DEFAULT_REMOTE_SERVERNAME}` to appear on the device")
 
     def wait_until_attachable(self, pid: int, *, host: str = DEFAULT_REMOTE_HOST, timeout: int = 30) -> None:
         deadline = time.monotonic() + timeout
