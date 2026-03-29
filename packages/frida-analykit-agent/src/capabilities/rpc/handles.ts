@@ -15,6 +15,18 @@ export type RPCHandleRef =
 
 export type RPCHandleSpec = RPCHandleRef | string
 
+const RPC_PREVIEW_UNAVAILABLE = Symbol("RPC_PREVIEW_UNAVAILABLE")
+const MAX_RPC_PREVIEW_DEPTH = 3
+const MAX_RPC_PREVIEW_PROPERTIES = 64
+
+type RpcPreviewValue =
+    | null
+    | boolean
+    | number
+    | string
+    | RpcPreviewValue[]
+    | { [key: string]: RpcPreviewValue }
+
 
 export function enumerateObjectProperties(
     specOrSpecs: RPCHandleSpec | Array<RPCHandleSpec>,
@@ -87,37 +99,11 @@ export function materializeArgument(value: any, scopeId: string): any {
 
 
 export function previewRpcValue(value: any): { hasValue: boolean, value: any | null } {
-    if (value === undefined || value === null) {
-        return { hasValue: true, value }
-    }
-
-    switch (typeof value) {
-        case "string":
-        case "number":
-        case "boolean":
-            return { hasValue: true, value }
-        case "bigint":
-        case "function":
-        case "symbol":
-            return { hasValue: false, value: null }
-        default:
-            break
-    }
-
-    if (value instanceof Promise) {
+    const preview = projectRpcPreviewValue(value)
+    if (preview === RPC_PREVIEW_UNAVAILABLE) {
         return { hasValue: false, value: null }
     }
-
-    if (Array.isArray(value) || isPlainObject(value)) {
-        try {
-            JSON.stringify(value)
-            return { hasValue: true, value }
-        } catch (error) {
-            void error
-        }
-    }
-
-    return { hasValue: false, value: null }
+    return { hasValue: true, value: preview }
 }
 
 
@@ -213,6 +199,138 @@ function isPlainObject(value: any): boolean {
     }
     const prototype = Object.getPrototypeOf(value)
     return prototype === Object.prototype || prototype === null
+}
+
+
+function projectRpcPreviewValue(
+    value: any,
+    depth: number = 0,
+    seen: Set<object> = new Set(),
+): RpcPreviewValue | typeof RPC_PREVIEW_UNAVAILABLE {
+    if (value === undefined || value === null) {
+        return value
+    }
+
+    switch (typeof value) {
+        case "string":
+        case "number":
+        case "boolean":
+            return value
+        case "bigint":
+        case "function":
+        case "symbol":
+            return RPC_PREVIEW_UNAVAILABLE
+        default:
+            break
+    }
+
+    if (value instanceof Promise) {
+        return RPC_PREVIEW_UNAVAILABLE
+    }
+
+    if (value instanceof NativePointer || value instanceof Int64 || value instanceof UInt64) {
+        return value.toString()
+    }
+
+    if (depth >= MAX_RPC_PREVIEW_DEPTH) {
+        return cloneJsonValue(value)
+    }
+
+    if (Array.isArray(value) || isPlainObject(value)) {
+        return cloneJsonValue(value)
+    }
+
+    if (typeof value !== "object") {
+        return RPC_PREVIEW_UNAVAILABLE
+    }
+
+    const jsonClone = cloneJsonValue(value)
+    const emptyPlainJsonClone = isPlainObject(jsonClone)
+        && Object.keys(jsonClone as { [key: string]: RpcPreviewValue }).length === 0
+    const shouldSnapshot = jsonClone === RPC_PREVIEW_UNAVAILABLE || emptyPlainJsonClone
+    if (!shouldSnapshot) {
+        return jsonClone
+    }
+
+    if (seen.has(value)) {
+        return RPC_PREVIEW_UNAVAILABLE
+    }
+    seen.add(value)
+    try {
+        // Frida runtime objects like `Module` expose useful getter-backed state
+        // but do not arrive as plain JSON objects. Snapshot a bounded set of
+        // serializable fields so REPL `value_` can inspect them synchronously.
+        const snapshot = snapshotRpcObjectValue(value, depth, seen)
+        if (snapshot !== RPC_PREVIEW_UNAVAILABLE) {
+            return snapshot
+        }
+    } finally {
+        seen.delete(value)
+    }
+    return jsonClone
+}
+
+
+function cloneJsonValue(value: any): RpcPreviewValue | typeof RPC_PREVIEW_UNAVAILABLE {
+    try {
+        const encoded = JSON.stringify(value)
+        if (encoded === undefined) {
+            return RPC_PREVIEW_UNAVAILABLE
+        }
+        return JSON.parse(encoded) as RpcPreviewValue
+    } catch (error) {
+        void error
+        return RPC_PREVIEW_UNAVAILABLE
+    }
+}
+
+
+function snapshotRpcObjectValue(
+    value: object,
+    depth: number,
+    seen: Set<object>,
+): { [key: string]: RpcPreviewValue } | typeof RPC_PREVIEW_UNAVAILABLE {
+    const snapshot: { [key: string]: RpcPreviewValue } = {}
+    const visitedKeys = new Set<string>()
+    let propertyCount = 0
+    let cursor: any = value
+    while (cursor && cursor !== Object.prototype && propertyCount < MAX_RPC_PREVIEW_PROPERTIES) {
+        for (const key of Reflect.ownKeys(cursor)) {
+            if (propertyCount >= MAX_RPC_PREVIEW_PROPERTIES) {
+                break
+            }
+            if (typeof key === "symbol") {
+                continue
+            }
+            const name = String(key)
+            if (name === "constructor" || visitedKeys.has(name)) {
+                continue
+            }
+            visitedKeys.add(name)
+
+            let propertyValue: any
+            try {
+                const descriptor = Reflect.getOwnPropertyDescriptor(cursor, key)
+                if (descriptor?.set && descriptor.get === undefined && !("value" in descriptor)) {
+                    continue
+                }
+                propertyValue = (value as Record<string, unknown>)[name]
+            } catch (error) {
+                void error
+                continue
+            }
+
+            const preview = projectRpcPreviewValue(propertyValue, depth + 1, seen)
+            if (preview === RPC_PREVIEW_UNAVAILABLE) {
+                continue
+            }
+            snapshot[name] = preview
+            propertyCount++
+        }
+        cursor = Object.getPrototypeOf(cursor)
+    }
+
+    return propertyCount > 0 ? snapshot : RPC_PREVIEW_UNAVAILABLE
 }
 
 

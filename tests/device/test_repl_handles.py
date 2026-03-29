@@ -235,6 +235,37 @@ def test_repl_handle_scope_root_sync_call_and_value_on_device(
 
 
 @pytest.mark.device
+def test_repl_handle_projectable_frida_object_value_on_device(
+    device_helpers,
+    booted_device_repl_workspace,
+    running_device_repl_app_pid: int,
+) -> None:
+    payload = _run_repl_probe(
+        device_helpers,
+        booted_device_repl_workspace,
+        """
+        module_value = Process.findModuleByAddress(Process.mainModule.base).value_
+        return {
+            "name": module_value["name"],
+            "path": module_value["path"],
+            "base": module_value["base"],
+            "size": module_value["size"],
+        }
+        """,
+        pid=running_device_repl_app_pid,
+    )
+
+    assert isinstance(payload["name"], str)
+    assert payload["name"]
+    assert isinstance(payload["path"], str)
+    assert payload["path"]
+    assert isinstance(payload["base"], str)
+    assert payload["base"]
+    assert isinstance(payload["size"], int)
+    assert payload["size"] > 0
+
+
+@pytest.mark.device
 def test_repl_handle_async_eval_and_resolve_on_device(
     device_helpers,
     booted_device_repl_workspace,

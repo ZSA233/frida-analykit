@@ -172,6 +172,8 @@ CLI 目前支持两类前端编排动作：
 - 这些 REPL 变量不会在进入 REPL 时立刻触发 RPC enumerate，而是在首次真实使用时才 materialize 成 `script.jsh(name)` 对应句柄。
 - `--repl` 当前已经切到 async ptpython 模式，允许在会话内直接 `await script.eval_async(...)`、`await handle.call_async(...)`、`await handle.resolve_async()`。
 - `script.eval(...)` / `script.eval_async(...)` 当前会优先把输入当作“表达式”求值，因此像 `Process.arch`、`Promise.resolve(Process.arch)` 这类 REPL 常见写法会直接返回表达式结果；如果输入本身是多语句 body，则会回退到原始函数体执行方式。
+- `JsHandle.value_` 当前除了 primitive/plain-object 结果外，也会尽量把 Frida 侧常见 getter-backed 对象投影成有界的 JSON-safe snapshot，例如 `Process.mainModule.value_`、`Process.findModuleByName("libc.so").value_` 这类模块对象读取路径。
+- 如果某个句柄值仍无法被投影到 RPC bridge，则 `value_` 仍会报 `RPCValueUnavailableError`；这种场景应继续使用链式句柄访问，或显式 `await handle.resolve_async()`。
 - REPL 句柄与 scope 相关调用在首次使用前会先做一次 agent runtime 协议握手。
 - 如果加载到设备上的 `_agent.js` 仍是旧 bundle，Python 侧会直接抛出 `RPC runtime mismatch`，提示用户重新用当前仓库打包本地 runtime 并 rebuild `_agent.js`，而不是再把底层 Frida `TypeError: value is not iterable` 直接暴露给用户。
 - 如果未开启 `--repl`，CLI 默认保持会话存活，适合持续收集日志和数据。
