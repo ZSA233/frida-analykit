@@ -276,6 +276,49 @@ def test_device_helpers_pidof_remote_server_falls_back_to_server_basename() -> N
     assert any("pidof frida-server" in command[-1] for command in calls)
 
 
+def test_device_helpers_start_boot_process_retries_when_remote_pid_is_not_visible_yet(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    helpers = DeviceHelpers(
+        repo_root=repo_root,
+        env={},
+        serial=None,
+        python_executable=Path("/usr/bin/python3"),
+        frida_version="16.6.6",
+    )
+    config_path = repo_root / "tests" / "fixtures" / "dummy-config.yml"
+    wait_calls: list[int] = []
+
+    class FakeProcess:
+        stdout = None
+        stderr = None
+
+        def poll(self):
+            return None
+
+    fake_process = FakeProcess()
+
+    monkeypatch.setattr(DeviceHelpers.start_boot_process.__globals__["subprocess"], "Popen", lambda *args, **kwargs: fake_process)
+    monkeypatch.setattr(helpers, "_probe_remote_ready", lambda host="127.0.0.1:27042": None)
+
+    def fake_wait_for_remote_server_pid(*, timeout: int = 30):
+        wait_calls.append(timeout)
+        if len(wait_calls) == 1:
+            raise TimeoutError("pid not visible yet")
+        return 18390
+
+    monkeypatch.setattr(helpers, "wait_for_remote_server_pid", fake_wait_for_remote_server_pid)
+    monotonic_values = iter([0.0, 0.0, 1.0, 1.0, 2.0])
+    monkeypatch.setattr(DeviceHelpers.start_boot_process.__globals__["time"], "monotonic", lambda: next(monotonic_values))
+    monkeypatch.setattr(DeviceHelpers.start_boot_process.__globals__["time"], "sleep", lambda _: None)
+
+    process = helpers.start_boot_process(config_path, force_restart=True, timeout=10)
+
+    assert process is fake_process
+    assert wait_calls == [5, 5]
+
+
 def test_device_helpers_find_attachable_app_pid_keeps_polling_after_nonzero_launch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -121,11 +121,14 @@ make release-install-check RELEASE_TAG=vX.Y.Z
 
 ```sh
 gh release create vX.Y.Z dist/*.tar.gz dist/*.whl *.tgz
-npm publish ./zsa233-frida-analykit-agent-X.Y.Z.tgz --access public --provenance
+npm publish ./zsa233-frida-analykit-agent-X.Y.Z.tgz --access public
 ```
 
 6. 首发成功后，到 npm 包设置里把 trusted publisher 绑定到 `.github/workflows/release.yml`。
 7. 从下一个 stable 开始，直接走自动化 stable 发布流程。
+
+自动 stable 发布的 `publish` job 需要使用支持 Trusted Publishing 的较新 npm CLI。
+仓库 workflow 会在发布前升级 npm；如果看到带 provenance 的 `npm publish` 仍返回误导性的 `E404`，先检查 job 实际使用的 npm 版本，而不是先怀疑 package scope 或 tarball 内容。
 
 ## RC 流程
 
@@ -251,7 +254,7 @@ gh release create vX.Y.Z-rc.N dist/*.tar.gz dist/*.whl *.tgz --prerelease
 stable npm 发布：
 
 ```sh
-npm publish ./zsa233-frida-analykit-agent-X.Y.Z.tgz --access public --provenance
+npm publish ./zsa233-frida-analykit-agent-X.Y.Z.tgz --access public
 ```
 
 RC 不发布 npm。
