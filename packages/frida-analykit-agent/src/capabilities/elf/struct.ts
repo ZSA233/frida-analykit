@@ -4,7 +4,7 @@ import {
     binaryReadU8, binaryReadU16,
     binaryReadU32, binaryReadS32,
     binaryReadU64, binaryReadS64,
-} from "../utils/utils.js"
+} from "../../utils/utils.js"
 
 
 
@@ -268,4 +268,3 @@ export enum DyntabTag {
     DT_RELRENT = 0x6fffe003,
     DT_RELRCOUNT = 0x6fffe005,
 }
-

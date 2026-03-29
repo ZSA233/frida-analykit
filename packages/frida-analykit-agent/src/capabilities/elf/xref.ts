@@ -1,8 +1,8 @@
 
 
-import { help, MemoryPage, NativePointerObject } from "../helper.js"
-import { ScanAdrpCMod } from "../cmodule/scan_adrp.js"
-import { setGlobalProperties } from "../config.js";
+import { help, MemoryPage, NativePointerObject } from "../../helper.js"
+import { ScanAdrpCMod } from "../../cmodule/scan_adrp.js"
+import { setGlobalProperties } from "../../config.js";
 import { InstructionSequence } from "./insn.js";
 
 

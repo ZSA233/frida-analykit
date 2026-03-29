@@ -1,4 +1,4 @@
-import { NativePointerObject } from "../helper.js";
+import { NativePointerObject } from "../../helper.js";
 import { JniEnvBase } from "./factory.js";
 import {
     jboolean,

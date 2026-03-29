@@ -1,4 +1,4 @@
-import { setGlobalProperties } from "../config.js";
+import { setGlobalProperties } from "../../config.js";
 import { createCallMethods, type JniCallMethods } from "./call_methods.js";
 import {
     type ExtendedJavaEnv,

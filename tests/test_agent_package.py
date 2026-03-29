@@ -15,6 +15,14 @@ def test_agent_package_exports_prebuilt_runtime() -> None:
     assert "dist/**/*" in package_json["files"]
     assert package_json["exports"]["."]["default"] == "./dist/index.js"
     assert package_json["exports"]["."]["types"] == "./dist/index.d.ts"
+    assert package_json["exports"]["./config"]["default"] == "./dist/config.js"
+    assert package_json["exports"]["./bridges"]["default"] == "./dist/bridges.js"
+    assert package_json["exports"]["./helper"]["default"] == "./dist/helper.js"
+    assert package_json["exports"]["./process"]["default"] == "./dist/process.js"
+    assert package_json["exports"]["./jni"]["default"] == "./dist/jni.js"
+    assert package_json["exports"]["./ssl"]["default"] == "./dist/ssl.js"
+    assert package_json["exports"]["./elf"]["default"] == "./dist/elf.js"
+    assert package_json["exports"]["./libssl"]["default"] == "./dist/libssl.js"
     assert package_json["exports"]["./rpc"]["default"] == "./dist/rpc.js"
     assert package_json["exports"]["./rpc"]["types"] == "./dist/rpc.d.ts"
     assert "./*" not in package_json["exports"]

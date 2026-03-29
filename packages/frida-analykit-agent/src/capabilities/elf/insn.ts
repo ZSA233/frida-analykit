@@ -1,5 +1,5 @@
-import { setGlobalProperties } from "../config.js"
-import { NativePointerObject } from "../helper.js"
+import { setGlobalProperties } from "../../config.js"
+import { NativePointerObject } from "../../helper.js"
 
 
 

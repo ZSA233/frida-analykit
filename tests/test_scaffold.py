@@ -8,12 +8,13 @@ import pytest
 from click.testing import CliRunner
 
 from frida_analykit.cli import cli
+from frida_analykit.config import AppConfig, DEFAULT_SCRIPT_REPL_GLOBALS
 from frida_analykit.scaffold import generate_dev_workspace
 
 
 SCAFFOLD_IMPORT_EXAMPLE = """\
 import "@zsa233/frida-analykit-agent/rpc"
-import { SSLTools, help } from "@zsa233/frida-analykit-agent"
+import { help } from "@zsa233/frida-analykit-agent/helper"
 
 setImmediate(() => {
     help.$error("OK!")
@@ -54,5 +55,7 @@ def test_scaffold_can_use_local_packed_runtime(tmp_path: Path) -> None:
     package = json.loads((tmp_path / "package.json").read_text(encoding="utf-8"))
     assert result.exit_code == 0, result.output
     assert package["dependencies"]["@zsa233/frida-analykit-agent"].startswith("file:")
+    assert "frida-java-bridge" not in package["dependencies"]
     assert (tmp_path / "_agent.js").exists()
     assert "OK!" in (tmp_path / "index.ts").read_text(encoding="utf-8")
+    assert AppConfig.from_yaml(tmp_path / "config.yml").script.repl.globals == list(DEFAULT_SCRIPT_REPL_GLOBALS)

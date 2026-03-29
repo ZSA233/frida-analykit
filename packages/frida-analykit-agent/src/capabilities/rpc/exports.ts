@@ -1,4 +1,4 @@
-import { RPCMsgType } from "../message.js"
+import { RPCMsgType } from "../../message.js"
 import { evalWithContext } from "./context.js"
 import { enumerateObjectProperties, materializeArgument, previewRpcValue, resolveHandleSpec, resolveOwnedScopeSlot, RPCHandleSpec } from "./handles.js"
 import { clearScope, deleteScopeValue, describeValueType, getEvalScope, saveScopeValue } from "./scope.js"

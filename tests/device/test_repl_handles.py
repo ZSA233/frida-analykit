@@ -34,6 +34,7 @@ def _run_repl_probe(
         "",
         "from frida_analykit.compat import FridaCompat",
         "from frida_analykit.config import AppConfig",
+        "from frida_analykit.repl import build_repl_namespace",
         "from frida_analykit.server import FridaServerManager",
         "from frida_analykit.session import SessionWrapper",
         "",
@@ -51,6 +52,23 @@ def _run_repl_probe(
         "",
         "async def main() -> dict[str, object]:",
         "    try:",
+        "        repl_namespace = build_repl_namespace(",
+        "            {",
+        "                'config': config,",
+        "                'device': device,",
+        "                'pid': pid,",
+        "                'session': session,",
+        "                'script': script,",
+        "            },",
+        "            script=script,",
+        "            global_names=config.script.repl.globals,",
+        "        )",
+        "        Process = repl_namespace.get('Process')",
+        "        Module = repl_namespace.get('Module')",
+        "        Memory = repl_namespace.get('Memory')",
+        "        Java = repl_namespace.get('Java')",
+        "        ObjC = repl_namespace.get('ObjC')",
+        "        Swift = repl_namespace.get('Swift')",
         *[f"        {line}" if line else "" for line in body_lines],
         "    finally:",
         "        try:",
@@ -138,6 +156,61 @@ def test_repl_handle_process_seed_path_on_device(
 
     assert payload["label"] == "Process"
     assert "arch" in payload["props"] or "platform" in payload["props"]
+
+
+@pytest.mark.device
+def test_repl_namespace_exposes_default_process_handle_on_device(
+    device_helpers,
+    booted_device_repl_workspace,
+    running_device_repl_app_pid: int,
+) -> None:
+    payload = _run_repl_probe(
+        device_helpers,
+        booted_device_repl_workspace,
+        """
+        return {
+            "label": str(Process),
+            "thread_id": Process.getCurrentThreadId().value_,
+        }
+        """,
+        pid=running_device_repl_app_pid,
+    )
+
+    assert payload["label"] == "Process"
+    assert isinstance(payload["thread_id"], int)
+    assert payload["thread_id"] > 0
+
+
+@pytest.mark.device
+def test_repl_namespace_respects_removed_globals_on_device(
+    device_helpers,
+    booted_device_repl_workspace,
+    running_device_repl_app_pid: int,
+) -> None:
+    payload = _run_repl_probe(
+        device_helpers,
+        booted_device_repl_workspace,
+        """
+        config.script.repl.globals = []
+        empty_namespace = build_repl_namespace(
+            {
+                "config": config,
+                "device": device,
+                "pid": pid,
+                "session": session,
+                "script": script,
+            },
+            script=script,
+            global_names=config.script.repl.globals,
+        )
+        return {
+            "has_process": "Process" in empty_namespace,
+        }
+        """,
+        pid=running_device_repl_app_pid,
+    )
+
+    assert payload["has_process"] is False
 
 
 @pytest.mark.device

@@ -1,6 +1,7 @@
 
-import { ElfModuleX, ElfFileFixer } from "../elf/module.js"
+import { ElfModuleX, ElfFileFixer } from "../capabilities/elf/module.js"
 import { nativeFunctionOptions } from "../consts.js"
+import { setGlobalProperties } from "../config.js"
 
 
 export class Libssl {
@@ -93,3 +94,13 @@ export class Libssl {
     )
 
 }
+
+type LibsslClass = typeof Libssl
+
+declare global {
+    const Libssl: LibsslClass
+}
+
+setGlobalProperties({
+    Libssl,
+})

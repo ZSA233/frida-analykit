@@ -1,13 +1,13 @@
 import type {
     JniBoundNonvirtualMethod,
     JniUnboundNonvirtualMethod,
-} from "../src/jni/members.js";
+} from "../src/capabilities/jni/members.js";
 import type {
     jclass,
     jmethodID,
     jobject,
-} from "../src/jni/refs.js";
-import type { jstring } from "../src/jni/strings.js";
+} from "../src/capabilities/jni/refs.js";
+import type { jstring } from "../src/capabilities/jni/strings.js";
 
 declare const obj: jobject;
 declare const clazz: jclass;

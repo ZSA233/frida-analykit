@@ -6,10 +6,10 @@ import { ssl_st_structOf, SSL3_RANDOM_SIZE } from "./struct.js"
 import { help, NativePointerObject, ProgressNotify } from "../helper.js"
 import { Libssl } from "../lib/libssl.js"
 import { FuncHelper } from "../func.js"
-import { ElfModuleX } from "../elf/module.js"
-import { AdrlXref } from "../elf/xref.js"
+import { ElfModuleX } from "../capabilities/elf/module.js"
+import { AdrlXref } from "../capabilities/elf/xref.js"
 import { TextEncoder } from "../utils/text_endec.js"
-import { Subroutine } from "../elf/verifier.js"
+import { Subroutine } from "../capabilities/elf/verifier.js"
 
 
 type SSL3_STATE = {

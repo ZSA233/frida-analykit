@@ -30,6 +30,38 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./config": {
+      "types": "./dist/config.d.ts",
+      "default": "./dist/config.js"
+    },
+    "./bridges": {
+      "types": "./dist/bridges.d.ts",
+      "default": "./dist/bridges.js"
+    },
+    "./helper": {
+      "types": "./dist/helper.d.ts",
+      "default": "./dist/helper.js"
+    },
+    "./process": {
+      "types": "./dist/process.d.ts",
+      "default": "./dist/process.js"
+    },
+    "./jni": {
+      "types": "./dist/jni.d.ts",
+      "default": "./dist/jni.js"
+    },
+    "./ssl": {
+      "types": "./dist/ssl.d.ts",
+      "default": "./dist/ssl.js"
+    },
+    "./elf": {
+      "types": "./dist/elf.d.ts",
+      "default": "./dist/elf.js"
+    },
+    "./libssl": {
+      "types": "./dist/libssl.d.ts",
+      "default": "./dist/libssl.js"
+    },
     "./rpc": {
       "types": "./dist/rpc.d.ts",
       "default": "./dist/rpc.js"

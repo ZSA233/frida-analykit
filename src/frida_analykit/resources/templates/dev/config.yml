@@ -18,3 +18,11 @@ agent:
 script:
   nettools:
     ssl_log_secret: ./data/nettools/sslkey/
+  repl:
+    globals:
+      - Process
+      - Module
+      - Memory
+      - Java
+      - ObjC
+      - Swift

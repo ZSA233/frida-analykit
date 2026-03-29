@@ -9,8 +9,7 @@
     "watch": "frida-compile index.ts -o _agent.js -w"
   },
   "dependencies": {
-    "${agent_package_name}": "${agent_package_spec}",
-    "frida-java-bridge": "^7.0.8"
+    "${agent_package_name}": "${agent_package_spec}"
   },
   "devDependencies": {
     "@types/frida-gum": "^18.7.2",

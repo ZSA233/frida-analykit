@@ -1,6 +1,6 @@
-import { Java } from "../bridges.js";
-import { nativeFunctionOptions } from "../consts.js";
-import { NativePointerObject } from "../helper.js";
+import { Java } from "../../bridges.js";
+import { nativeFunctionOptions } from "../../consts.js";
+import { NativePointerObject } from "../../helper.js";
 import { IndirectRefKind } from "./struct.js";
 import type { jmethodID } from "./refs.js";
 

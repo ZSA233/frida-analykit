@@ -16,6 +16,7 @@ from ..config import AppConfig
 from ..dev_env import DevEnvManager
 from ..diagnostics import set_verbose
 from ..frontend import FrontendError, WatchProcess, build_agent_bundle, load_frontend_project, start_watch
+from ..repl import LazyJsHandleProxy, build_repl_namespace
 from ..server import FridaServerManager, ServerManagerError
 from ..session import ScriptWrapper, SessionWrapper
 
@@ -36,7 +37,7 @@ class RuntimeDevice(Protocol):
     def resume(self, pid: int) -> None: ...
 
 
-ReplNamespaceValue: TypeAlias = AppConfig | int | SessionWrapper | ScriptWrapper | RuntimeDevice
+ReplNamespaceValue: TypeAlias = AppConfig | int | SessionWrapper | ScriptWrapper | RuntimeDevice | LazyJsHandleProxy
 
 
 def _load_config(path: str) -> AppConfig:
@@ -184,14 +185,23 @@ def _post_attach(
         return
     atexit.register(session.detach)
     if repl:
+        base_namespace: dict[str, ReplNamespaceValue] = {
+            "config": config,
+            "device": device,
+            "pid": pid,
+            "session": session,
+            "script": script,
+        }
+        try:
+            namespace = build_repl_namespace(
+                base_namespace,
+                script=script,
+                global_names=config.script.repl.globals,
+            )
+        except ValueError as exc:
+            raise click.ClickException(str(exc)) from exc
         _run_repl(
-            {
-                "config": config,
-                "device": device,
-                "pid": pid,
-                "session": session,
-                "script": script,
-            }
+            cast(dict[str, ReplNamespaceValue], namespace)
         )
         return
     _wait_forever()

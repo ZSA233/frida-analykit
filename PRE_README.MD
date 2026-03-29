@@ -168,6 +168,8 @@ CLI 目前支持两类前端编排动作：
 - 如果 `attach` 未传 `--pid`，且 `config.app` 存在，则会尝试通过应用标识自动解析 PID。
 - `--repl` 会进入 `ptpython` REPL。
 - REPL 中会注入 `config`、`device`、`pid`、`session`、`script` 等对象。
+- REPL 还会按 `script.repl.globals` 懒注入一组 JS seed handle；当前模板默认包括 `Process`、`Module`、`Memory`、`Java`、`ObjC`、`Swift`。
+- 这些 REPL 变量不会在进入 REPL 时立刻触发 RPC enumerate，而是在首次真实使用时才 materialize 成 `script.jsh(name)` 对应句柄。
 - `--repl` 当前已经切到 async ptpython 模式，允许在会话内直接 `await script.eval_async(...)`、`await handle.call_async(...)`、`await handle.resolve_async()`。
 - `script.eval(...)` / `script.eval_async(...)` 当前会优先把输入当作“表达式”求值，因此像 `Process.arch`、`Promise.resolve(Process.arch)` 这类 REPL 常见写法会直接返回表达式结果；如果输入本身是多语句 body，则会回退到原始函数体执行方式。
 - REPL 句柄与 scope 相关调用在首次使用前会先做一次 agent runtime 协议握手。
@@ -462,6 +464,17 @@ Python 侧目前已经有一套 RPC message / handler 体系。
 - `ElfTools`
 - `Libssl`
 
+当前还新增了一组显式 capability subpath，供轻量 bundle 按需导入：
+
+- `@zsa233/frida-analykit-agent/config`
+- `@zsa233/frida-analykit-agent/bridges`
+- `@zsa233/frida-analykit-agent/helper`
+- `@zsa233/frida-analykit-agent/process`
+- `@zsa233/frida-analykit-agent/jni`
+- `@zsa233/frida-analykit-agent/ssl`
+- `@zsa233/frida-analykit-agent/elf`
+- `@zsa233/frida-analykit-agent/libssl`
+
 当前 runtime 的定位不是“只有一个 rpc shim”，而是已经开始积累逆向辅助能力，尤其包括：
 
 - Android / JNI 相关 helper
@@ -469,6 +482,13 @@ Python 侧目前已经有一套 RPC message / handler 体系。
 - SSL/BoringSSL 相关 helper
 - ELF 解析与辅助工具
 - RPC 作用域调用支持
+
+其中有一个本轮需要特别强调的导入边界变化：
+
+- `@zsa233/frida-analykit-agent/rpc` 现在只安装最小 RPC / REPL 基础能力
+- 它不再为了 REPL / eval context 自动 import `JNIEnv`、`SSLTools`、`ElfTools`、`Libssl`、`help`、`proc`
+- 这些能力只有在用户自己的 `index.ts` 中显式 import 对应 capability 模块后，才会进入 bundle 并出现在 RPC eval context 中
+- 这使得 `_agent.js` 的体积主要由用户的显式导入面决定，而不是被 `/rpc` 默认拖重
 
 当前 `JNIEnv` 之上已经有一层 JNI member facade，当前已完成第一阶段基础访问面与第二阶段 nonvirtual slice，定位是“显式 `sig` 驱动的高层访问面”，主要特征如下：
 
@@ -533,8 +553,8 @@ const after = pointClass.$getField(point, "x", "I").toInt();
 
 当前应特别注意对外边界已经收口：
 
-- 正式 public entry 只保留包根 `@zsa233/frida-analykit-agent`
-- 以及副入口 `@zsa233/frida-analykit-agent/rpc`
+- 正式 public entry 仍保留包根 `@zsa233/frida-analykit-agent`
+- 同时新增了一组显式 capability subpath 与副入口 `@zsa233/frida-analykit-agent/rpc`
 - 不再通过 `./*` 通配子路径默认暴露内部实现文件
 - 这意味着内部 `jni/*`、`elf/*`、`net/*` 等文件形态可以继续重构，但不再承诺作为公开导入面兼容
 
@@ -631,6 +651,13 @@ const after = pointClass.$getField(point, "x", "I").toInt();
 
 - SSL key log 的输出目录
 
+`script.repl.globals`
+
+- Python `--repl` 命名空间中的懒注入 JS seed handle 列表
+- 当前仅支持裸全局名，例如 `Process`、`Java`
+- 不支持 alias，也不支持 `Process/getCurrentThreadId` 这类深路径
+- 若条目与内置 REPL 名字冲突，或不是合法 Python 标识符，会在进入 REPL 前直接报错
+
 ### 当前模板默认值
 
 当前脚手架模板默认会生成：
@@ -653,6 +680,14 @@ agent:
 script:
   nettools:
     ssl_log_secret: ./data/nettools/sslkey/
+  repl:
+    globals:
+      - Process
+      - Module
+      - Memory
+      - Java
+      - ObjC
+      - Swift
 ```
 
 ## 当前兼容性与依赖约束

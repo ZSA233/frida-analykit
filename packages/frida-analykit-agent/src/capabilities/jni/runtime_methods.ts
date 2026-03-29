@@ -1,4 +1,4 @@
-import { help } from "../helper.js";
+import { help } from "../../helper.js";
 import type { JniCallArgument } from "./call_methods.js";
 import {
     type ExtendedJavaEnv,

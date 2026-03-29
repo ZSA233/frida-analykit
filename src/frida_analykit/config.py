@@ -6,6 +6,15 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 from ruamel.yaml import YAML
 
+DEFAULT_SCRIPT_REPL_GLOBALS: tuple[str, ...] = (
+    "Process",
+    "Module",
+    "Memory",
+    "Java",
+    "ObjC",
+    "Swift",
+)
+
 
 class ServerConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -34,10 +43,17 @@ class ScriptNetToolsConfig(BaseModel):
     ssl_log_secret: Path | None = None
 
 
+class ScriptReplConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    globals: list[str] = Field(default_factory=lambda: list(DEFAULT_SCRIPT_REPL_GLOBALS))
+
+
 class ScriptConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     nettools: ScriptNetToolsConfig = Field(default_factory=ScriptNetToolsConfig)
+    repl: ScriptReplConfig = Field(default_factory=ScriptReplConfig)
 
 
 class AppConfig(BaseModel):

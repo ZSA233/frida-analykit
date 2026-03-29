@@ -1,4 +1,4 @@
-import { NativePointerObject } from "../helper.js";
+import { NativePointerObject } from "../../helper.js";
 import type { JniCallArgument } from "./call_methods.js";
 import { JNI_REF_KIND_MASK } from "./factory.js";
 import {

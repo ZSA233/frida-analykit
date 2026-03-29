@@ -1,14 +1,14 @@
 
 import { Ehdr, Phdr, Dyn, Shdr, Soinfo, Sym, Rela } from './struct.js'
-import { nativeFunctionOptions, SYM_INFO_BIND, SYM_INFO_TYPE, SYM_SHNDX } from '../consts.js'
+import { nativeFunctionOptions, SYM_INFO_BIND, SYM_INFO_TYPE, SYM_SHNDX } from '../../consts.js'
 import {
     Elf_Dyn, Elf_Ehdr, Elf_Phdr, Elf_Shdr, Elf_Sym, Elf_Rela,
     DyntabTag
 } from './struct.js'
-import { help , downAlign, upAlign, page_end, page_start } from '../helper.js'
-import { ArrayPointer } from '../utils/array_pointer.js'
-import { setGlobalProperties } from '../config.js'
-import { saveFileSource } from '../message.js'
+import { help , downAlign, upAlign, page_end, page_start } from '../../helper.js'
+import { ArrayPointer } from '../../utils/array_pointer.js'
+import { setGlobalProperties } from '../../config.js'
+import { saveFileSource } from '../../message.js'
 
 
 interface ElfModuleX extends BaseModule {}

@@ -1,4 +1,4 @@
-import { setGlobalProperties } from "../config.js"
+import { setGlobalProperties } from "../../config.js"
 import { ElfFileFixer, ElfModuleX } from "./module.js"
 
 

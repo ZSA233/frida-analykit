@@ -1,4 +1,4 @@
-import type { NativePointerObject } from "../helper.js";
+import type { NativePointerObject } from "../../helper.js";
 import {
     callMethodVariadicArgTypes,
     callNonvirtualMethodVariadicArgTypes,
