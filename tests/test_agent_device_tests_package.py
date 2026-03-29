@@ -67,11 +67,18 @@ def test_device_helpers_workspace_accepts_extra_dependencies(tmp_path: Path) -> 
     )
 
     package_json = json.loads((tmp_path / "package.json").read_text(encoding="utf-8"))
+    tsconfig_json = json.loads((tmp_path / "tsconfig.json").read_text(encoding="utf-8"))
     assert package_json["dependencies"]["@zsa233/frida-analykit-agent"] == "file:/tmp/runtime.tgz"
     assert (
         package_json["dependencies"]["@zsa233/frida-analykit-agent-device-tests"]
         == "file:/tmp/device-tests.tgz"
     )
+    assert package_json["overrides"]["frida-java-bridge"] == f"file:{repo_root / 'node_modules' / 'frida-java-bridge'}"
+    assert package_json["devDependencies"] == {
+        "@types/frida-gum": f"file:{repo_root / 'node_modules' / '@types' / 'frida-gum'}",
+        "typescript": f"file:{repo_root / 'node_modules' / 'typescript'}",
+    }
+    assert tsconfig_json["compilerOptions"]["types"] == ["frida-gum"]
 
 
 def test_device_helpers_pack_local_package_uses_workspace_local_npm_cache(
@@ -113,6 +120,45 @@ def test_device_helpers_pack_local_package_uses_workspace_local_npm_cache(
     assert env["BASE_ENV"] == "1"
     assert env["npm_config_cache"] == str(tmp_path / ".npm-cache")
     assert Path(env["npm_config_cache"]).is_dir()
+
+
+def test_device_helpers_build_workspace_uses_workspace_local_npm_cache(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    helpers = DeviceHelpers(
+        repo_root=repo_root,
+        env={"BASE_ENV": "1"},
+        serial=None,
+        python_executable=Path("/usr/bin/python3"),
+        frida_version="16.6.6",
+    )
+    workspace = helpers.create_workspace(tmp_path, app=None)
+    workspace.agent_path.write_text("// built\n", encoding="utf-8")
+    captured: dict[str, object] = {}
+
+    def fake_run_cli_with_env(args, *, timeout=120, extra_env=None):
+        captured["args"] = args
+        captured["timeout"] = timeout
+        captured["extra_env"] = extra_env
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(helpers, "run_cli_with_env", fake_run_cli_with_env)
+
+    helpers.build_workspace(workspace, install=True, timeout=45)
+
+    assert captured["args"] == [
+        "build",
+        "--config",
+        str(workspace.config_path),
+        "--project-dir",
+        str(workspace.root),
+        "--install",
+    ]
+    assert captured["timeout"] == 45
+    assert captured["extra_env"] == {"npm_config_cache": str(workspace.root / ".npm-cache")}
+    assert (workspace.root / ".npm-cache").is_dir()
 
 
 def test_device_helpers_workspace_config_keeps_server_device_nested(tmp_path: Path) -> None:
@@ -196,6 +242,38 @@ def test_device_helpers_launch_app_falls_back_to_am_start_when_monkey_fails() ->
         ["shell", "cmd", "package", "resolve-activity", "--brief", "com.demo"],
         ["shell", "am", "start", "-W", "-n", "com.demo/.MainActivity"],
     ]
+
+
+def test_device_helpers_pidof_remote_server_falls_back_to_server_basename() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    helpers = DeviceHelpers(
+        repo_root=repo_root,
+        env={},
+        serial=None,
+        python_executable=Path("/usr/bin/python3"),
+        frida_version="16.6.6",
+    )
+
+    calls: list[list[str]] = []
+
+    def fake_adb_run(args: list[str], *, timeout: int = 30):
+        calls.append(args)
+        if "pidof /data/local/tmp/frida-server" in args[-1]:
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        if "pidof frida-server" in args[-1]:
+            return SimpleNamespace(returncode=0, stdout="18390\n", stderr="")
+        raise AssertionError(f"unexpected adb args: {args}")
+
+    helpers.adb_run = fake_adb_run  # type: ignore[method-assign]
+
+    pid = helpers.pidof_remote_server()
+
+    assert pid == 18390
+    assert calls[:2] == [
+        ["shell", "sh -c 'pidof /data/local/tmp/frida-server'"],
+        ["shell", "su 0 sh -c 'pidof /data/local/tmp/frida-server'"],
+    ]
+    assert any("pidof frida-server" in command[-1] for command in calls)
 
 
 def test_device_helpers_find_attachable_app_pid_keeps_polling_after_nonzero_launch(

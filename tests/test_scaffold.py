@@ -30,8 +30,18 @@ def test_scaffold_can_use_local_packed_runtime(tmp_path: Path) -> None:
         pytest.skip("npm is required for scaffold checks")
 
     repo_root = Path(__file__).resolve().parents[1]
+    npm_env = dict(os.environ)
+    npm_cache_dir = tmp_path / ".npm-cache"
+    npm_cache_dir.mkdir(parents=True, exist_ok=True)
+    # Use a test-local npm cache so scaffold checks do not inherit broken host cache permissions.
+    npm_env["npm_config_cache"] = str(npm_cache_dir)
     package_name = (
-        subprocess.check_output(["npm", "pack", "./packages/frida-analykit-agent"], cwd=repo_root, text=True)
+        subprocess.check_output(
+            ["npm", "pack", "./packages/frida-analykit-agent"],
+            cwd=repo_root,
+            env=npm_env,
+            text=True,
+        )
         .strip()
         .splitlines()[-1]
     )
@@ -44,8 +54,36 @@ def test_scaffold_can_use_local_packed_runtime(tmp_path: Path) -> None:
         "tsc -p tsconfig.json --noEmit && "
         "node -e \"require('node:fs').writeFileSync('_agent.js', '// built by scaffold test\\n');\""
     )
+    package["overrides"] = {
+        "frida-java-bridge": f"file:{repo_root / 'node_modules' / 'frida-java-bridge'}",
+    }
+    package["devDependencies"] = {
+        "@types/frida-gum": f"file:{repo_root / 'node_modules' / '@types' / 'frida-gum'}",
+        "typescript": f"file:{repo_root / 'node_modules' / 'typescript'}",
+    }
     (tmp_path / "package.json").write_text(json.dumps(package, indent=2), encoding="utf-8")
-    subprocess.run(["npm", "install", "--ignore-scripts"], cwd=tmp_path, check=True)
+    (tmp_path / "tsconfig.json").write_text(
+        json.dumps(
+            {
+                "compilerOptions": {
+                    "module": "es2022",
+                    "moduleResolution": "bundler",
+                    "target": "es2021",
+                    "lib": ["es2021"],
+                    "types": ["frida-gum"],
+                    "allowJs": True,
+                    "noEmit": True,
+                    "strict": True,
+                    "esModuleInterop": True,
+                    "allowSyntheticDefaultImports": True,
+                    "skipLibCheck": True,
+                }
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    subprocess.run(["npm", "install", "--ignore-scripts"], cwd=tmp_path, env=npm_env, check=True)
     runner = CliRunner()
     result = runner.invoke(
         cli,

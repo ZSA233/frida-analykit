@@ -131,10 +131,22 @@ class DeviceHelpers:
         )
 
     def run_cli(self, args: list[str], *, timeout: int = 120) -> subprocess.CompletedProcess[str]:
+        return self.run_cli_with_env(args, timeout=timeout)
+
+    def run_cli_with_env(
+        self,
+        args: list[str],
+        *,
+        timeout: int = 120,
+        extra_env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        env = dict(self.env)
+        if extra_env:
+            env.update(extra_env)
         return subprocess.run(
             [str(self.python_executable), "-m", "frida_analykit", *args],
             cwd=self.repo_root,
-            env=self.env,
+            env=env,
             capture_output=True,
             text=True,
             check=False,
@@ -199,21 +211,27 @@ class DeviceHelpers:
         pytest.fail(f"timed out waiting for `{package}` to start")
 
     def pidof_remote_server(self, *, timeout: int = 30) -> int | None:
-        commands = [
-            ["shell", shlex.join(("sh", "-c", f"pidof {DEFAULT_REMOTE_SERVERNAME}"))],
-            ["shell", shlex.join(("su", "0", "sh", "-c", f"pidof {DEFAULT_REMOTE_SERVERNAME}"))],
-            ["shell", shlex.join(("su", "root", "sh", "-c", f"pidof {DEFAULT_REMOTE_SERVERNAME}"))],
-            ["shell", shlex.join(("su", "-c", f"pidof {DEFAULT_REMOTE_SERVERNAME}"))],
+        probe_names = [DEFAULT_REMOTE_SERVERNAME]
+        server_basename = Path(DEFAULT_REMOTE_SERVERNAME).name
+        if server_basename != DEFAULT_REMOTE_SERVERNAME:
+            # Android `pidof` often matches the process basename even when it was launched by an absolute path.
+            probe_names.append(server_basename)
+        command_templates = [
+            lambda target: ["shell", shlex.join(("sh", "-c", f"pidof {target}"))],
+            lambda target: ["shell", shlex.join(("su", "0", "sh", "-c", f"pidof {target}"))],
+            lambda target: ["shell", shlex.join(("su", "root", "sh", "-c", f"pidof {target}"))],
+            lambda target: ["shell", shlex.join(("su", "-c", f"pidof {target}"))],
         ]
-        for command in commands:
-            result = self.adb_run(command, timeout=timeout)
-            if result.returncode != 0:
-                continue
-            output = result.stdout.strip()
-            if not output:
-                continue
-            token = output.split()[0]
-            return int(token) if token.isdigit() else None
+        for probe_name in probe_names:
+            for make_command in command_templates:
+                result = self.adb_run(make_command(probe_name), timeout=timeout)
+                if result.returncode != 0:
+                    continue
+                output = result.stdout.strip()
+                if not output:
+                    continue
+                token = output.split()[0]
+                return int(token) if token.isdigit() else None
         return None
 
     def wait_for_remote_server_pid(self, *, timeout: int = 30) -> int:
@@ -349,12 +367,26 @@ class DeviceHelpers:
         extra_dependencies: dict[str, str] | None = None,
     ) -> DeviceWorkspace:
         generate_dev_workspace(tmp_path, agent_package_spec=agent_package_spec)
+        package_path = tmp_path / "package.json"
+        package = json.loads(package_path.read_text(encoding="utf-8"))
         if extra_dependencies:
-            package_path = tmp_path / "package.json"
-            package = json.loads(package_path.read_text(encoding="utf-8"))
             dependencies = package.setdefault("dependencies", {})
             dependencies.update(extra_dependencies)
-            package_path.write_text(json.dumps(package, indent=2) + "\n", encoding="utf-8")
+        package["overrides"] = {
+            # Device workspaces install the packed runtime tarball, so pin its transitive Java bridge
+            # to the repo-local copy instead of hitting the registry from each temporary workspace.
+            "frida-java-bridge": f"file:{self.repo_root / 'node_modules' / 'frida-java-bridge'}",
+        }
+        package["devDependencies"] = {
+            "@types/frida-gum": f"file:{self.repo_root / 'node_modules' / '@types' / 'frida-gum'}",
+            "typescript": f"file:{self.repo_root / 'node_modules' / 'typescript'}",
+        }
+        package_path.write_text(json.dumps(package, indent=2) + "\n", encoding="utf-8")
+        tsconfig_path = tmp_path / "tsconfig.json"
+        tsconfig = json.loads(tsconfig_path.read_text(encoding="utf-8"))
+        compiler_options = tsconfig.setdefault("compilerOptions", {})
+        compiler_options["types"] = ["frida-gum"]
+        tsconfig_path.write_text(json.dumps(tsconfig, indent=2) + "\n", encoding="utf-8")
         (tmp_path / "index.ts").write_text(entry_source, encoding="utf-8")
 
         agent_path = tmp_path / "_agent.js"
@@ -383,7 +415,13 @@ class DeviceHelpers:
         ]
         if install:
             args.append("--install")
-        result = self.run_cli(args, timeout=timeout)
+        npm_cache_dir = workspace.root / ".npm-cache"
+        npm_cache_dir.mkdir(parents=True, exist_ok=True)
+        result = self.run_cli_with_env(
+            args,
+            timeout=timeout,
+            extra_env={"npm_config_cache": str(npm_cache_dir)},
+        )
         if result.returncode != 0:
             pytest.fail(
                 "failed to build the device test workspace\n"
