@@ -110,5 +110,11 @@ device-test-core:
 device-test-install:
 	FRIDA_ANALYKIT_ENABLE_DEVICE=1 "$(PYTHON_BIN)" -m pytest tests/device/test_server_install.py -m device -v
 
+device-test-repl-handlers:
+	FRIDA_ANALYKIT_ENABLE_DEVICE=1 "$(PYTHON_BIN)" -m pytest tests/device/test_repl_handles.py -m device -v
+
+device-test-attach-marker:
+	FRIDA_ANALYKIT_ENABLE_DEVICE=1 "$(PYTHON_BIN)" -m pytest tests/device/test_attach_marker.py -m device -v
+
 device-test:
 	FRIDA_ANALYKIT_ENABLE_DEVICE=1 "$(PYTHON_BIN)" -m pytest tests/device -m device -v

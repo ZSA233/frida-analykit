@@ -1,3 +1,3 @@
-from .js_handle import JsHandle
+from .js_handle import JsHandle, Unset
 
-__all__ = ["JsHandle"]
+__all__ = ["JsHandle", "Unset"]

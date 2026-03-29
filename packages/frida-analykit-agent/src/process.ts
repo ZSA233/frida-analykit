@@ -1,3 +1,4 @@
+import { setGlobalProperties } from "./config.js";
 import { help  } from "./helper.js";
 
 
@@ -135,3 +136,11 @@ class Proc {
 
 
 export { Proc as proc }
+
+declare global {
+    const proc: typeof Proc
+}
+
+setGlobalProperties({
+    proc: Proc,
+})

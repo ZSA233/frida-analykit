@@ -7,7 +7,7 @@ from click.testing import CliRunner
 
 from frida_analykit._version import __version__
 from frida_analykit.cli import cli
-from frida_analykit.config import AppConfig
+from frida_analykit.config import AppConfig, DEFAULT_SCRIPT_REPL_GLOBALS
 from frida_analykit.dev_env import DevEnvError, ManagedEnv
 from frida_analykit.scaffold import default_agent_package_spec
 
@@ -110,12 +110,20 @@ class _FakeScript:
         self.handlers: dict[str, object] = {}
         self.log_handler = None
         self.loaded = False
+        self.exports_sync = SimpleNamespace()
+        self.exports_async = SimpleNamespace()
 
     def on(self, signal: str, callback) -> None:
         self.handlers[signal] = callback
 
     def set_log_handler(self, handler) -> None:
         self.log_handler = handler
+
+    def list_exports_sync(self) -> list[str]:
+        return []
+
+    async def list_exports_async(self) -> list[str]:
+        return []
 
     def load(self) -> None:
         self.loaded = True
@@ -179,12 +187,17 @@ def test_gen_dev_creates_v2_workspace(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
     package = json.loads((tmp_path / "package.json").read_text(encoding="utf-8"))
     assert package["dependencies"]["@zsa233/frida-analykit-agent"] == default_agent_package_spec()
+    assert "frida-java-bridge" not in package["dependencies"]
     assert package["scripts"]["build"] == "frida-compile index.ts -o _agent.js -c"
     assert package["scripts"]["watch"] == "frida-compile index.ts -o _agent.js -w"
     assert package["devDependencies"]["typescript"] == "^5.8.3"
     assert not (tmp_path / ".npmrc").exists()
     assert (tmp_path / "README.md").exists()
     assert "frida-analykit build --config config.yml" in (tmp_path / "README.md").read_text(encoding="utf-8")
+    assert "/helper" in (tmp_path / "index.ts").read_text(encoding="utf-8")
+    assert "only bundles what your script uses" in (tmp_path / "README.md").read_text(encoding="utf-8")
+    generated_config = AppConfig.from_yaml(tmp_path / "config.yml")
+    assert generated_config.script.repl.globals == list(DEFAULT_SCRIPT_REPL_GLOBALS)
 
 
 def test_default_agent_package_spec_maps_python_rc_to_npm_rc() -> None:
@@ -230,7 +243,7 @@ def test_env_create_uses_manager_and_prints_summary(monkeypatch: pytest.MonkeyPa
             calls.update(name=name, profile=profile, frida_version=frida_version, with_repl=with_repl)
             return env
 
-    monkeypatch.setattr("frida_analykit.cli._global_env_manager", lambda: FakeManager())
+    monkeypatch.setattr("frida_analykit.cli.common._global_env_manager", lambda: FakeManager())
 
     result = runner.invoke(
         cli,
@@ -265,7 +278,7 @@ def test_env_create_can_skip_repl(monkeypatch: pytest.MonkeyPatch) -> None:
             calls.update(name=name, profile=profile, frida_version=frida_version, with_repl=with_repl)
             return env
 
-    monkeypatch.setattr("frida_analykit.cli._global_env_manager", lambda: FakeManager())
+    monkeypatch.setattr("frida_analykit.cli.common._global_env_manager", lambda: FakeManager())
 
     result = runner.invoke(cli, ["env", "create", "--frida-version", "16.5.9", "--no-repl"])
 
@@ -280,7 +293,7 @@ def test_env_list_prints_manager_table(monkeypatch: pytest.MonkeyPatch) -> None:
         def render_list(self) -> str:
             return "*  frida-16.5.9"
 
-    monkeypatch.setattr("frida_analykit.cli._global_env_manager", lambda: FakeManager())
+    monkeypatch.setattr("frida_analykit.cli.common._global_env_manager", lambda: FakeManager())
 
     result = runner.invoke(cli, ["env", "list"])
 
@@ -296,7 +309,7 @@ def test_env_shell_forwards_optional_name(monkeypatch: pytest.MonkeyPatch) -> No
         def enter(self, name=None):
             calls.append(name)
 
-    monkeypatch.setattr("frida_analykit.cli._global_env_manager", lambda: FakeManager())
+    monkeypatch.setattr("frida_analykit.cli.common._global_env_manager", lambda: FakeManager())
 
     result = runner.invoke(cli, ["env", "shell", "legacy-16"])
 
@@ -321,7 +334,7 @@ def test_env_remove_deletes_selected_environment(monkeypatch: pytest.MonkeyPatch
             calls.append(name)
             return managed_env
 
-    monkeypatch.setattr("frida_analykit.cli._global_env_manager", lambda: FakeManager())
+    monkeypatch.setattr("frida_analykit.cli.common._global_env_manager", lambda: FakeManager())
 
     result = runner.invoke(cli, ["env", "remove", "frida-16.5.9"])
 
@@ -347,7 +360,7 @@ def test_env_use_sets_current_environment(monkeypatch: pytest.MonkeyPatch) -> No
             calls.append(name)
             return managed_env
 
-    monkeypatch.setattr("frida_analykit.cli._global_env_manager", lambda: FakeManager())
+    monkeypatch.setattr("frida_analykit.cli.common._global_env_manager", lambda: FakeManager())
 
     result = runner.invoke(cli, ["env", "use", "frida-16.5.9"])
 
@@ -371,13 +384,13 @@ def test_env_install_frida_uses_current_interpreter(monkeypatch: pytest.MonkeyPa
                 "frida_version": frida_version,
             }
 
-    monkeypatch.setattr("frida_analykit.cli._global_env_manager", lambda: FakeManager())
+    monkeypatch.setattr("frida_analykit.cli.common._global_env_manager", lambda: FakeManager())
 
     result = runner.invoke(cli, ["env", "install-frida", "--version", "16.5.9"])
 
     assert result.exit_code == 0, result.output
     assert calls["frida_version"] == "16.5.9"
-    assert Path(calls["python_path"]).stem == "python"
+    assert Path(calls["python_path"]).stem.startswith("python")
     assert "updated Frida runtime" in result.output
 
 def test_env_install_frida_surfaces_validation_errors(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -387,7 +400,7 @@ def test_env_install_frida_surfaces_validation_errors(monkeypatch: pytest.Monkey
         def install_frida(self, python_path: Path, frida_version: str):
             raise DevEnvError("not inside a virtual environment")
 
-    monkeypatch.setattr("frida_analykit.cli._global_env_manager", lambda: FakeManager())
+    monkeypatch.setattr("frida_analykit.cli.common._global_env_manager", lambda: FakeManager())
 
     result = runner.invoke(cli, ["env", "install-frida", "--version", "16.5.9"])
 
@@ -397,8 +410,8 @@ def test_env_install_frida_surfaces_validation_errors(monkeypatch: pytest.Monkey
 
 def test_attach_rejects_conflicting_build_modes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     runner = CliRunner()
-    monkeypatch.setattr("frida_analykit.cli.FridaCompat", _FakeCompat)
-    monkeypatch.setattr("frida_analykit.cli._load_config", lambda _: _config(tmp_path))
+    monkeypatch.setattr("frida_analykit.cli.commands.runtime.FridaCompat", _FakeCompat)
+    monkeypatch.setattr("frida_analykit.cli.common._load_config", lambda _: _config(tmp_path))
 
     result = runner.invoke(
         cli,
@@ -416,17 +429,17 @@ def test_attach_forwards_frontend_build_options(tmp_path: Path, monkeypatch: pyt
     project_dir = tmp_path / "agent"
     project_dir.mkdir()
 
-    monkeypatch.setattr("frida_analykit.cli.FridaCompat", lambda: compat)
-    monkeypatch.setattr("frida_analykit.cli._load_config", lambda _: _config(tmp_path))
+    monkeypatch.setattr("frida_analykit.cli.commands.runtime.FridaCompat", lambda: compat)
+    monkeypatch.setattr("frida_analykit.cli.common._load_config", lambda _: _config(tmp_path))
     monkeypatch.setattr(
-        "frida_analykit.cli._prepare_frontend_assets",
+        "frida_analykit.cli.common._prepare_frontend_assets",
         lambda **kwargs: calls.update(kwargs) or None,
     )
     monkeypatch.setattr(
-        "frida_analykit.cli._prepare_session",
-        lambda config, device, pid: (device, object(), object()),
+        "frida_analykit.cli.common._prepare_session",
+        lambda config, device, pid, **kwargs: (device, object(), object()),
     )
-    monkeypatch.setattr("frida_analykit.cli._post_attach", lambda **kwargs: None)
+    monkeypatch.setattr("frida_analykit.cli.common._post_attach", lambda **kwargs: None)
 
     result = runner.invoke(
         cli,
@@ -456,14 +469,14 @@ def test_attach_uses_configured_usb_device(tmp_path: Path, monkeypatch: pytest.M
     runner = CliRunner()
     compat = _FakeCompatWithAttach()
 
-    monkeypatch.setattr("frida_analykit.cli.FridaCompat", lambda: compat)
-    monkeypatch.setattr("frida_analykit.cli._load_config", lambda _: _usb_config(tmp_path))
-    monkeypatch.setattr("frida_analykit.cli._prepare_frontend_assets", lambda **kwargs: None)
+    monkeypatch.setattr("frida_analykit.cli.commands.runtime.FridaCompat", lambda: compat)
+    monkeypatch.setattr("frida_analykit.cli.common._load_config", lambda _: _usb_config(tmp_path))
+    monkeypatch.setattr("frida_analykit.cli.common._prepare_frontend_assets", lambda **kwargs: None)
     monkeypatch.setattr(
-        "frida_analykit.cli._prepare_session",
-        lambda config, device, pid: (device, object(), object()),
+        "frida_analykit.cli.common._prepare_session",
+        lambda config, device, pid, **kwargs: (device, object(), object()),
     )
-    monkeypatch.setattr("frida_analykit.cli._post_attach", lambda **kwargs: None)
+    monkeypatch.setattr("frida_analykit.cli.common._post_attach", lambda **kwargs: None)
 
     result = runner.invoke(
         cli,
@@ -487,14 +500,14 @@ def test_spawn_closes_watch_process(tmp_path: Path, monkeypatch: pytest.MonkeyPa
         def close(self) -> None:
             watch_state["closed"] = True
 
-    monkeypatch.setattr("frida_analykit.cli.FridaCompat", lambda: compat)
-    monkeypatch.setattr("frida_analykit.cli._load_config", lambda _: _config(tmp_path, app="com.example.demo"))
-    monkeypatch.setattr("frida_analykit.cli._prepare_frontend_assets", lambda **kwargs: FakeWatcher())
+    monkeypatch.setattr("frida_analykit.cli.commands.runtime.FridaCompat", lambda: compat)
+    monkeypatch.setattr("frida_analykit.cli.common._load_config", lambda _: _config(tmp_path, app="com.example.demo"))
+    monkeypatch.setattr("frida_analykit.cli.common._prepare_frontend_assets", lambda **kwargs: FakeWatcher())
     monkeypatch.setattr(
-        "frida_analykit.cli._prepare_session",
-        lambda config, device, pid: (device, object(), object()),
+        "frida_analykit.cli.common._prepare_session",
+        lambda config, device, pid, **kwargs: (device, object(), object()),
     )
-    monkeypatch.setattr("frida_analykit.cli._post_attach", lambda **kwargs: None)
+    monkeypatch.setattr("frida_analykit.cli.common._post_attach", lambda **kwargs: None)
 
     result = runner.invoke(
         cli,
@@ -518,18 +531,18 @@ def test_spawn_forwards_remote_port_for_configured_device(tmp_path: Path, monkey
             forwarded["action"] = action
             return "27042"
 
-    monkeypatch.setattr("frida_analykit.cli.FridaCompat", lambda: compat)
+    monkeypatch.setattr("frida_analykit.cli.commands.runtime.FridaCompat", lambda: compat)
     monkeypatch.setattr(
-        "frida_analykit.cli._load_config",
+        "frida_analykit.cli.common._load_config",
         lambda _: _remote_runtime_config(tmp_path, app="com.example.demo"),
     )
-    monkeypatch.setattr("frida_analykit.cli.FridaServerManager", lambda *args, **kwargs: FakeManager())
-    monkeypatch.setattr("frida_analykit.cli._prepare_frontend_assets", lambda **kwargs: None)
+    monkeypatch.setattr("frida_analykit.cli.common.FridaServerManager", lambda *args, **kwargs: FakeManager())
+    monkeypatch.setattr("frida_analykit.cli.common._prepare_frontend_assets", lambda **kwargs: None)
     monkeypatch.setattr(
-        "frida_analykit.cli._prepare_session",
-        lambda config, device, pid: (device, object(), object()),
+        "frida_analykit.cli.common._prepare_session",
+        lambda config, device, pid, **kwargs: (device, object(), object()),
     )
-    monkeypatch.setattr("frida_analykit.cli._post_attach", lambda **kwargs: None)
+    monkeypatch.setattr("frida_analykit.cli.common._post_attach", lambda **kwargs: None)
 
     result = runner.invoke(
         cli,
@@ -553,18 +566,18 @@ def test_spawn_forwards_remote_port_without_configured_device(tmp_path: Path, mo
             forwarded["action"] = action
             return "27042"
 
-    monkeypatch.setattr("frida_analykit.cli.FridaCompat", lambda: compat)
+    monkeypatch.setattr("frida_analykit.cli.commands.runtime.FridaCompat", lambda: compat)
     monkeypatch.setattr(
-        "frida_analykit.cli._load_config",
+        "frida_analykit.cli.common._load_config",
         lambda _: _remote_runtime_config(tmp_path, app="com.example.demo", device=None),
     )
-    monkeypatch.setattr("frida_analykit.cli.FridaServerManager", lambda *args, **kwargs: FakeManager())
-    monkeypatch.setattr("frida_analykit.cli._prepare_frontend_assets", lambda **kwargs: None)
+    monkeypatch.setattr("frida_analykit.cli.common.FridaServerManager", lambda *args, **kwargs: FakeManager())
+    monkeypatch.setattr("frida_analykit.cli.common._prepare_frontend_assets", lambda **kwargs: None)
     monkeypatch.setattr(
-        "frida_analykit.cli._prepare_session",
-        lambda config, device, pid: (device, object(), object()),
+        "frida_analykit.cli.common._prepare_session",
+        lambda config, device, pid, **kwargs: (device, object(), object()),
     )
-    monkeypatch.setattr("frida_analykit.cli._post_attach", lambda **kwargs: None)
+    monkeypatch.setattr("frida_analykit.cli.common._post_attach", lambda **kwargs: None)
 
     result = runner.invoke(
         cli,
@@ -588,19 +601,19 @@ def test_attach_forwards_remote_port_without_configured_device(tmp_path: Path, m
             forwarded["action"] = action
             return "27042"
 
-    monkeypatch.setattr("frida_analykit.cli.FridaCompat", lambda: compat)
+    monkeypatch.setattr("frida_analykit.cli.commands.runtime.FridaCompat", lambda: compat)
     monkeypatch.setattr(
-        "frida_analykit.cli._load_config",
+        "frida_analykit.cli.common._load_config",
         lambda _: _remote_runtime_config(tmp_path, app="com.example.demo", device=None),
     )
-    monkeypatch.setattr("frida_analykit.cli.FridaServerManager", lambda *args, **kwargs: FakeManager())
-    monkeypatch.setattr("frida_analykit.cli._prepare_frontend_assets", lambda **kwargs: None)
+    monkeypatch.setattr("frida_analykit.cli.common.FridaServerManager", lambda *args, **kwargs: FakeManager())
+    monkeypatch.setattr("frida_analykit.cli.common._prepare_frontend_assets", lambda **kwargs: None)
     monkeypatch.setattr(
-        "frida_analykit.cli._prepare_session",
-        lambda config, device, pid: (device, object(), object()),
+        "frida_analykit.cli.common._prepare_session",
+        lambda config, device, pid, **kwargs: (device, object(), object()),
     )
-    monkeypatch.setattr("frida_analykit.cli._find_app_pid", lambda device, compat, app_id: 123)
-    monkeypatch.setattr("frida_analykit.cli._post_attach", lambda **kwargs: None)
+    monkeypatch.setattr("frida_analykit.cli.common._find_app_pid", lambda device, compat, app_id: 123)
+    monkeypatch.setattr("frida_analykit.cli.common._post_attach", lambda **kwargs: None)
 
     result = runner.invoke(
         cli,
@@ -618,10 +631,10 @@ def test_spawn_prints_resolved_agent_log_paths(tmp_path: Path, monkeypatch: pyte
     compat = _FakeCompatWithAttach()
     (tmp_path / "_agent.js").write_text("16 /index.js\n✄\n", encoding="utf-8")
 
-    monkeypatch.setattr("frida_analykit.cli.FridaCompat", lambda: compat)
-    monkeypatch.setattr("frida_analykit.cli._load_config", lambda _: _config_with_logs(tmp_path, app="com.example.demo"))
-    monkeypatch.setattr("frida_analykit.cli._prepare_frontend_assets", lambda **kwargs: None)
-    monkeypatch.setattr("frida_analykit.cli._post_attach", lambda **kwargs: None)
+    monkeypatch.setattr("frida_analykit.cli.commands.runtime.FridaCompat", lambda: compat)
+    monkeypatch.setattr("frida_analykit.cli.common._load_config", lambda _: _config_with_logs(tmp_path, app="com.example.demo"))
+    monkeypatch.setattr("frida_analykit.cli.common._prepare_frontend_assets", lambda **kwargs: None)
+    monkeypatch.setattr("frida_analykit.cli.common._post_attach", lambda **kwargs: None)
 
     result = runner.invoke(
         cli,
@@ -646,8 +659,8 @@ def test_server_boot_forwards_force_restart(tmp_path: Path, monkeypatch: pytest.
         calls["config"] = config
         calls["force_restart"] = force_restart
 
-    monkeypatch.setattr("frida_analykit.cli._load_config", lambda _: _remote_config(tmp_path, version="17.8.1"))
-    monkeypatch.setattr("frida_analykit.cli.boot_server", fake_boot)
+    monkeypatch.setattr("frida_analykit.cli.common._load_config", lambda _: _remote_config(tmp_path, version="17.8.1"))
+    monkeypatch.setattr("frida_analykit.cli.commands.server.boot_server", fake_boot)
 
     result = runner.invoke(
         cli,
@@ -662,8 +675,8 @@ def test_server_boot_forwards_force_restart(tmp_path: Path, monkeypatch: pytest.
 def test_server_stop_prints_stopped_pids(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     runner = CliRunner()
 
-    monkeypatch.setattr("frida_analykit.cli._load_config", lambda _: _remote_config(tmp_path, version="17.8.1"))
-    monkeypatch.setattr("frida_analykit.cli.stop_server", lambda config: {222, 111})
+    monkeypatch.setattr("frida_analykit.cli.common._load_config", lambda _: _remote_config(tmp_path, version="17.8.1"))
+    monkeypatch.setattr("frida_analykit.cli.commands.server.stop_server", lambda config: {222, 111})
 
     result = runner.invoke(cli, ["server", "stop", "--config", str(tmp_path / "config.yml")])
 
@@ -674,8 +687,8 @@ def test_server_stop_prints_stopped_pids(tmp_path: Path, monkeypatch: pytest.Mon
 def test_server_stop_reports_no_matching_process(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     runner = CliRunner()
 
-    monkeypatch.setattr("frida_analykit.cli._load_config", lambda _: _remote_config(tmp_path, version="17.8.1"))
-    monkeypatch.setattr("frida_analykit.cli.stop_server", lambda config: set())
+    monkeypatch.setattr("frida_analykit.cli.common._load_config", lambda _: _remote_config(tmp_path, version="17.8.1"))
+    monkeypatch.setattr("frida_analykit.cli.commands.server.stop_server", lambda config: set())
 
     result = runner.invoke(cli, ["server", "stop", "--config", str(tmp_path / "config.yml")])
 
@@ -717,8 +730,8 @@ def test_server_install_forwards_version_override(tmp_path: Path, monkeypatch: p
                 local_source_asset_arch_hint=None,
             )
 
-    monkeypatch.setattr("frida_analykit.cli._load_config", lambda _: _remote_config(tmp_path, version="17.8.1"))
-    monkeypatch.setattr("frida_analykit.cli.FridaServerManager", lambda *args, **kwargs: FakeManager())
+    monkeypatch.setattr("frida_analykit.cli.common._load_config", lambda _: _remote_config(tmp_path, version="17.8.1"))
+    monkeypatch.setattr("frida_analykit.cli.commands.server.FridaServerManager", lambda *args, **kwargs: FakeManager())
 
     result = runner.invoke(
         cli,
@@ -778,8 +791,8 @@ def test_server_install_supports_local_server(tmp_path: Path, monkeypatch: pytes
                 local_source_asset_arch_hint="android-arm64",
             )
 
-    monkeypatch.setattr("frida_analykit.cli._load_config", lambda _: _remote_config(tmp_path, version="17.8.1"))
-    monkeypatch.setattr("frida_analykit.cli.FridaServerManager", lambda *args, **kwargs: FakeManager())
+    monkeypatch.setattr("frida_analykit.cli.common._load_config", lambda _: _remote_config(tmp_path, version="17.8.1"))
+    monkeypatch.setattr("frida_analykit.cli.commands.server.FridaServerManager", lambda *args, **kwargs: FakeManager())
 
     result = runner.invoke(
         cli,
@@ -831,7 +844,7 @@ def test_server_install_validates_option_combinations(
     local_server.write_text("binary", encoding="utf-8")
     rewritten_args = [str(local_server) if item == "frida-server" else item for item in args]
 
-    monkeypatch.setattr("frida_analykit.cli._load_config", lambda _: _remote_config(tmp_path, version="17.8.1"))
+    monkeypatch.setattr("frida_analykit.cli.common._load_config", lambda _: _remote_config(tmp_path, version="17.8.1"))
 
     result = runner.invoke(cli, rewritten_args)
 
@@ -881,9 +894,9 @@ def test_doctor_reports_remote_server_status_when_config_exists(
                 matched_profile="current-17",
             )
 
-    monkeypatch.setattr("frida_analykit.cli.FridaCompat", FakeCompat)
-    monkeypatch.setattr("frida_analykit.cli._load_optional_config", lambda _: _remote_config(tmp_path, version="17.8.1"))
-    monkeypatch.setattr("frida_analykit.cli.FridaServerManager", FakeManager)
+    monkeypatch.setattr("frida_analykit.cli.commands.doctor.FridaCompat", FakeCompat)
+    monkeypatch.setattr("frida_analykit.cli.common._load_optional_config", lambda _: _remote_config(tmp_path, version="17.8.1"))
+    monkeypatch.setattr("frida_analykit.cli.commands.doctor.FridaServerManager", FakeManager)
 
     result = runner.invoke(cli, ["doctor", "--config", str(tmp_path / "config.yml")])
 
@@ -915,9 +928,9 @@ def test_doctor_verbose_configures_diagnostics(tmp_path: Path, monkeypatch: pyte
                 "profiles": [],
             }
 
-    monkeypatch.setattr("frida_analykit.cli.set_verbose", lambda enabled: configured.append(enabled))
-    monkeypatch.setattr("frida_analykit.cli.FridaCompat", FakeCompat)
-    monkeypatch.setattr("frida_analykit.cli._load_optional_config", lambda _: None)
+    monkeypatch.setattr("frida_analykit.cli.common.set_verbose", lambda enabled: configured.append(enabled))
+    monkeypatch.setattr("frida_analykit.cli.commands.doctor.FridaCompat", FakeCompat)
+    monkeypatch.setattr("frida_analykit.cli.common._load_optional_config", lambda _: None)
 
     result = runner.invoke(cli, ["doctor", "--verbose", "--config", str(tmp_path / "config.yml")])
 

@@ -92,4 +92,13 @@ jobs:
           fail_on_unmatched_files: true
 
       - name: Publish npm runtime to npmjs
-        run: npm publish release-bundle/*.tgz --access public --provenance
+        shell: bash
+        run: |
+          shopt -s nullglob
+          tgz_files=(./release-bundle/*.tgz)
+          if [ "${#tgz_files[@]}" -ne 1 ]; then
+            echo "expected exactly one npm tarball in ./release-bundle, found ${#tgz_files[@]}" >&2
+            printf '  %s\n' "${tgz_files[@]}" >&2
+            exit 1
+          fi
+          npm publish "${tgz_files[0]}" --access public --provenance

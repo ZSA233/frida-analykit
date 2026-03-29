@@ -1,6 +1,6 @@
 {
   "name": "@zsa233/frida-analykit-agent",
-  "version": "2.0.2",
+  "version": "2.0.3",
   "description": "Frida agent runtime for frida-analykit",
   "keywords": [
     "frida",
@@ -30,19 +30,47 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./config": {
+      "types": "./dist/config.d.ts",
+      "default": "./dist/config.js"
+    },
+    "./bridges": {
+      "types": "./dist/bridges.d.ts",
+      "default": "./dist/bridges.js"
+    },
+    "./helper": {
+      "types": "./dist/helper.d.ts",
+      "default": "./dist/helper.js"
+    },
+    "./process": {
+      "types": "./dist/process.d.ts",
+      "default": "./dist/process.js"
+    },
+    "./jni": {
+      "types": "./dist/jni.d.ts",
+      "default": "./dist/jni.js"
+    },
+    "./ssl": {
+      "types": "./dist/ssl.d.ts",
+      "default": "./dist/ssl.js"
+    },
+    "./elf": {
+      "types": "./dist/elf.d.ts",
+      "default": "./dist/elf.js"
+    },
+    "./libssl": {
+      "types": "./dist/libssl.d.ts",
+      "default": "./dist/libssl.js"
+    },
     "./rpc": {
       "types": "./dist/rpc.d.ts",
       "default": "./dist/rpc.js"
-    },
-    "./*": {
-      "types": "./dist/*.d.ts",
-      "default": "./dist/*.js"
     }
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "prepack": "npm run build",
-    "check": "tsc -p tsconfig.json --noEmit"
+    "check": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.type-tests.json --noEmit"
   },
   "dependencies": {
     "frida-java-bridge": "^7.0.8"

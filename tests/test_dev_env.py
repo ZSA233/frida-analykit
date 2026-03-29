@@ -216,7 +216,7 @@ def test_list_envs_discovers_legacy_virtualenvs(
     (legacy_env / "pyvenv.cfg").write_text("home = /tmp\n", encoding="utf-8")
 
     manager = DevEnvManager.for_repo(tmp_path)
-    monkeypatch.setattr(manager, "_detect_installed_frida_version", lambda _: "16.5.9")
+    monkeypatch.setattr(manager._registry_store, "detect_installed_frida_version", lambda _: "16.5.9")
 
     envs = manager.list_envs()
 
@@ -250,7 +250,7 @@ def test_enter_uses_single_env_as_implicit_current(tmp_path: Path, monkeypatch: 
     manager.registry_path.parent.mkdir(parents=True, exist_ok=True)
     manager.registry_path.write_text(json.dumps(registry), encoding="utf-8")
     opened: list[str] = []
-    monkeypatch.setattr(manager, "_open_shell", lambda env: opened.append(env.name))
+    monkeypatch.setattr(manager._shell_launcher, "open_shell", lambda env: opened.append(env.name))
 
     manager.enter()
 
@@ -333,8 +333,12 @@ def test_list_envs_repairs_partial_registry_entries(
         ),
         encoding="utf-8",
     )
-    monkeypatch.setattr(manager, "_detect_installed_frida_version", lambda _: "16.5.9")
-    monkeypatch.setattr(manager, "_detect_installed_frida_analykit_version", lambda _: __version__)
+    monkeypatch.setattr(manager._registry_store, "detect_installed_frida_version", lambda _: "16.5.9")
+    monkeypatch.setattr(
+        manager._registry_store,
+        "detect_installed_frida_analykit_version",
+        lambda _: __version__,
+    )
 
     envs = manager.list_envs()
 
@@ -381,8 +385,8 @@ def test_render_list_does_not_rewrite_registry_when_payload_is_unchanged(
         encoding="utf-8",
     )
     monkeypatch.setattr(
-        manager,
-        "_save_registry",
+        manager._registry_store,
+        "save_registry",
         lambda payload: (_ for _ in ()).throw(AssertionError(f"unexpected write: {payload}")),
     )
 
@@ -419,7 +423,7 @@ def test_render_list_refreshes_cached_frida_analykit_version(
         json.dumps(registry, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(manager, "_detect_installed_frida_analykit_version", lambda _: "2.0.1")
+    monkeypatch.setattr(manager._registry_store, "detect_installed_frida_analykit_version", lambda _: "2.0.1")
 
     output = manager.render_list()
 
@@ -440,10 +444,10 @@ def test_save_registry_keeps_previous_contents_when_replace_fails(
     def _fail_replace(source: Path, destination: Path) -> None:
         raise OSError("boom")
 
-    monkeypatch.setattr("frida_analykit.dev_env.os.replace", _fail_replace)
+    monkeypatch.setattr("frida_analykit.dev_env.registry.os.replace", _fail_replace)
 
     with pytest.raises(DevEnvError, match="Failed to write registry"):
-        manager._save_registry({"current": "frida-16.5.9", "envs": []})
+        manager._registry_store.save_registry({"current": "frida-16.5.9", "envs": []})
 
     assert manager.registry_path.read_text(encoding="utf-8") == old_text
     assert list(manager.registry_path.parent.glob(".envs.json.*.tmp")) == []
@@ -467,7 +471,7 @@ def test_install_frida_updates_managed_env_metadata(
         return subprocess.CompletedProcess(command, 0, "", "")
 
     manager = DevEnvManager.for_repo(tmp_path, subprocess_run=_run)
-    monkeypatch.setattr(manager, "_detect_installed_frida_analykit_version", lambda _: __version__)
+    monkeypatch.setattr(manager._registry_store, "detect_installed_frida_analykit_version", lambda _: __version__)
     manager.registry_path.parent.mkdir(parents=True, exist_ok=True)
     manager.registry_path.write_text(
         json.dumps(
@@ -623,7 +627,7 @@ def test_open_shell_uses_zsh_wrapper_that_reactivates_after_user_rc(
         )
         return subprocess.CompletedProcess(command, 0, "", "")
 
-    manager._subprocess_run = _run
+    manager._runtime.subprocess_run = _run
     managed_env = ManagedEnv(
         name="frida-16.5.9",
         path=str(env_dir),
@@ -633,7 +637,7 @@ def test_open_shell_uses_zsh_wrapper_that_reactivates_after_user_rc(
         last_updated="2026-03-26T00:00:00Z",
     )
 
-    manager._open_shell(managed_env)
+    manager._shell_launcher.open_shell(managed_env)
 
     assert calls[0][0] == ["/bin/zsh", "-i"]
     assert ". " + str(original_zshrc) in calls[0][3]
@@ -682,7 +686,7 @@ def test_open_shell_prefers_explicit_zdotdir_for_zsh_startup_files(
         )
         return subprocess.CompletedProcess(command, 0, "", "")
 
-    manager._subprocess_run = _run
+    manager._runtime.subprocess_run = _run
     managed_env = ManagedEnv(
         name="frida-16.5.9",
         path=str(env_dir),
@@ -692,7 +696,7 @@ def test_open_shell_prefers_explicit_zdotdir_for_zsh_startup_files(
         last_updated="2026-03-26T00:00:00Z",
     )
 
-    manager._open_shell(managed_env)
+    manager._shell_launcher.open_shell(managed_env)
 
     assert calls[0][0] == ["/bin/zsh", "-i"]
     assert ". " + str(original_zshrc) in calls[0][3]
@@ -716,7 +720,7 @@ def test_open_shell_fallback_exports_virtualenv_for_generic_shell(
         calls.append((command, env))
         return subprocess.CompletedProcess(command, 0, "", "")
 
-    manager._subprocess_run = _run
+    manager._runtime.subprocess_run = _run
     managed_env = ManagedEnv(
         name="frida-16.5.9",
         path=str(env_dir),
@@ -726,7 +730,7 @@ def test_open_shell_fallback_exports_virtualenv_for_generic_shell(
         last_updated="2026-03-26T00:00:00Z",
     )
 
-    manager._open_shell(managed_env)
+    manager._shell_launcher.open_shell(managed_env)
 
     assert calls[0][0] == ["/bin/sh", "-i"]
     assert calls[0][1] is not None
@@ -757,7 +761,7 @@ def test_open_shell_uses_cmd_activation_on_windows(
         calls.append((command, env))
         return subprocess.CompletedProcess(command, 0, "", "")
 
-    manager._subprocess_run = _run
+    manager._runtime.subprocess_run = _run
     managed_env = ManagedEnv(
         name="frida-16.5.9",
         path=str(env_dir),
@@ -767,7 +771,7 @@ def test_open_shell_uses_cmd_activation_on_windows(
         last_updated="2026-03-26T00:00:00Z",
     )
 
-    manager._open_shell(managed_env)
+    manager._shell_launcher.open_shell(managed_env)
 
     assert calls[0][0] == [r"C:\Windows\System32\cmd.exe", "/K", str(activate_path)]
     assert calls[0][1] is not None

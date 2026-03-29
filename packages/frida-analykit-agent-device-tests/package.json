@@ -1,0 +1,30 @@
+{
+  "name": "@zsa233/frida-analykit-agent-device-tests",
+  "version": "2.0.2",
+  "description": "Device-only unit suites for frida-analykit agent runtime",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist/**/*"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "prepack": "npm run build",
+    "check": "tsc -p tsconfig.json --noEmit"
+  },
+  "peerDependencies": {
+    "@zsa233/frida-analykit-agent": "*"
+  },
+  "devDependencies": {
+    "@types/frida-gum": "^18.7.2",
+    "typescript": "^5.8.3"
+  }
+}

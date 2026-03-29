@@ -2,18 +2,21 @@ from __future__ import annotations
 
 import json
 import re
+import uuid
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Final, Literal, overload
 
-from frida.core import Script, ScriptExportsAsync, Session, SessionDetachedCallback
+from frida.core import Script, Session, SessionDetachedCallback
 
 from ._version import __version__
 from .config import AgentConfig, AppConfig
 from .logging import LoggerBundle, build_loggers
-from .rpc.exports import ScriptExportsSyncWrapper
+from .rpc.client import RPCClient
+from .rpc.exports import ScriptExportsAsyncWrapper, ScriptExportsSyncWrapper
 from .rpc.handler.js_handle import JsHandle
-from .rpc.message import RPCMessage, RPCMsgInitConfig, RPCPayload
+from .rpc.message import RPCMessage, RPCMsgInitConfig
 from .rpc.registry import HandlerRegistry
 from .rpc.resolver import RPCResolver
 
@@ -60,6 +63,21 @@ SESSION_BANNER_LOGO: Final[str] = r"""
 ██║     ██║  ██║██║██████╔╝██║  ██║      ██║  ██║██║ ╚████║██║  ██║███████╗   ██║   ██║  ██╗██║   ██║
 ╚═╝     ╚═╝  ╚═╝╚═╝╚═════╝ ╚═╝  ╚═╝      ╚═╝  ╚═╝╚═╝  ╚═══╝╚═╝  ╚═╝╚══════╝   ╚═╝   ╚═╝  ╚═╝╚═╝   ╚═╝
 """.strip("\n")
+
+
+@dataclass(slots=True)
+class SessionRuntime:
+    config: AppConfig
+    loggers: LoggerBundle
+    resolver: RPCResolver
+    interactive: bool = False
+
+
+@dataclass(slots=True)
+class ScriptRuntime:
+    env: ScriptEnv
+    rpc: RPCClient
+    loggers: LoggerBundle | None = None
 
 
 def try_inject_environ(script_src: str, env: dict | None = None) -> str:
@@ -124,56 +142,57 @@ def render_session_banner(config: AppConfig, *, jsfile: Path, updated: datetime)
     else:
         lines.append(render_item("Stdout:", display_path(stdout_path) if stdout_path is not None else "<stdout>"))
         lines.append(render_item("Stderr:", display_path(stderr_path) if stderr_path is not None else "<stderr>"))
-    lines = [
-        *lines,
-        "",
-    ]
+    lines.extend([""])
     return "\n".join(lines)
 
 
 class ScriptWrapper:
-    __SCRIPT_EXPORT__: Final[frozenset[str]] = frozenset(
-        {
-            "load",
-            "unload",
-            "eternalize",
-            "enable_debugger",
-            "disable_debugger",
-            "exports_async",
-            "list_exports_async",
-            "set_log_handler",
-        }
-    )
-
-    def __init__(
-        self,
-        script: Script,
-        env: ScriptEnv,
-        resolver: RPCResolver,
-        *,
-        loggers: LoggerBundle | None = None,
-    ) -> None:
+    def __init__(self, script: Script, runtime: ScriptRuntime) -> None:
         self._script = script
-        self._env = env
-        self._resolver = resolver
-        self._loggers = loggers
-        self._resolver.register_script(script)
-        self.exports_sync = ScriptExportsSyncWrapper(script)
+        self._runtime = runtime
+        self._scope_id = runtime.rpc.scope_id
+        # Public script exports should stay close to Frida's native semantics.
+        # RPC payload normalization belongs to RPCClient only.
+        self.exports_sync: ScriptExportsSyncWrapper = ScriptExportsSyncWrapper(script)
+        self.exports_async: ScriptExportsAsyncWrapper = ScriptExportsAsyncWrapper(script)
+
+    @property
+    def scope_id(self) -> str:
+        return self._scope_id
+
+    def load(self) -> None:
+        self._script.load()
+
+    def unload(self) -> None:
+        self._script.unload()
+
+    def eternalize(self) -> None:
+        self._script.eternalize()
+
+    def enable_debugger(self, port: int | None = None) -> None:
+        if port is None:
+            self._script.enable_debugger()
+            return
+        self._script.enable_debugger(port)
+
+    def disable_debugger(self) -> None:
+        self._script.disable_debugger()
+
+    def list_exports_sync(self) -> list[str]:
+        return self.exports_sync._list_exports()
+
+    async def list_exports_async(self) -> list[str]:
+        return await self.exports_async._list_exports()
+
+    def set_log_handler(self, handler: Callable[[str, str], None] | None) -> None:
+        self._script.set_log_handler(handler)
 
     def post(self, message: RPCMessage, data: bytes | None = None) -> None:
         self._script.post(message.to_mapping(), data)
 
-    def __getattribute__(self, name: str):
-        if name in ScriptWrapper.__SCRIPT_EXPORT__:
-            return getattr(self._script, name)
-        return object.__getattribute__(self, name)
-
-    def __dir__(self):
-        return tuple(object.__dir__(self)) + tuple(ScriptWrapper.__SCRIPT_EXPORT__)
-
     def set_logger(self, loggers: LoggerBundle | None = None) -> None:
-        active_loggers = loggers or self._loggers or build_loggers(AgentConfig())
-        self._loggers = active_loggers
+        active_loggers = loggers or self._runtime.loggers or build_loggers(AgentConfig())
+        self._runtime.loggers = active_loggers
 
         def handler(level: str, text: str) -> None:
             stream = active_loggers.stdout if level == "info" else active_loggers.stderr
@@ -181,34 +200,28 @@ class ScriptWrapper:
 
         self.set_log_handler(handler)
 
-    def list_exports_sync(self) -> list[str]:
-        return self.exports_sync._list_exports()
-
-    @property
-    def scope_id(self) -> str:
-        return hex(id(self))
-
     def jsh(self, path: str) -> JsHandle:
-        return JsHandle(path, script=self, scope_id=self.scope_id)
+        return JsHandle.from_seed_path(path, client=self._runtime.rpc)
 
     def eval(self, source: str) -> JsHandle:
-        result = self.exports_sync.scope_eval(source, self.scope_id)
-        return JsHandle.new_from_payload(result, script=self, scope_id=self.scope_id)
+        return JsHandle.from_scope_result(self._runtime.rpc.eval(source), client=self._runtime.rpc)
+
+    async def eval_async(self, source: str) -> JsHandle:
+        return JsHandle.from_scope_result(await self._runtime.rpc.eval_async(source), client=self._runtime.rpc)
 
 
 class SessionWrapper:
-    __SESSION_EXPORT__: Final[frozenset[str]] = frozenset(
-        {"detach", "resume", "on", "off", "enable_child_gating", "disable_child_gating"}
-    )
-
-    def __init__(self, session: Session, *, config: AppConfig) -> None:
+    def __init__(self, session: Session, *, config: AppConfig, interactive: bool = False) -> None:
         self._session = session
         self._config = config
-        self._logs = build_loggers(config.agent)
-        self._resolver = RPCResolver(HandlerRegistry(config, self._logs.stdout, self._logs.stderr))
+        loggers = build_loggers(config.agent)
+        registry = HandlerRegistry(config, loggers.stdout, loggers.stderr)
+        resolver = RPCResolver(registry)
+        self._runtime = SessionRuntime(config=config, loggers=loggers, resolver=resolver, interactive=interactive)
 
     @property
-    def is_detached(self) -> bool: ...
+    def is_detached(self) -> bool:
+        return self._session.is_detached
 
     @overload
     def on(self, signal: str, callback: Callable[..., Any]) -> None: ...
@@ -216,11 +229,29 @@ class SessionWrapper:
     @overload
     def on(self, signal: Literal["detached"], callback: SessionDetachedCallback) -> None: ...
 
+    def on(self, signal: str, callback: Callable[..., Any]) -> None:
+        self._session.on(signal, callback)
+
     @overload
     def off(self, signal: str, callback: Callable[..., Any]) -> None: ...
 
     @overload
     def off(self, signal: Literal["detached"], callback: SessionDetachedCallback) -> None: ...
+
+    def off(self, signal: str, callback: Callable[..., Any]) -> None:
+        self._session.off(signal, callback)
+
+    def detach(self) -> None:
+        self._session.detach()
+
+    def resume(self) -> None:
+        self._session.resume()
+
+    def enable_child_gating(self) -> None:
+        self._session.enable_child_gating()
+
+    def disable_child_gating(self) -> None:
+        self._session.disable_child_gating()
 
     def create_script(
         self,
@@ -237,7 +268,14 @@ class SessionWrapper:
             snapshot,
             runtime,
         )
-        return ScriptWrapper(script, inject_env, self._resolver, loggers=self._logs)
+        self._runtime.resolver.register_script(script)
+        scope_id = uuid.uuid4().hex
+        script_runtime = ScriptRuntime(
+            env=inject_env,
+            rpc=RPCClient(script, scope_id=scope_id, interactive=self._runtime.interactive),
+            loggers=self._runtime.loggers,
+        )
+        return ScriptWrapper(script, script_runtime)
 
     def open_script(
         self,
@@ -255,10 +293,11 @@ class SessionWrapper:
         return self.create_script(source, name, snapshot, runtime, env)
 
     @classmethod
-    def from_session(cls, session: Session, *, config: AppConfig) -> "SessionWrapper":
-        return cls(session, config=config)
-
-    def __getattribute__(self, name: str):
-        if name in SessionWrapper.__SESSION_EXPORT__:
-            return getattr(self._session, name)
-        return object.__getattribute__(self, name)
+    def from_session(
+        cls,
+        session: Session,
+        *,
+        config: AppConfig,
+        interactive: bool = False,
+    ) -> "SessionWrapper":
+        return cls(session, config=config, interactive=interactive)
