@@ -29,7 +29,13 @@ def _config(tmp_path: Path) -> AppConfig:
     ).resolve_paths(tmp_path)
 
 
-def _dex_file_payload(transfer_id: str, output_name: str, data: bytes) -> RPCPayload:
+def _dex_file_payload(
+    transfer_id: str,
+    output_name: str,
+    data: bytes,
+    *,
+    declared_size: int | None = None,
+) -> RPCPayload:
     return RPCPayload(
         message=RPCMessage(
             type=RPCMsgType.DUMP_DEX_FILE,
@@ -39,7 +45,7 @@ def _dex_file_payload(transfer_id: str, output_name: str, data: bytes) -> RPCPay
                 info=RPCMsgDexDumpFileInfo(
                     name=output_name,
                     base="0x1000",
-                    size=len(data),
+                    size=len(data) if declared_size is None else declared_size,
                     loader="0x1",
                     loader_class="dalvik.system.PathClassLoader",
                     output_name=output_name,
@@ -140,3 +146,96 @@ def test_registry_falls_back_to_agent_datadir_for_dex_dump(tmp_path: Path) -> No
     )
 
     assert (tmp_path / "data" / "dextools").exists()
+
+
+def test_registry_marks_partial_dex_dump_as_incomplete(tmp_path: Path) -> None:
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    registry = HandlerRegistry(_config(tmp_path), stdout, stderr)
+    transfer_id = "dex-partial"
+    output_dir = tmp_path / "custom-dex"
+    target_dir = output_dir / "demo"
+
+    registry.handle(
+        RPCPayload(
+            message=RPCMessage(
+                type=RPCMsgType.DEX_DUMP_BEGIN,
+                data=RPCMsgDexDumpBegin(
+                    transfer_id=transfer_id,
+                    tag="demo",
+                    dump_dir=str(output_dir),
+                    expected_count=2,
+                    total_bytes=5,
+                    max_batch_bytes=1024,
+                ),
+            )
+        )
+    )
+    registry.handle(_dex_file_payload(transfer_id, "classes00.dex", b"abc"))
+    registry.handle(
+        RPCPayload(
+            message=RPCMessage(
+                type=RPCMsgType.DEX_DUMP_END,
+                data=RPCMsgDexDumpEnd(
+                    transfer_id=transfer_id,
+                    tag="demo",
+                    expected_count=2,
+                    received_count=1,
+                    total_bytes=5,
+                ),
+            )
+        )
+    )
+
+    assert (target_dir / "classes00.dex").read_bytes() == b"abc"
+    manifest = json.loads((target_dir / "classes.json").read_text(encoding="utf-8"))
+    assert [item["output_name"] for item in manifest] == ["classes00.dex"]
+    assert "[dex] complete dex-partial" not in stdout.getvalue()
+    assert "[dex] incomplete transfer dex-partial" in stderr.getvalue()
+
+
+def test_registry_marks_size_mismatch_dex_dump_as_incomplete(tmp_path: Path) -> None:
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    registry = HandlerRegistry(_config(tmp_path), stdout, stderr)
+    transfer_id = "dex-size-mismatch"
+    output_dir = tmp_path / "custom-dex"
+    target_dir = output_dir / "demo"
+
+    registry.handle(
+        RPCPayload(
+            message=RPCMessage(
+                type=RPCMsgType.DEX_DUMP_BEGIN,
+                data=RPCMsgDexDumpBegin(
+                    transfer_id=transfer_id,
+                    tag="demo",
+                    dump_dir=str(output_dir),
+                    expected_count=1,
+                    total_bytes=4,
+                    max_batch_bytes=1024,
+                ),
+            )
+        )
+    )
+    registry.handle(_dex_file_payload(transfer_id, "classes00.dex", b"abc", declared_size=4))
+    registry.handle(
+        RPCPayload(
+            message=RPCMessage(
+                type=RPCMsgType.DEX_DUMP_END,
+                data=RPCMsgDexDumpEnd(
+                    transfer_id=transfer_id,
+                    tag="demo",
+                    expected_count=1,
+                    received_count=1,
+                    total_bytes=4,
+                ),
+            )
+        )
+    )
+
+    assert (target_dir / "classes00.dex").read_bytes() == b"abc"
+    manifest = json.loads((target_dir / "classes.json").read_text(encoding="utf-8"))
+    assert manifest[0]["size"] == 4
+    assert "[dex] complete dex-size-mismatch" not in stdout.getvalue()
+    assert "[dex] size mismatch dex-size-mismatch" in stderr.getvalue()
+    assert "[dex] incomplete transfer dex-size-mismatch" in stderr.getvalue()

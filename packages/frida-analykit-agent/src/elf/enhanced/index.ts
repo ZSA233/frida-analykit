@@ -1,4 +1,5 @@
 import { emitElfSymbolCallLog, readCStringSafe } from "../internal/log.js"
+import { TextDecoder } from "../../internal/text/encoder.js"
 import { ElfSymbolHooks } from "../symbol_hooks.js"
 import type { ElfSymbolHookResult } from "../types.js"
 
@@ -50,6 +51,8 @@ export type EnhancedElfSymbolHookMethods = {
 
 export type EnhancedElfSymbolHooks = ElfSymbolHooks & EnhancedElfSymbolHookMethods
 
+const TEXT_DECODER = new TextDecoder()
+
 function readDlInfo(info: NativePointer) {
     const ps = Process.pointerSize
     return {
@@ -57,6 +60,18 @@ function readDlInfo(info: NativePointer) {
         dli_fbase: info.add(ps).readPointer(),
         dli_sname: readCStringSafe(info.add(ps * 2).readPointer()),
         dli_saddr: info.add(ps * 3).readPointer(),
+    }
+}
+
+function readSizedUtf8Safe(value: NativePointer | null | undefined, length: number): string {
+    if (!value || value.isNull() || !Number.isFinite(length) || length <= 0) {
+        return ""
+    }
+    try {
+        const bytes = value.readByteArray(length)
+        return bytes === null ? "" : TEXT_DECODER.decode(bytes)
+    } catch {
+        return ""
     }
 }
 
@@ -352,7 +367,12 @@ function createPresetMethods(hooks: ElfSymbolHooks): EnhancedElfSymbolHookMethod
         },
         readlink(fn = function (impl: AnyFunction, path: NativePointer, buffer: NativePointer, size: number) {
             const result = impl(path, buffer, size)
-            log("readlink", { path: readCStringSafe(path), size, result, output: readCStringSafe(buffer) })
+            log("readlink", {
+                path: readCStringSafe(path),
+                size,
+                result,
+                output: result >= 0 ? readSizedUtf8Safe(buffer, result) : null,
+            })
             return result
         }) {
             return hooks.attach("readlink", fn, "int", ["pointer", "pointer", "size_t"])

@@ -98,7 +98,7 @@ function buildSnapshotArtifacts(module: ElfModuleX, snapshotId: string, tag: str
         },
     }
 
-    const symbols = (module.dynSymbols || []).map((item) => serializeResolvedSymbol({
+    const symbols = module.getDynSymbols({ full: true }).map((item) => serializeResolvedSymbol({
         name: item.name,
         linked: item.linked,
         hook: item.hook,
@@ -147,7 +147,11 @@ function localSnapshotBaseDir(outputDir?: string): string {
 }
 
 function localSnapshotDir(baseDir: string, tag: string, snapshotId: string): string {
-    return help.fs.joinPath(help.fs.joinPath(baseDir, "snapshots"), sanitizePathSegment(tag || snapshotId))
+    const snapshotsRoot = help.fs.joinPath(baseDir, "snapshots")
+    if (tag.length > 0) {
+        return help.fs.joinPath(help.fs.joinPath(snapshotsRoot, sanitizePathSegment(tag)), snapshotId)
+    }
+    return help.fs.joinPath(snapshotsRoot, snapshotId)
 }
 
 function ensureDirectory(path: string): void {

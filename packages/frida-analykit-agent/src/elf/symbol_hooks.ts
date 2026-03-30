@@ -57,7 +57,7 @@ export class ElfSymbolHooks {
     }
 
     listSymbols(): ElfResolvedSymbol[] {
-        const symbols = [...(this.module.dynSymbols || []), ...Object.values(this._lazySymbols)]
+        const symbols = [...this.module.getDynSymbols({ full: true }), ...Object.values(this._lazySymbols)]
         return symbols.map(createResolvedSymbol)
     }
 

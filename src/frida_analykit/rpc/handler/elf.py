@@ -100,11 +100,11 @@ class ElfSnapshotHandler:
             return
 
         missing = [name for name in data.expected_files if name not in state.written_files]
-        if missing or state.received_bytes != data.received_bytes:
+        if missing or state.received_bytes != data.received_bytes or state.total_bytes != data.total_bytes:
             print(
                 (
                     f"[elf] incomplete snapshot {data.snapshot_id}: "
-                    f"missing={missing}, bytes={state.received_bytes}/{data.received_bytes}, "
+                    f"missing={missing}, bytes={state.received_bytes}/{state.total_bytes}/{data.received_bytes}/{data.total_bytes}, "
                     f"dir={state.directory}"
                 ),
                 file=self._stderr,
@@ -134,7 +134,10 @@ class ElfSnapshotHandler:
 
     def _resolve_snapshot_directory(self, data: RPCMsgElfSnapshotBegin) -> Path:
         root = self._resolve_output_root(data.output_dir)
-        return (root / "snapshots" / _safe_name(data.tag or data.snapshot_id)).resolve()
+        snapshots_root = root / "snapshots"
+        if data.tag:
+            return (snapshots_root / _safe_name(data.tag) / data.snapshot_id).resolve()
+        return (snapshots_root / data.snapshot_id).resolve()
 
     @staticmethod
     def _prepare_output_path(path: Path) -> Path:

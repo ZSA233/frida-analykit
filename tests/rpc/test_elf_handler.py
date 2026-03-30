@@ -53,7 +53,7 @@ def test_registry_handles_streaming_elf_snapshot_and_symbol_logs(tmp_path: Path)
     stderr = io.StringIO()
     registry = HandlerRegistry(_config(tmp_path), stdout, stderr)
     snapshot_id = "elf-1"
-    snapshot_root = tmp_path / "elf" / "snapshots" / "demo"
+    snapshot_root = tmp_path / "elf" / "snapshots" / "demo" / snapshot_id
     snapshot_root.mkdir(parents=True, exist_ok=True)
     (snapshot_root / "stale.bin").write_bytes(b"stale")
 
@@ -134,4 +134,54 @@ def test_registry_handles_streaming_elf_snapshot_and_symbol_logs(tmp_path: Path)
     assert "getpid" in log_path.read_text(encoding="utf-8")
     assert "[elf] begin elf-1" in stdout.getvalue()
     assert "[elf] complete elf-1" in stdout.getvalue()
+    assert stderr.getvalue() == ""
+
+
+def test_registry_preserves_multiple_snapshots_for_same_tag(tmp_path: Path) -> None:
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    registry = HandlerRegistry(_config(tmp_path), stdout, stderr)
+
+    for snapshot_id, payload_bytes in (("elf-keep-1", b"one"), ("elf-keep-2", b"two")):
+        registry.handle(
+            RPCPayload(
+                message=RPCMessage(
+                    type=RPCMsgType.ELF_SNAPSHOT_BEGIN,
+                    data=RPCMsgElfSnapshotBegin(
+                        snapshot_id=snapshot_id,
+                        tag="same-tag",
+                        module_name="libc.so",
+                        module_path="/apex/libc.so",
+                        module_base="0x1000",
+                        module_size=len(payload_bytes),
+                        expected_files=["libc.so"],
+                        total_bytes=len(payload_bytes),
+                    ),
+                )
+            )
+        )
+        registry.handle(_chunk_payload(snapshot_id, "module", "libc.so", payload_bytes))
+        registry.handle(
+            RPCPayload(
+                message=RPCMessage(
+                    type=RPCMsgType.ELF_SNAPSHOT_END,
+                    data=RPCMsgElfSnapshotEnd(
+                        snapshot_id=snapshot_id,
+                        tag="same-tag",
+                        module_name="libc.so",
+                        expected_files=["libc.so"],
+                        total_bytes=len(payload_bytes),
+                        received_bytes=len(payload_bytes),
+                    ),
+                )
+            )
+        )
+
+    first_dir = tmp_path / "elf" / "snapshots" / "same-tag" / "elf-keep-1"
+    second_dir = tmp_path / "elf" / "snapshots" / "same-tag" / "elf-keep-2"
+
+    assert (first_dir / "libc.so").read_bytes() == b"one"
+    assert (second_dir / "libc.so").read_bytes() == b"two"
+    assert "[elf] complete elf-keep-1" in stdout.getvalue()
+    assert "[elf] complete elf-keep-2" in stdout.getvalue()
     assert stderr.getvalue() == ""

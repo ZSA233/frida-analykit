@@ -366,7 +366,14 @@ def test_agent_unit_runner_reports_elf_tools_suite_on_device(
         assert case["ok"] is True, case
 
     snapshot_detail = json.loads(_suite_case_detail(result, ELF_SNAPSHOT_CASE))
-    snapshot_dir = booted_device_agent_unit_workspace.root / "data" / "elftools" / "snapshots" / str(snapshot_detail["tag"])
+    snapshot_dir = (
+        booted_device_agent_unit_workspace.root
+        / "data"
+        / "elftools"
+        / "snapshots"
+        / str(snapshot_detail["tag"])
+        / str(snapshot_detail["snapshotId"])
+    )
     expected_files = [
         snapshot_detail["moduleName"],
         "symbols.json",
