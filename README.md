@@ -29,7 +29,7 @@ Python 包只通过 GitHub 仓库 / GitHub Release 分发，不发布到 PyPI。
 推荐直接用 `uv` 安装：
 
 ```sh
-uv tool install "git+https://github.com/ZSA233/frida-analykit@v2.0.5"
+uv tool install "git+https://github.com/ZSA233/frida-analykit@v2.0.6"
 ```
 
 如果你希望锁定到某个精确 Frida 版本，推荐在独立环境里显式安装：
@@ -38,7 +38,7 @@ uv tool install "git+https://github.com/ZSA233/frida-analykit@v2.0.5"
 uv venv .venv-frida-17.8.2
 uv pip install --python .venv-frida-17.8.2/bin/python \
   "frida==17.8.2" \
-  "git+https://github.com/ZSA233/frida-analykit@v2.0.5"
+  "git+https://github.com/ZSA233/frida-analykit@v2.0.6"
 ```
 
 也可以用内置环境管理来维护多套 Frida 版本环境：
@@ -118,6 +118,7 @@ frida-analykit server install --config ./config.yml --local-server ./frida-serve
 - `spawn` 要求 `config.app` 必填；`attach` 可显式传 `--pid`
 - `--build` / `--watch` 会复用工作区里的 `npm run build` / `npm run watch`
 - `attach --watch` / `spawn --watch` 是“等待首个成功构建后再注入”，不会自动热重载已加载 session
+- `spawn` / `attach` 不会自动启动远端 `frida-server`；远端链路应先执行 `server boot`
 - `server.host` 支持 `host:port`、`local`、`usb`
 - `server.device` 用于固定目标设备序列号，避免多设备场景串到错误目标
 - `server boot` 默认不会杀掉已有远端 `frida-server`；如需强制替换，使用 `--force-restart`
@@ -204,11 +205,34 @@ setImmediate(() => {
 
 - `@zsa233/frida-analykit-agent/rpc` 只安装最小 RPC / REPL 基础
 - 包根 `@zsa233/frida-analykit-agent` 现在也是瘦入口，只导出 `config/helper/process` 这类轻量基础能力
-- `bridges`、`jni`、`ssl`、`elf`、`native/libssl`、`native/libc` 都需要显式 subpath import
+- `bridges`、`jni`、`ssl`、`elf`、`dex`、`native/libart`、`native/libssl`、`native/libc` 都需要显式 subpath import
 - 它不会再自动 import `help`、`proc`、`JNIEnv`、`SSLTools`、`ElfTools`、`Libssl`
 - 只有在你自己的 `index.ts` 中显式 import 对应 capability 后，这些能力才会进入 bundle，并出现在 RPC eval context 中
 
 这意味着 `_agent.js` 的体积主要由你的显式导入面决定，而不是被 `/rpc` 默认拖重。
+
+## Dex Dump
+
+如果需要枚举和导出 ART 中已加载的 dex，可显式导入 `/dex` capability：
+
+```ts
+import "@zsa233/frida-analykit-agent/rpc"
+import { DexTools } from "@zsa233/frida-analykit-agent/dex"
+
+setImmediate(() => {
+  const loaders = DexTools.enumerateClassLoaderDexFiles()
+  console.log("dex loaders =", loaders.length)
+  DexTools.dumpAllDex({ tag: "manual" })
+})
+```
+
+当前行为要点：
+
+- `DexTools.dumpAllDex()` 会走 `DEX_DUMP_BEGIN -> BATCH(DEX_DUMP_FILES) -> DEX_DUMP_END` 的流式链路
+- `script.rpc.batch_max_bytes` 是通用 RPC batch 上限，不只作用于 dex dump
+- agent 侧默认读取 `Config.BatchMaxBytes`；`dumpAllDex({ maxBatchBytes })` 可按次覆盖
+- Python 侧默认输出目录优先取 `script.dextools.dex_dir`，未配置时回退到 `agent.datadir/dextools`
+- 单个 dex 即使超过批量上限，也会单独成批发送，不继续细切片
 
 ## 配置说明
 
@@ -218,7 +242,7 @@ setImmediate(() => {
 - `jsfile`：编译产物 `_agent.js` 路径
 - `server`：设备与 `frida-server` 连接信息
 - `agent`：Python 侧日志与二进制数据输出路径
-- `script`：agent 侧扩展配置；当前主要是 `nettools.ssl_log_secret` 和 `repl.globals`
+- `script`：agent 侧扩展配置；当前包括 `repl.globals`、`nettools.ssl_log_secret`、`rpc.batch_max_bytes`、`dextools.dex_dir`
 
 示例：
 
@@ -238,6 +262,8 @@ agent:
   stderr: ./logs/stderr.log
 
 script:
+  rpc:
+    batch_max_bytes: 8388608
   repl:
     globals:
       - Process
@@ -248,6 +274,8 @@ script:
       - Swift
   nettools:
     ssl_log_secret: ./data/nettools/sslkey
+  dextools:
+    dex_dir: ./data/dextools
 ```
 
 ## 真机测试

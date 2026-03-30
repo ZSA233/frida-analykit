@@ -44,6 +44,7 @@ npx frida-compile index.ts -o _agent.js -c
 - `@zsa233/frida-analykit-agent/ssl`
 - `@zsa233/frida-analykit-agent/elf`
 - `@zsa233/frida-analykit-agent/dex`
+- `@zsa233/frida-analykit-agent/native/libart`
 - `@zsa233/frida-analykit-agent/native/libssl`
 - `@zsa233/frida-analykit-agent/native/libc`
 
@@ -91,6 +92,7 @@ import { JNIEnv } from "@zsa233/frida-analykit-agent/jni"
 import { SSLTools } from "@zsa233/frida-analykit-agent/ssl"
 import { ElfTools } from "@zsa233/frida-analykit-agent/elf"
 import { DexTools } from "@zsa233/frida-analykit-agent/dex"
+import { Libart } from "@zsa233/frida-analykit-agent/native/libart"
 import { Libssl } from "@zsa233/frida-analykit-agent/native/libssl"
 import { libc } from "@zsa233/frida-analykit-agent/native/libc"
 
@@ -102,6 +104,7 @@ setImmediate(() => {
   console.log("ssl guesses =", SSLTools.guess().length)
   console.log("main module =", ElfTools.findModuleByName("libc.so")?.name)
   console.log("dex loaders =", DexTools.enumerateClassLoaderDexFiles().length)
+  console.log("libart loaded =", Libart.$getModule().name)
   console.log("libssl module =", Libssl.$getModule().name)
   console.log("cwd =", libc.getcwd())
 })
@@ -179,7 +182,7 @@ import { DexTools } from "@zsa233/frida-analykit-agent/dex"
 - `DexTools.enumerateClassLoaderDexFiles()`
 - `DexTools.dumpAllDex({ tag?, dumpDir?, maxBatchBytes?, log? })`
 
-`dumpAllDex()` 在 RPC 模式下会发送 `DEX_DUMP_BEGIN -> BATCH(DEX_DUMP_FILES) -> DEX_DUMP_END`。默认最大批量大小来自 Python 配置 `script.rpc.batch_max_bytes`，agent 侧对应 `Config.BatchMaxBytes`；单个超大 dex 会单独成批发送而不会继续切片。Python 侧默认写到 `script.dextools.dex_dir`，未配置时回退到 `agent.datadir/dextools`。
+`dumpAllDex()` 在 RPC 模式下会发送 `DEX_DUMP_BEGIN -> BATCH(DEX_DUMP_FILES) -> DEX_DUMP_END`。默认最大批量大小来自 Python 配置 `script.rpc.batch_max_bytes`，这是通用 RPC batch 上限，不只作用于 dex；agent 侧对应 `Config.BatchMaxBytes`。单个超大 dex 会单独成批发送而不会继续切片。Python 侧默认写到 `script.dextools.dex_dir`，未配置时回退到 `agent.datadir/dextools`。
 
 ## JNI 能力说明
 
