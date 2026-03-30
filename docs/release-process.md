@@ -106,6 +106,12 @@ make release-version-stable BASE_VERSION=X.Y.Z CHECK=1 RC_TAG=vX.Y.Z-rc.N
 - lockfile 重算失败会回滚
 - `release-preflight` 失败会回滚
 
+需要特别明确的一点：
+
+- `make release-version-rc` / `make release-version-stable` 只负责切换版本文件并跑校验，不会自动创建 git commit 或 tag。
+- RC / stable 的 commit 和 tag 必须由发布操作者按顺序显式执行，不要并行。
+- 尤其不要把 `git commit` 和 `git tag` 放到并行任务里执行；否则 tag 很容易落到前一个提交，而不是刚刚生成的 release commit。
+
 `make release-preflight RELEASE_TAG=...` 会执行：
 
 - `scripts/release_version.py check-sync`
@@ -123,6 +129,15 @@ make release-preflight RELEASE_TAG=vX.Y.Z[-rc.N] [RC_TAG=vX.Y.Z-rc.N]
 make release-local RELEASE_TAG=vX.Y.Z[-rc.N]
 make release-install-check RELEASE_TAG=vX.Y.Z[-rc.N]
 ```
+
+推荐在每次准备 push tag 之前做一次显式确认：
+
+```sh
+git rev-parse HEAD
+git rev-parse vX.Y.Z[-rc.N]
+```
+
+这两个值必须完全一致；如果不一致，说明 tag 没有打在当前 release commit 上，应先修正 tag，再继续后续 dry-run 或 push。
 
 ## 首次 stable 发布
 
@@ -183,17 +198,43 @@ make release-install-check RELEASE_TAG=vX.Y.Z-rc.N
    - `server install`
    - `build`
    - `attach --detach-on-load`
-3. 通过 `workflow_dispatch` 触发 `.github/workflows/release-rc.yml`，传入 `vX.Y.Z-rc.N` 做远程 dry-run。
+3. 把 RC 版本切换结果提交到发布分支：
+
+```sh
+git add README.md README_EN.md packages/frida-analykit-agent/README.md \
+  release-version.toml src/frida_analykit/_version.py \
+  package.json packages/frida-analykit-agent/package.json package-lock.json
+git commit -m "release: cut vX.Y.Z-rc.N"
+git tag vX.Y.Z-rc.N
+test "$(git rev-parse HEAD)" = "$(git rev-parse vX.Y.Z-rc.N)"
+```
+
+4. 如需在不提前公开 RC tag 的前提下做远程 dry-run，可先把 RC commit 推到一个临时分支，再通过 `workflow_dispatch` 触发 `.github/workflows/release-rc.yml`：
+
+```sh
+git push origin HEAD:refs/heads/tmp/release-vX.Y.Z-rc.N
+gh workflow run "Release RC" --ref tmp/release-vX.Y.Z-rc.N -f tag=vX.Y.Z-rc.N
+```
+
    dry-run 只执行 build，并上传 `release-bundle-vX.Y.Z-rc.N` artifact。
-4. dry-run 通过后，再 push `vX.Y.Z-rc.N`。
-5. push RC tag 后，`Release RC` 工作流会：
+5. dry-run 通过后，再 push `vX.Y.Z-rc.N`。
+6. push RC tag 后，`Release RC` 工作流会：
    - 复用 `.github/actions/release-bundle/action.yml`
    - 执行 `make release-preflight`
    - 执行 `make release-local`
    - 执行 `make release-install-check`
    - 创建 GitHub prerelease
    - 上传 `dist/*.tar.gz`、`dist/*.whl` 和 `*.tgz`
-6. 如果 RC 需要修复，在同一发布分支继续提交，递增 `rc.N` 后重新执行流程。
+7. 若使用了临时 dry-run 分支，可在 RC tag 成功 push 后删除该临时分支。
+8. 如果 RC 需要修复，在同一发布分支继续提交，递增 `rc.N` 后重新执行流程。
+
+如果当前发布设备明确不支持某个受测 profile，不要为了凑流程在不支持的设备上反复尝试。此时应：
+
+- 优先完成当前设备可支持 profile 的手工验证
+- 明确记录未验证 profile、无法验证的原因和影响范围
+- 不要把“设备不支持某个 Frida 大版本”误判成 release 工具链回归
+
+如果示例 app 本身会快速退出、冷启动不稳定或 attach 窗口很短，不要让业务 app 的时序噪音主导 RC 结论。发布 smoke 的目标是验证工具链，因此可以改用设备上稳定常驻的系统 app 作为 `attach --detach-on-load` 手工验证目标，例如 `com.android.settings`。
 
 RC 阶段的 bug 处理规则：
 
@@ -223,21 +264,37 @@ make release-local RELEASE_TAG=vX.Y.Z
 make release-install-check RELEASE_TAG=vX.Y.Z
 ```
 
-2. 通过 `workflow_dispatch` 触发 `.github/workflows/release.yml`，传入 `vX.Y.Z` 做远程 dry-run。
+2. 把 stable 版本元数据变更单独提交到发布分支：
+
+```sh
+git add release-version.toml src/frida_analykit/_version.py \
+  package.json packages/frida-analykit-agent/package.json package-lock.json
+git commit -m "release: cut vX.Y.Z"
+```
+
+3. 通过 `workflow_dispatch` 触发 `.github/workflows/release.yml`，传入 `vX.Y.Z` 做远程 dry-run。
    dry-run 只执行 build，并上传 `release-bundle-vX.Y.Z` artifact。
-3. dry-run 通过后，再 push `vX.Y.Z`。
-4. push stable tag 后，`Release` 工作流会：
+4. stable dry-run 之前，远端仓库必须已经存在可从当前发布分支追溯到的 RC tag `vX.Y.Z-rc.N`；否则 `validate-promotion` 会在远端报 `No RC tag found for stable release vX.Y.Z`。
+5. dry-run 通过后，再创建并 push `vX.Y.Z`：
+
+```sh
+git tag vX.Y.Z
+test "$(git rev-parse HEAD)" = "$(git rev-parse vX.Y.Z)"
+git push origin vX.Y.Z
+```
+
+6. push stable tag 后，`Release` 工作流会：
    - 复用 `.github/actions/release-bundle/action.yml`
    - 执行 `make release-preflight`
    - 执行 `make release-local`
    - 执行 `make release-install-check`
    - 上传 `release-bundle-vX.Y.Z` artifact
-5. build 成功后，工作流会等待 `production` environment 审批。
-6. 审批通过后，publish 任务会：
+7. build 成功后，工作流会等待 `production` environment 审批。
+8. 审批通过后，publish 任务会：
    - 下载 `release-bundle-vX.Y.Z`
    - 创建 GitHub Release
    - 执行 `npm publish release-bundle/*.tgz --access public --provenance`
-7. stable 发布成功后，把 `release/vX.Y.Z` 合并回 `main`，再按需要回灌到对应开发线。
+9. stable 发布成功后，把 `release/vX.Y.Z` 合并回 `main`，再按需要回灌到对应开发线。
 
 ## 发版中断策略
 
@@ -320,3 +377,73 @@ npm publish ./zsa233-frida-analykit-agent-X.Y.Z.tgz --access public
 ```
 
 RC 不发布 npm。
+
+
+
+## 常见QA
+
+### 1. stable 远程 dry-run 找不到 RC
+
+现象：
+
+- GitHub Actions 的 stable dry-run 在 `validate-promotion` 阶段失败
+- 日志出现 `No RC tag found for stable release vX.Y.Z`
+
+根因：
+
+- 远端仓库还没有 `vX.Y.Z-rc.N` tag
+- 虽然本地已经完成 RC，但 remote `workflow_dispatch` 只能看到远端 refs
+
+确定的解决方案：
+
+- stable dry-run 前，先确保 RC tag 已 push 到远端
+- stable `workflow_dispatch` 使用的 `--ref` 必须能追溯到该 RC tag
+
+### 2. 文档变更混进 stable promotion
+
+现象：
+
+- `validate-promotion` 报 stable 只允许版本元数据差异，但 diff 中出现 `README.md`、`README_EN.md`、`packages/frida-analykit-agent/README.md`
+
+根因：
+
+- README 收束没有在 RC 之前完成
+- 或者 README 变更发生在 RC tag 之后
+
+确定的解决方案：
+
+- 所有 README 收束必须在 RC 之前完成
+- 从 RC 切到 stable 时，只允许保留版本元数据差异
+
+### 3. 发布设备不支持某个受测 profile
+
+现象：
+
+- 当前设备无法启动或稳定运行某个 Frida 大版本
+- 例如设备只支持 `16.x`，不支持 `17.x`
+
+根因：
+
+- 设备能力与 `compat_profiles.json` 中的全部受测 profile 不完全重合
+
+确定的解决方案：
+
+- 不要把这种硬件/设备限制误判成 release 回归
+- 完成当前设备可支持 profile 的手工验证
+- 在发布记录中明确说明未覆盖 profile、原因和影响范围
+
+### 4. 示例 app 本身太不稳定，导致 attach 结论失真
+
+现象：
+
+- `attach --detach-on-load` 报目标进程不存在
+- 但同一套 server / runtime / bundle 在稳定进程上可以正常注入
+
+根因：
+
+- 被测 app 自身冷启动快退、attach 窗口过短，不能代表发布链路本身
+
+确定的解决方案：
+
+- 发布 smoke 验证的目标是工具链，而不是业务 app
+- 如果示例 app 时序不稳定，可改用稳定系统 app 做 `attach --detach-on-load` 验证

@@ -193,6 +193,8 @@
 - 再同步更新 `README_EN.md` 作为根文档的英文翻译
 - 再按需要更新 `packages/frida-analykit-agent/README.md`
 - 文档收束完成后，才进入 `docs/release-process.md` 中定义的 release-version、preflight、RC、stable、publish 流程。
+- 发版时 `git commit`、`git tag`、`workflow_dispatch`、`push tag` 必须串行执行，不要并行；尤其不要把 `git commit` 和 `git tag` 并行跑，否则 tag 可能落在错误提交上。
+- stable 的远程 dry-run / 正式发布依赖远端已存在可追溯的 RC tag；如果 RC tag 还没有 push 到远端，不要直接继续 stable dry-run。
 - 发版过程中如果发现严重 bug，不要立刻边发版边修；应立即停止当前发版流程，明确告诉用户问题出在哪里、影响范围是什么、发布风险是否高。
 - “严重 bug” 包括但不限于：
 - 会导致产物无法安装或无法运行
