@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import frida
 import pytest
 from click.testing import CliRunner
 
@@ -151,6 +152,16 @@ class _FakeAttachDevice(_FakeDevice):
     def attach(self, pid: int) -> _FakeAttachedSession:
         self.attached = pid
         return self.session
+
+
+class _FailingSpawnDevice(_FakeDevice):
+    def __init__(self, exc: Exception) -> None:
+        super().__init__()
+        self._exc = exc
+
+    def spawn(self, argv: list[str]) -> int:
+        self.spawned = argv
+        raise self._exc
 
 
 class _FakeCompat:
@@ -588,6 +599,92 @@ def test_spawn_forwards_remote_port_without_configured_device(tmp_path: Path, mo
     assert compat.calls == [("127.0.0.1:27042", None)]
     assert forwarded["config"].server.device is None
     assert forwarded["action"] == "device connection"
+
+
+def test_spawn_reports_remote_transport_error_with_boot_hint(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner = CliRunner()
+    compat = _FakeCompat()
+    compat.device = _FailingSpawnDevice(frida.TransportError("connection closed"))
+
+    class FakeManager:
+        def ensure_remote_forward(self, config, *, action="remote port forward"):
+            return "27042"
+
+    monkeypatch.setattr("frida_analykit.cli.commands.runtime.FridaCompat", lambda: compat)
+    monkeypatch.setattr(
+        "frida_analykit.cli.common._load_config",
+        lambda _: _remote_runtime_config(tmp_path, app="com.example.demo"),
+    )
+    monkeypatch.setattr("frida_analykit.cli.common.FridaServerManager", lambda *args, **kwargs: FakeManager())
+    monkeypatch.setattr("frida_analykit.cli.common._prepare_frontend_assets", lambda **kwargs: None)
+
+    result = runner.invoke(
+        cli,
+        ["spawn", "--config", str(tmp_path / "config.yml"), "--detach-on-load"],
+    )
+
+    assert result.exit_code != 0
+    assert "remote Frida device `127.0.0.1:27042` is not reachable" in result.output
+    assert "connection closed" in result.output
+    assert "frida-analykit server boot --config" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_spawn_reports_remote_protocol_error_with_boot_hint(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner = CliRunner()
+    compat = _FakeCompat()
+    compat.device = _FailingSpawnDevice(
+        frida.ProtocolError("unable to communicate with remote frida-server")
+    )
+
+    class FakeManager:
+        def ensure_remote_forward(self, config, *, action="remote port forward"):
+            return "27042"
+
+    monkeypatch.setattr("frida_analykit.cli.commands.runtime.FridaCompat", lambda: compat)
+    monkeypatch.setattr(
+        "frida_analykit.cli.common._load_config",
+        lambda _: _remote_runtime_config(tmp_path, app="com.example.demo"),
+    )
+    monkeypatch.setattr("frida_analykit.cli.common.FridaServerManager", lambda *args, **kwargs: FakeManager())
+    monkeypatch.setattr("frida_analykit.cli.common._prepare_frontend_assets", lambda **kwargs: None)
+
+    result = runner.invoke(
+        cli,
+        ["spawn", "--config", str(tmp_path / "config.yml"), "--detach-on-load"],
+    )
+
+    assert result.exit_code != 0
+    assert "remote frida-server at `127.0.0.1:27042` is not ready" in result.output
+    assert "version-compatible" in result.output
+    assert "frida-analykit server boot --config" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_spawn_reports_timeout_without_traceback(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    runner = CliRunner()
+    compat = _FakeCompat()
+    compat.device = _FailingSpawnDevice(frida.TimedOutError("timed out"))
+
+    monkeypatch.setattr("frida_analykit.cli.commands.runtime.FridaCompat", lambda: compat)
+    monkeypatch.setattr("frida_analykit.cli.common._load_config", lambda _: _config(tmp_path, app="com.example.demo"))
+    monkeypatch.setattr("frida_analykit.cli.common._prepare_frontend_assets", lambda **kwargs: None)
+
+    result = runner.invoke(
+        cli,
+        ["spawn", "--config", str(tmp_path / "config.yml"), "--detach-on-load"],
+    )
+
+    assert result.exit_code != 0
+    assert "spawn of `com.example.demo` timed out while waiting for the app to launch" in result.output
+    assert "Check whether the app blocks or exits during launch" in result.output
+    assert "Traceback" not in result.output
 
 
 def test_attach_forwards_remote_port_without_configured_device(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

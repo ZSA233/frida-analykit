@@ -11,37 +11,25 @@
 - 只要用户可见能力、配置、命令行、接入方式、限制条件发生变化，应先更新本文件。
 - release 前收束 `README.md` 时，应基于本文件整体整理，而不是仅把最近一次改动直接拼接进 README。
 
-本文件的初始化快照基于当前仓库状态整理，快照时间为 `2026-03-28`。
+本文件的初始化快照基于当前仓库状态整理，当前更新快照时间为 `2026-03-30`。
 
 ## 当前仓库快照
 
 ### 分支与版本状态
 
-- 当前工作分支：`release/v2.0.5`
+- 当前工作分支：`release/v2.0.6`
 - 当前版本真源：`release-version.toml`
-- 当前声明发布版本：`2.0.4`
+- 当前声明发布版本：`2.0.5`
 - 当前声明发布通道：`stable`
-- 当前 Python 包版本：`src/frida_analykit/_version.py` 中为 `2.0.4`
-- 当前根 `package.json` 版本：`2.0.4`
-- 当前 npm runtime 包 `@zsa233/frida-analykit-agent` 版本：`2.0.4`
+- 当前 Python 包版本：`src/frida_analykit/_version.py` 中为 `2.0.5`
+- 当前根 `package.json` 版本：`2.0.5`
+- 当前 npm runtime 包 `@zsa233/frida-analykit-agent` 版本：`2.0.5`
 
 需要特别记录的一点：
 
-- 分支名已经进入 `release/v2.0.5`，但版本真源仍然是 `2.0.4 stable`。
-- 这意味着仓库 HEAD 已经包含了 post-`v2.0.4` 的持续变更，但正式版本号尚未切换到 `2.0.5`。
-- 后续如果要进行 release 收束，需要先确认届时究竟是发布 `v2.0.5`，还是继续在 `2.0.4` 线上做文档修订。
-
-### 当前已存在的 v2 tag
-
-- `v2.0.0`
-- `v2.0.0-rc.1`
-- `v2.0.0-rc.2`
-- `v2.0.0-rc.3`
-- `v2.0.0-rc.4`
-- `v2.0.1`
-- `v2.0.1-rc.1`
-- `v2.0.2`
-- `v2.0.2-rc.1`
+- 分支名已经进入 `release/v2.0.6`，但版本真源当前仍然是 `2.0.5 stable`。
+- 这意味着仓库 HEAD 已经包含了 post-`v2.0.5` 的持续变更，但正式版本号尚未切换到 `2.0.6`。
+- 后续如果要进行 release 收束，需要先确认届时究竟是发布 `v2.0.6`，还是继续在 `2.0.5` 线上做文档修订。
 
 ## 项目定义
 
@@ -217,6 +205,42 @@ Python 侧目前已经有一套 RPC message / handler 体系。
 - `SAVE_FILE`
 - `SSL_SECRET`
 - `PROGRESSING`
+
+新增的 dex dump 消息链路包括：
+
+- `DEX_DUMP_BEGIN`
+- `DUMP_DEX_FILE`
+- `DEX_DUMP_END`
+- `BATCH(source=DEX_DUMP_FILES)`
+
+当前 `@zsa233/frida-analykit-agent/dex` 已提供 `DexTools` capability：
+
+- `DexTools.enumerateClassLoaderDexFiles()` 返回 plain metadata，不暴露旧版 Java wrapper
+- `DexTools.dumpAllDex()` 会按最大批量字节数流式发送 dex 文件
+- 默认最大批量上限为 `8 MiB`
+- Python 侧默认输出目录优先取 `script.dextools.dex_dir`，否则回退到 `agent.datadir/dextools`
+
+- ART 相关 native 符号绑定已抽到共享 `@zsa233/frida-analykit-agent/native/libart`
+
+### 7. DexTools 配置
+
+当前 `config.yml` 已支持：
+
+```yml
+script:
+  rpc:
+    batch_max_bytes: 8388608
+  dextools:
+    dex_dir: ./data/dextools/
+```
+
+行为说明：
+
+- `batch_max_bytes` 是通用 RPC batch 传输上限，不只服务于 dex dump
+- 它会注入到 agent `Config.BatchMaxBytes`
+- `BatchSender` 在未显式覆盖时默认使用这个全局上限
+- `dex_dir` 为 Python 侧接收 dex dump 的默认目录
+- agent 侧 `DexTools.dumpAllDex()` 可通过 `maxBatchBytes` 参数临时覆盖配置值
 
 当前默认行为：
 
@@ -460,9 +484,13 @@ Python 侧目前已经有一套 RPC message / handler 体系。
 - `legacy-16`
 - `current-17`
 
-### 12. npm runtime 已暴露的能力面
+### 12. npm runtime agent 能力地图
 
-`@zsa233/frida-analykit-agent` 的包根 `.` 当前已经收成瘦入口，只导出轻量基础能力：
+当前 `@zsa233/frida-analykit-agent` 不应再理解为“只有一个 RPC shim 的小包”。从当前仓库代码来看，它已经形成了一套按 capability 拆分的 agent runtime，既包含基础 helper / process / RPC 支撑，也包含 JNI、Dex、ELF、SSL 和 native bindings 等逆向辅助能力。
+
+#### 12.1 核心运行时 / Core Runtime
+
+包根 `@zsa233/frida-analykit-agent` 当前保持瘦入口，只导出轻量基础能力：
 
 - `Config`
 - `LogLevel`
@@ -475,8 +503,18 @@ Python 侧目前已经有一套 RPC message / handler 体系。
 - `FileHelper`
 - `proc`
 
-当前还新增了一组显式 capability subpath，供轻量 bundle 按需导入：
+当前包根设计的重点不是“把所有东西都从 `.` 导出”，而是：
 
+- 保留最轻、最常用、最稳定的基础能力
+- 把较重 capability 留在显式 subpath
+- 让 bundle 体积主要由用户自己的 import 面决定
+
+#### 12.2 公共导入面 / Public Surface
+
+当前正式公共导入面已经明确收口为：
+
+- `@zsa233/frida-analykit-agent`
+- `@zsa233/frida-analykit-agent/rpc`
 - `@zsa233/frida-analykit-agent/config`
 - `@zsa233/frida-analykit-agent/bridges`
 - `@zsa233/frida-analykit-agent/helper`
@@ -484,19 +522,20 @@ Python 侧目前已经有一套 RPC message / handler 体系。
 - `@zsa233/frida-analykit-agent/jni`
 - `@zsa233/frida-analykit-agent/ssl`
 - `@zsa233/frida-analykit-agent/elf`
+- `@zsa233/frida-analykit-agent/dex`
+- `@zsa233/frida-analykit-agent/native/libart`
 - `@zsa233/frida-analykit-agent/native/libssl`
 - `@zsa233/frida-analykit-agent/native/libc`
 
-当前 runtime 的定位不是“只有一个 rpc shim”，而是已经开始积累逆向辅助能力，尤其包括：
+需要特别记住：
 
-- Android / JNI 相关 helper
-- process/maps helper
-- SSL/BoringSSL 相关 helper
-- ELF 解析与辅助工具
-- native lib binding helper
-- RPC 作用域调用支持
+- 当前 package `exports` 已不再保留 `./*` 通配子路径
+- 深层内部文件与 `internal/*` 不再默认属于 public import surface
+- `@zsa233/frida-analykit-agent/libssl` 这类旧入口已经退出主线公开形态，当前应使用 `@zsa233/frida-analykit-agent/native/libssl`
 
-当前 helper 也已经从大静态类重构为分组 facade。主线接口现在是：
+#### 12.3 Helper 门面 / Helper Facade
+
+当前 helper 已经从“大静态类 / 大工具袋”收敛为分组 facade。主线接口现在是：
 
 - `help.log.debug/info/warn/error`
 - `help.progress.create(tag)`
@@ -514,89 +553,180 @@ Python 侧目前已经有一套 RPC message / handler 体系。
 - `help.assert`
 - `help.$send`
 
-其中有一个本轮需要特别强调的导入边界变化：
+这意味着后续 README 收束时，不应再把 helper 描述成“只有若干零散全局函数”，而应强调它现在是一层结构化 facade。
 
-- `@zsa233/frida-analykit-agent/rpc` 现在只安装最小 RPC / REPL 基础能力
-- 它不再为了 REPL / eval context 自动 import `JNIEnv`、`SSLTools`、`ElfTools`、`Libssl`、`help`、`proc`
-- 包根 `@zsa233/frida-analykit-agent` 也不再承担 capability barrel；它不会再顺手导出 `Java`、`JNIEnv`、`SSLTools`、`ElfTools`、`Libssl`
-- 这些能力只有在用户自己的 `index.ts` 中显式 import 对应 capability 模块后，才会进入 bundle 并出现在 RPC eval context 中
-- 这使得 `_agent.js` 的体积主要由用户的显式导入面决定，而不是被 `/rpc` 默认拖重
+#### 12.4 RPC、REPL 与 HandleRef / RPC / REPL / HandleRef
 
-当前 `native/*` 家族的职责边界也已经明确：
+`@zsa233/frida-analykit-agent/rpc` 当前只安装最小 RPC / REPL 基础能力：
 
-- `ssl` 负责高层 hook / workflow，如 `SSLTools` 与 `BoringSSL`
-- `native/libssl` 负责 `Libssl` 这类低层符号绑定
-- `native/libc` 负责 `Libc` / `libc`
-- RPC eval context 会按需暴露 `Libssl` 与 `Libc`，前提仍然是用户已经显式 import 对应模块
+- 它不再为了 eval context 自动 import `JNIEnv`、`SSLTools`、`ElfTools`、`Libart`、`Libssl`、`Libc`、`help`、`proc`
+- capability 是否会进入 `_agent.js` 和 RPC eval context，取决于用户是否在自己的 `index.ts` 中显式 import 对应模块
+- 这使得 `/rpc` 成为真正的最小副入口，而不是默认拖入整套 runtime 的大桶入口
 
-当前 `JNIEnv` 之上已经有一层 JNI member facade，当前已完成第一阶段基础访问面与第二阶段 nonvirtual slice，定位是“显式 `sig` 驱动的高层访问面”，主要特征如下：
+当前 Python 侧 `script.eval(...)`、`script.jsh(...)`、REPL 句柄链路依赖的不是“魔法字符串协议”，而是一套结构化 RPC 能力面：
 
-- `jobject` 支持：
-- `.$method(name, sig)` / `.$call(name, sig, ...args)`
-- `.$nonvirtualMethod(clazz, name, sig)` / `.$nonvirtualCall(clazz, name, sig, ...args)`
-- `.$field(name, sig)` / `.$getField(name, sig)` / `.$setField(name, sig, value)`
-- `.$methodIdFor(name, sig)` / `.$fieldIdFor(name, sig)`
-- `jclass` 支持：
-- `.$method(name, sig)` / `.$call(target, name, sig, ...args)` 用于 unbound instance member
-- `.$nonvirtualMethod(name, sig)` / `.$nonvirtualCall(target, name, sig, ...args)` 用于 unbound nonvirtual instance member
-- `.$staticMethod(name, sig)` / `.$staticCall(name, sig, ...args)`
-- `.$field(name, sig)` / `.$getField(target, name, sig)` / `.$setField(target, name, sig, value)`
-- `.$staticField(name, sig)` / `.$getStaticField(name, sig)` / `.$setStaticField(name, sig, value)`
-- `.$constructor(sig)` / `.$new(sig, ...args)`
-- `.$methodIdFor(name, sig)` / `.$staticMethodIdFor(name, sig)`
-- `.$fieldIdFor(name, sig)` / `.$staticFieldIdFor(name, sig)`
+- `HandleRef`
+- `scope_eval`
+- `scope_call`
+- `scope_get`
+- `enumerate_obj_props`
+- `rpcRuntimeInfo()` 协议预检
 
-当前这一层的明确约束：
+这里需要在后续 README 收束时保持一个边界感：
+
+- `/rpc` 是最小交互能力面
+- capability 模块是按需增强层
+- eval context 的可见性取决于显式 import，而不是隐式全局全家桶
+
+#### 12.5 JNI 能力与门面 / JNI / JNI Facade
+
+`@zsa233/frida-analykit-agent/jni` 当前不只是 `JNIEnv` wrapper，还包括：
+
+- `refs`
+- `strings`
+- `members`
+- `signatures`
+- `runtime_methods`
+- `runtime_fields`
+
+当前 JNI member facade 已经形成了“显式 `sig` 驱动的高层访问面”，主线特征包括：
 
 - `sig` 必填，不做 name-only lookup，也不做 overload 猜测
 - 默认返回 JNI wrapper，不自动转 JS primitive / JS string
 - object-like 返回值可按 descriptor 收敛到已有 wrapper，例如 `jstring` / `jclass`
-- 默认仍由调用方手动管理对象生命周期
-- accessor 额外提供 `withLocal(...)`，用于在 callback 作用域内消费局部引用并自动 `unref`
-- nonvirtual facade 仍要求显式传入 declaring class，不做继承链自动推断
-- unbound method accessor 必须显式传入 target，例如 `clazz.$method(...).call(obj)` 与 `clazz.$method(...).withLocal(obj, use, ...args)`
-- unbound field accessor 必须显式传入 target，例如 `clazz.$field(...).get(obj)` / `set(obj, value)` / `withLocal(obj, use)`
-- bound instance accessor 不接受额外 target；`obj.$method(...).withLocal(obj, use)`、`obj.$field(...).get(obj)` 这类写法都是无效调用
-- bound static field accessor 不接受额外 clazz；`clazz.$staticField(...).get(clazz)` / `set(clazz, value)` 这类写法也是无效调用
+- accessor 提供 `withLocal(...)`，用于局部引用生命周期收口
+- nonvirtual 路径已经有专门 slice，但仍要求显式传入 declaring class
 
-当前正确写法示例：
+当前已明确的接口能力包括：
 
-```ts
-const xField = pointClass.$field("x", "I");
-const before = xField.get(point).toInt();
-xField.set(point, 1);
-const after = pointClass.$getField(point, "x", "I").toInt();
-```
+- `jobject.$method(...)` / `.$call(...)`
+- `jobject.$field(...)` / `.$getField(...)` / `.$setField(...)`
+- `jobject.$nonvirtualMethod(...)` / `.$nonvirtualCall(...)`
+- `jclass.$staticMethod(...)` / `.$staticCall(...)`
+- `jclass.$constructor(...)` / `.$new(...)`
+- `.$methodIdFor(...)` / `.$fieldIdFor(...)`
 
-- 如果调用方绕过了 TypeScript 类型系统，例如使用 `as any` 或纯 JS 入口，runtime guard 仍会保留并直接抛错
+数组与字符串语义也已经被显式拆分：
 
-当前 JNI wrapper 的数组语义已经明确拆分：
+- `jobjectArray` 与各类 primitive array wrapper 表示 JNI array ref，本身仍需要按 ref 生命周期管理
+- `Get*ArrayElements()` 获取的是独立 raw buffer wrapper，不应与 array ref wrapper 混用
+- primitive array ref 提供 `.$elements()` 与 `withElements(...)`
+- `GetStringCritical` 回到 JNI 原型语义，必须显式 acquire / release；`jstring.toCriticalUTF16String()` 只是围绕这套语义做封装
 
-- `jobjectArray` 与 `jbooleanArray` ... `jdoubleArray` 统一表示 JNI array ref，本身仍然是 local/global ref，需要按 ref 生命周期管理
-- `Get*ArrayElements()` 返回的则是独立 raw buffer wrapper，例如 `jintArrayElements` / `jcharArrayElements`
-- primitive array ref 提供 `.$elements()` 与 `withElements(use, mode = 0)`，负责 acquire/release `Get*ArrayElements()` 缓冲区
-- 这两层不能复用同一个 wrapper；否则 array-returning facade 会既泄露 local ref，又把 ref handle 误当 element buffer
+当前仍需特别记住一个 breaking change：
 
-当前 `GetStringCritical` 也已回到 JNI 原型语义：
+- `.$method(name, sig)` 现在返回高层 accessor，而不再直接返回 low-level `jmethodID`
+- 旧 lookup 语义已迁移到 `.$methodIdFor(name, sig)`
 
-- `JNIEnv.GetStringCritical(javaString)` 返回 `NativePointer`
-- 必须配对 `JNIEnv.ReleaseStringCritical(javaString, chars)`
-- `jstring.toCriticalUTF16String()` 提供了和现有 UTF-16 helper 一致的 acquire/read/release 封装
-- 这里不再直接返回 JS string，因为 critical 区间里 VM 可能 pin 住字符串或阻塞 GC，必须尽快 release
+#### 12.6 Dex 能力 / Dex / DexTools
 
-当前需要特别注意一个 breaking change：
+`@zsa233/frida-analykit-agent/dex` 当前公开的核心 capability 是 `DexTools`：
 
-- `.$method(name, sig)` 不再返回 low-level `jmethodID`
-- 旧 lookup 语义已经迁移到 `.$methodIdFor(name, sig)`
-- `.$methodID(existingId)` 仍然保留“把已有 `jmethodID` 反射成 `java.lang.reflect.Method` 对象”的旧语义，不受这次 facade 演进影响
+- `DexTools.enumerateClassLoaderDexFiles()`
+- `DexTools.dumpAllDex({ tag?, dumpDir?, maxBatchBytes?, log? })`
 
-当前应特别注意对外边界已经收口：
+当前行为边界：
 
-- 正式 public entry 仍保留包根 `@zsa233/frida-analykit-agent`
-- 同时新增了一组显式 capability subpath 与副入口 `@zsa233/frida-analykit-agent/rpc`
-- `@zsa233/frida-analykit-agent/libssl` 已退出主线 public shape，迁移到 `@zsa233/frida-analykit-agent/native/libssl`
-- 不再通过 `./*` 通配子路径默认暴露内部实现文件
-- 这意味着内部 `jni/*`、`elf/*`、`net/*` 等文件形态可以继续重构，但不再承诺作为公开导入面兼容
+- `enumerateClassLoaderDexFiles()` 返回 plain metadata，不再回退到旧版 Java wrapper 形态
+- `dumpAllDex()` 在 RPC 模式下会走 `DEX_DUMP_BEGIN -> BATCH(DEX_DUMP_FILES) -> DEX_DUMP_END`
+- 默认最大批量上限为 `8 MiB`
+- 单个超大 dex 会单独成批发送，而不是继续切片
+- Python 侧默认写入 `script.dextools.dex_dir`，未配置时回退到 `agent.datadir/dextools`
+
+当前 agent 侧还有专门的 type-tests 与 device suite 覆盖 DexTools 的类型面和真实流式落盘行为。
+
+#### 12.7 ELF 能力 / ELF / ElfTools
+
+`@zsa233/frida-analykit-agent/elf` 当前公开的正式入口是 `ElfTools`，当前已确认的主线能力包括：
+
+- `ElfTools.findModuleByName(name, tryFix?)`
+- `ElfTools.getModuleByName(name, tryFix?)`
+- `ElfTools.loadFromModule(mod, tryFix?)`
+
+其背后的增强对象是 `ElfModuleX`。从当前 `src/elf/module.ts` 来看，它已经不仅是模块句柄包装，而是带有增强 ELF 解析能力的 module facade，当前至少覆盖：
+
+- ELF header 解析
+- program header 解析
+- dynamic table 解析
+- section header 读取与段查找
+- symbol 扫描
+- relocation / plt relocation 读取与链接
+- `off2addr()` 这类地址映射辅助
+
+当前还存在一个 fixer 扩展点：
+
+- `ElfModuleFixer`
+- `ElfFileFixer`
+
+这说明 README 后续收束时，应把 ELF 能力描述成“增强 ELF 模块分析与修复辅助”，而不是只写成“能找模块名”的小工具。
+
+#### 12.8 SSL 能力 / SSL / SSLTools / BoringSSL
+
+`@zsa233/frida-analykit-agent/ssl` 当前公开的正式能力包括：
+
+- `SSLTools`
+- `BoringSSL`
+- `SSLSecretCallbackConsumer`
+
+从当前 `src/ssl/ssl.ts` 来看，这一侧已经至少形成两条工作流：
+
+- `SSLTools.attachLibsslKeylogFunc(tag?)`
+  通过 libssl 低层符号绑定挂接 keylog callback，把 `SSL_SECRET` 写回 RPC 或本地日志
+- `SSLTools.attachBoringsslKeylogFunc({ mod?, libname? })`
+  先定位目标模块，再借助 `BoringSSL.scanKeylogFunc()` 猜测并 attach BoringSSL 的 keylog 函数
+
+其中 `BoringSSL.scanKeylogFunc()` 当前不是简单 symbol lookup，而是一套静态/启发式分析路径：
+
+- 扫描 `CLIENT_RANDOM` 字符串特征
+- 对字符串引用做 ADRL xref 扫描
+- 从相关指令继续推断 BL 目标
+- 再通过 verifier / thunk 判断做函数确认
+
+因此这里的 README 能力描述应强调：
+
+- 不只是“SSL keylog hook”
+- 还包括对 BoringSSL keylog 相关函数的静态定位辅助
+
+#### 12.9 原生绑定层 / Native Bindings
+
+当前 `native/*` 家族的职责边界已经明确：
+
+- `native/libart` 提供 `Libart` 这类 ART 低层符号绑定
+- `native/libssl` 提供 `Libssl` 这类低层符号绑定
+- `native/libc` 提供 `Libc` / `libc`
+
+这三者与高层 capability 的关系应当这样理解：
+
+- 高层 workflow 位于 `ssl`、`jni`、`dex`、`elf` 等 capability 模块
+- `native/*` 是低层绑定层，供高层 capability 或用户脚本按需显式 import
+- RPC eval context 只有在用户显式 import 对应模块后，才会看到这些低层绑定对象
+
+#### 12.10 私有测试包 / Private Test-only Package
+
+当前仓库里还有一个私有 package：
+
+- `@zsa233/frida-analykit-agent-device-tests`
+- `private: true`
+- 主入口指向其自身的 `dist/index.js`
+- 通过 `peerDependencies` 引用 `@zsa233/frida-analykit-agent`
+
+它的定位不是正式 runtime capability，而是仓库内真机回归与 agent 单测桥接层。当前已知用途包括：
+
+- 在临时 workspace 中安装私有测试导出
+- 通过 `installAgentUnitRpcExports()` 暴露测试 RPC 入口
+- 由 Python 侧 `tests/device` 调用 `listAgentUnitSuites()` / `runAgentUnitSuite(name)` 拉起 suite
+
+当前至少包含这些 suite：
+
+- `dex_tools`
+- `helper_core`
+- `helper_runtime`
+- `jni_env_wrappers`
+- `jni_member_facade`
+- `jni_member_facade_arrays`
+- `jni_member_facade_nonvirtual`
+
+因此后续无论是根 README 还是 npm README，都不应把这个私有包误写成面向普通 npm 用户的正式能力。
 
 ### 13. npm runtime 打包约束
 

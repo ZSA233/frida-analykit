@@ -29,7 +29,7 @@ The Python package is distributed through GitHub only, not PyPI.
 Recommended installation with `uv`:
 
 ```sh
-uv tool install "git+https://github.com/ZSA233/frida-analykit@v2.0.5"
+uv tool install "git+https://github.com/ZSA233/frida-analykit@v2.0.6"
 ```
 
 This path keeps the tag-defined range dependency from `pyproject.toml`, which is currently `frida>=16.5.9,<18`.
@@ -40,7 +40,7 @@ If you prefer an exact Frida pin, install into an isolated environment explicitl
 uv venv .venv-frida-17.8.2
 uv pip install --python .venv-frida-17.8.2/bin/python \
   "frida==17.8.2" \
-  "git+https://github.com/ZSA233/frida-analykit@v2.0.5"
+  "git+https://github.com/ZSA233/frida-analykit@v2.0.6"
 ```
 
 If `frida --version` does not change after you switch environments, you are usually still hitting a global `frida-tools` binary. Managed environments install `frida`, `frida-tools`, and `frida-analykit` together so the shell command follows the selected environment.
@@ -93,6 +93,10 @@ agent:
   stderr: ./logs/stderr.log
 
 script:
+  rpc:
+    batch_max_bytes: 8388608
+  dextools:
+    dex_dir: ./data/dextools
   nettools:
     ssl_log_secret: ./data/nettools/sslkey
 ```
@@ -121,6 +125,7 @@ Notes:
 - `spawn` and `attach` keep the session alive by default so logs and binary payloads continue streaming.
 - `--repl` opens `ptpython` and exposes `device`, `session`, `script`, and `config`.
 - `--verbose` prints the actual adb/npm subprocess commands, exit codes, and captured stdout/stderr so you can diagnose mismatches between expected and observed device state.
+- `spawn` and `attach` do not boot a remote `frida-server` automatically; for remote targets, run `server boot` first.
 - `server.host` also supports `local` and `usb` shortcuts in addition to `host:port`.
 - `server.device` pins the target device serial; `doctor`, `spawn`, `attach`, and the `server` subcommands all prefer it so multi-device setups do not drift onto the wrong target.
 - `doctor --config` reads `config.yml`, shows the configured `server.device` and resolved adb target, checks the device-side `server.servername`, reports the detected server version, and shows the resolved asset arch for the current device ABI.
@@ -202,7 +207,7 @@ console.log("libssl module =", Libssl.$getModule().name)
 SSLTools.guess().forEach((item) => console.log(item))
 ```
 
-`@zsa233/frida-analykit-agent/rpc` only installs the minimal RPC / REPL runtime. The package root `@zsa233/frida-analykit-agent` is also slim now, so heavier capability areas such as `bridges`, `jni`, `ssl`, `elf`, `native/libssl`, and `native/libc` should be imported through explicit subpaths.
+`@zsa233/frida-analykit-agent/rpc` only installs the minimal RPC / REPL runtime. The package root `@zsa233/frida-analykit-agent` is also slim now, so heavier capability areas such as `bridges`, `jni`, `ssl`, `elf`, `dex`, `native/libart`, `native/libssl`, and `native/libc` should be imported through explicit subpaths.
 
 ### 4. Let The CLI Drive The Compile Flow
 
@@ -222,6 +227,29 @@ Run it with the Python CLI:
 frida-analykit attach --config ./config.yml --build --repl
 ```
 
+## Dex Dump
+
+If you need to enumerate and export loaded ART dex files, import the `/dex` capability explicitly:
+
+```ts
+import "@zsa233/frida-analykit-agent/rpc"
+import { DexTools } from "@zsa233/frida-analykit-agent/dex"
+
+setImmediate(() => {
+  const loaders = DexTools.enumerateClassLoaderDexFiles()
+  console.log("dex loaders =", loaders.length)
+  DexTools.dumpAllDex({ tag: "manual" })
+})
+```
+
+Key behavior:
+
+- `DexTools.dumpAllDex()` uses a streaming flow: `DEX_DUMP_BEGIN -> BATCH(DEX_DUMP_FILES) -> DEX_DUMP_END`
+- `script.rpc.batch_max_bytes` is a global RPC batch limit, not a dex-only setting
+- the agent defaults to `Config.BatchMaxBytes`; `dumpAllDex({ maxBatchBytes })` can override it per call
+- Python writes dex files to `script.dextools.dex_dir` first, then falls back to `agent.datadir/dextools`
+- if a single dex exceeds the batch limit it is still sent as a single batch instead of being sliced further
+
 ## Config Shape
 
 The v2 YAML shape stays close to v1:
@@ -231,7 +259,7 @@ The v2 YAML shape stays close to v1:
 - `server`: target device and `frida-server` connection settings
   `server.version` is an optional pin for the desired `frida-server` build
 - `agent`: Python-side output directories for logs and binary payloads
-- `script`: agent-side extension config, currently mainly `nettools.ssl_log_secret`
+- `script`: agent-side extension config, currently `repl.globals`, `nettools.ssl_log_secret`, `rpc.batch_max_bytes`, and `dextools.dex_dir`
 
 ## Distribution And Repository Layout
 

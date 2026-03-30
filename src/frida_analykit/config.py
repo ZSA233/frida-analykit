@@ -43,6 +43,18 @@ class ScriptNetToolsConfig(BaseModel):
     ssl_log_secret: Path | None = None
 
 
+class ScriptDexToolsConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    dex_dir: Path | None = None
+
+
+class ScriptRpcConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    batch_max_bytes: int = 8 * 1024 * 1024
+
+
 class ScriptReplConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -53,6 +65,8 @@ class ScriptConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     nettools: ScriptNetToolsConfig = Field(default_factory=ScriptNetToolsConfig)
+    dextools: ScriptDexToolsConfig = Field(default_factory=ScriptDexToolsConfig)
+    rpc: ScriptRpcConfig = Field(default_factory=ScriptRpcConfig)
     repl: ScriptReplConfig = Field(default_factory=ScriptReplConfig)
 
 
@@ -101,6 +115,11 @@ class AppConfig(BaseModel):
                 ),
                 "script": self.script.model_copy(
                     update={
+                        "dextools": self.script.dextools.model_copy(
+                            update={
+                                "dex_dir": resolve(self.script.dextools.dex_dir),
+                            }
+                        ),
                         "nettools": self.script.nettools.model_copy(
                             update={
                                 "ssl_log_secret": resolve(self.script.nettools.ssl_log_secret),

@@ -261,7 +261,7 @@ class SessionWrapper:
         runtime: str | None = None,
         env: ScriptEnv | None = None,
     ) -> ScriptWrapper:
-        inject_env = env or ScriptEnv()
+        inject_env = env or ScriptEnv(BatchMaxBytes=self._config.script.rpc.batch_max_bytes)
         script = self._session.create_script(
             try_inject_environ(source, inject_env.model_dump()),
             name,

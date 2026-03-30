@@ -1,6 +1,6 @@
 {
   "name": "@zsa233/frida-analykit-agent",
-  "version": "2.0.5",
+  "version": "2.0.6",
   "description": "Frida agent runtime for frida-analykit",
   "keywords": [
     "frida",
@@ -58,9 +58,17 @@
       "types": "./dist/elf/index.d.ts",
       "default": "./dist/elf/index.js"
     },
+    "./dex": {
+      "types": "./dist/dex/index.d.ts",
+      "default": "./dist/dex/index.js"
+    },
     "./native/libssl": {
       "types": "./dist/native/libssl/index.d.ts",
       "default": "./dist/native/libssl/index.js"
+    },
+    "./native/libart": {
+      "types": "./dist/native/libart/index.d.ts",
+      "default": "./dist/native/libart/index.js"
     },
     "./native/libc": {
       "types": "./dist/native/libc/index.d.ts",

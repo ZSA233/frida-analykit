@@ -3,6 +3,7 @@ from __future__ import annotations
 import atexit
 import asyncio
 import os
+import shlex
 import time
 from pathlib import Path
 from typing import Callable, Iterable, Protocol, TypeAlias, TypeVar, cast
@@ -209,6 +210,54 @@ def _post_attach(
 
 def _configure_verbose(verbose: bool) -> None:
     set_verbose(verbose)
+
+
+def _runtime_click_exception(
+    *,
+    command: str,
+    target: str | int | None,
+    config: AppConfig,
+    exc: Exception,
+) -> click.ClickException:
+    detail = str(exc).strip()
+    operation = command if target is None else f"{command} of `{target}`"
+
+    if isinstance(exc, (frida.TransportError, frida.ServerNotRunningError, frida.ProtocolError)):
+        if config.server.is_remote:
+            boot_command = "frida-analykit server boot"
+            if config.source_path is not None:
+                boot_command += f" --config {shlex.quote(str(config.source_path))}"
+            detail_suffix = f" ({detail})" if detail else ""
+            if isinstance(exc, frida.ProtocolError):
+                problem = f"the remote frida-server at `{config.server.host}` is not ready"
+                guidance = "Check that it is running and version-compatible."
+            else:
+                problem = f"the remote Frida device `{config.server.host}` is not reachable"
+                guidance = "Check that the server is running and the forwarded port is reachable."
+            # Runtime commands only ensure adb port forwarding for remote targets.
+            # They intentionally do not start frida-server on the device.
+            return click.ClickException(
+                f"{operation} failed because {problem}{detail_suffix}. {guidance} "
+                f"`spawn` and `attach` do not boot `frida-server` automatically; "
+                f"run `{boot_command}` first and retry."
+            )
+        return click.ClickException(f"{operation} failed: {detail or exc.__class__.__name__}")
+
+    if isinstance(exc, frida.TimedOutError):
+        if command == "spawn":
+            return click.ClickException(
+                f"{operation} timed out while waiting for the app to launch. "
+                "Check whether the app blocks or exits during launch, then retry."
+            )
+        return click.ClickException(
+            f"{operation} timed out while waiting for the target process to respond. "
+            "Verify the target process is still alive, then retry."
+        )
+
+    if isinstance(exc, frida.ProcessNotFoundError):
+        return click.ClickException(f"{operation} failed because the target process no longer exists.")
+
+    return click.ClickException(f"{operation} failed: {detail or exc.__class__.__name__}")
 
 
 def _resolve_runtime_device(config: AppConfig, compat: FridaCompat) -> RuntimeDevice:

@@ -97,12 +97,13 @@ class _FakeSession:
 def test_try_inject_environ_wraps_module_import_with_bootstrap_guard() -> None:
     script_src = "16 /index.js\n✄\nconsole.log('demo')\n"
 
-    injected = try_inject_environ(script_src, {"OnRPC": True})
+    injected = try_inject_environ(script_src, {"OnRPC": True, "BatchMaxBytes": 1024})
 
     assert 'globalThis.__FRIDA_ANALYKIT_CONFIG__' in injected
     assert 'await import("/index.js");' in injected
     assert "catch (error)" in injected
     assert 'console.error(`[frida-analykit/bootstrap] ${description}`);' in injected
+    assert '"BatchMaxBytes": 1024' in injected
 
 
 def test_session_wrapper_reuses_existing_logger_bundle(monkeypatch, tmp_path: Path) -> None:
@@ -180,3 +181,23 @@ def test_script_wrapper_public_exports_remain_transparent(tmp_path: Path) -> Non
 
     assert script.exports_sync.plain_payload() == {"type": "demo"}
     assert asyncio.run(script.exports_async.plain_payload()) == {"type": "demo"}
+
+
+def test_session_wrapper_injects_default_batch_limit(tmp_path: Path) -> None:
+    fake_session = _FakeSession()
+    base_config = _config(tmp_path)
+    config = base_config.model_copy(
+        update={
+            "script": base_config.script.model_copy(
+                update={
+                    "rpc": base_config.script.rpc.model_copy(update={"batch_max_bytes": 2048}),
+                }
+            )
+        }
+    )
+    session = SessionWrapper(fake_session, config=config)
+
+    session.create_script("16 /index.js\n✄\n")
+
+    assert fake_session.last_source is not None
+    assert '"BatchMaxBytes": 2048' in fake_session.last_source

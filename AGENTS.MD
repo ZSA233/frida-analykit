@@ -154,6 +154,18 @@
 - 如果需要抽象依赖面，只允许使用“小而明确的 `Protocol`”，并定义在使用侧；不要用大而泛的接口占位。
 - 不要用“返回一个不透明对象或模块，再动态调用其方法”的方式规避类型表达。
 
+## 子系统设计规范规则
+
+- 根目录 `AGENTS.MD` 是本项目所有端共用的公共规范底线。
+- 在此基础上，本项目额外维护两份子系统级 `DESIGN_SPEC.MD`：
+  - `src/frida_analykit/DESIGN_SPEC.MD`
+  - `packages/frida-analykit-agent/DESIGN_SPEC.MD`
+- 当改动 Python 侧代码、测试、模块边界或接口设计时，必须同时参考 `src/frida_analykit/DESIGN_SPEC.MD`。
+- 当改动 agent / TypeScript 侧代码、测试、导出边界或 capability 设计时，必须同时参考 `packages/frida-analykit-agent/DESIGN_SPEC.MD`。
+- 如果改动跨越 Python 与 agent 的协议边界，例如 RPC 协议、REPL 句柄、导出形态、打包导入边界或组合测试工作流，应同时对照两份 `DESIGN_SPEC.MD`。
+- 子系统 `DESIGN_SPEC.MD` 只能细化该端当前风格，不能放宽或绕过本文件已有规则。
+- 如果本次改动已经改变了某一侧当前的设计风格、模块组织、测试样式、导出边界或接口习惯，应同步更新对应 `DESIGN_SPEC.MD`，避免规范长期落后于代码。
+
 ## README 文档维护规则
 
 - 本项目有两份面向发布的 README，且它们职责不同。
@@ -207,9 +219,11 @@
 - 是否存在非显而易见的修复点，但还没有加注释？
 - 是否有文件或测试已经大到值得拆分？
 - 这次涉及的 Python 代码，类型注解是否已经足够清楚，尤其是参数、返回值、字段和属性？
+- 这次改动涉及哪一侧？是否已经对照对应的 `DESIGN_SPEC.MD` 设计和实现？
 - 当前新增类是否单独打开就能看懂其依赖？
 - 是否引入了动态入口、包根转发、或不透明依赖中转层？
 - 测试是否 patch 在真实拥有者上，而不是隐藏私有面？
+- 如果这次改动改变了某一侧的设计风格、模块边界、测试组织或公开接口习惯，是否已经同步更新对应的 `DESIGN_SPEC.MD`？
 - 如果这次改动影响了用户可见行为，`PRE_README.MD` 是否已经同步更新？
 - 如果需要收束 README，这次目标到底是根 `README.md` 还是 `packages/frida-analykit-agent/README.md`？
 - 如果这是一次发版操作，用户是否已经明确给出目标版本号？

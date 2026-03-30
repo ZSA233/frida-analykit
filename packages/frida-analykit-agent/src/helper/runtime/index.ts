@@ -1,5 +1,5 @@
 import { Config } from "../../config/index.js"
-import { BatchSender } from "../../internal/rpc/batch_sender.js"
+import { BatchSender, type BatchSenderOptions } from "../../internal/rpc/batch_sender.js"
 import { libc } from "../../native/libc/libc.js"
 import type { FileHelper } from "../fs/index.js"
 import type { LoggerState } from "../log/index.js"
@@ -57,8 +57,8 @@ export function createRuntimeFacade(context: HelperRuntimeContext) {
             }
             return context.androidApiLevel
         },
-        newBatchSender(source: string): BatchSender {
-            return new BatchSender(source)
+        newBatchSender(source: string, options: BatchSenderOptions = {}): BatchSender {
+            return new BatchSender(source, options)
         },
     } as const
 }

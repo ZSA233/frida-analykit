@@ -4,7 +4,7 @@ declare const base: NativePointer;
 
 const logState: LoggerState = new LoggerState(2);
 const progress: ProgressNotify = help.progress.create("helper");
-const batchSender: BatchSender = help.runtime.newBatchSender("helper");
+const batchSender: BatchSender = help.runtime.newBatchSender("helper", { maxBatchBytes: 1024 });
 const logfile: FileHelper = help.fs.getLogFile("/tmp/helper.log", "a");
 const joinedPath: string = help.fs.joinPath("/tmp", "helper.log");
 const isPath: boolean = help.fs.isFilePath("/tmp/helper.log");

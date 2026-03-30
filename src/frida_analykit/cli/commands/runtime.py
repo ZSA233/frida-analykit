@@ -95,6 +95,15 @@ def spawn(
             repl=repl,
             detach_on_load=detach_on_load,
         )
+    except click.ClickException:
+        raise
+    except Exception as exc:
+        raise cli_common._runtime_click_exception(
+            command="spawn",
+            target=config.app,
+            config=config,
+            exc=exc,
+        ) from exc
     finally:
         if watcher is not None:
             watcher.close()
@@ -131,9 +140,9 @@ def attach(
         project_dir=project_dir,
         install=install,
     )
+    resolved_pid = pid
     try:
         device = cli_common._resolve_runtime_device(config, compat)
-        resolved_pid = pid
         if resolved_pid is None and config.app:
             resolved_pid = cli_common._find_app_pid(device, compat, config.app)
         if resolved_pid is None:
@@ -149,6 +158,15 @@ def attach(
             repl=repl,
             detach_on_load=detach_on_load,
         )
+    except click.ClickException:
+        raise
+    except Exception as exc:
+        raise cli_common._runtime_click_exception(
+            command="attach",
+            target=resolved_pid if resolved_pid is not None else config.app,
+            config=config,
+            exc=exc,
+        ) from exc
     finally:
         if watcher is not None:
             watcher.close()

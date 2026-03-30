@@ -16,8 +16,8 @@ agent:
 
 
 script:
-  nettools:
-    ssl_log_secret: ./data/nettools/sslkey/
+  rpc:
+    batch_max_bytes: 8388608
   repl:
     globals:
       - Process
@@ -26,3 +26,7 @@ script:
       - Java
       - ObjC
       - Swift
+  dextools:
+    dex_dir: ./data/dextools/
+  nettools:
+    ssl_log_secret: ./data/nettools/sslkey/

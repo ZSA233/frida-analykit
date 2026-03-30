@@ -1,6 +1,7 @@
 from frida_analykit.rpc.message import (
     RPCMessage,
     RPCMsgBatch,
+    RPCMsgDexDumpBegin,
     RPCMsgSaveFile,
     RPCMsgScopeCall,
     RPCMsgType,
@@ -45,3 +46,23 @@ def test_unpack_batch_payload_splits_data_stream() -> None:
     chunks = unpack_batch_payload(payload)
 
     assert [chunk.data for chunk in chunks] == [b"abc", b"de"]
+
+
+def test_rpc_message_from_mapping_parses_dex_dump_begin() -> None:
+    message = RPCMessage.from_mapping(
+        {
+            "type": RPCMsgType.DEX_DUMP_BEGIN.value,
+            "data": {
+                "transfer_id": "dex-1",
+                "tag": "demo",
+                "expected_count": 2,
+                "total_bytes": 10,
+                "max_batch_bytes": 4096,
+            },
+        }
+    )
+
+    assert isinstance(message.data, RPCMsgDexDumpBegin)
+    assert message.data.transfer_id == "dex-1"
+    assert message.data.expected_count == 2
+    assert message.data.max_batch_bytes == 4096
