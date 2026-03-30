@@ -5,77 +5,116 @@
 
 🌍 Language: [中文](README.md) | English
 
-Frida-Analykit v2 is a dual-artifact repository:
+`frida-analykit` v2 is a dual-artifact monorepo: the Python CLI handles environment setup, builds, injection, and data persistence, while the npm runtime `@zsa233/frida-analykit-agent` provides runtime capabilities for custom TypeScript Frida agents.
 
-- Python CLI for device/session orchestration, `frida-server` bootstrapping, log and binary persistence, REPL, and project scaffolding.
-- npm runtime package for custom TypeScript agents: `@zsa233/frida-analykit-agent`.
+## Project Positioning
+
+- Python CLI: manages the `frida-server` lifecycle, device connectivity, build orchestration, attach/spawn flows, REPL, logs, and binary payload persistence.
+- npm runtime: published as `@zsa233/frida-analykit-agent`, providing RPC, helper, JNI, ELF, SSL, Dex dump, and selected native bindings.
+- The main v2 workflow is: "you maintain an independent TypeScript agent workspace, and the CLI handles build, injection, and result archiving."
+
+## Architecture Diagram
+
+```mermaid
+flowchart LR
+    subgraph Host["Host PC（宿主机 / 电脑端）"]
+        direction TB
+        WorkDir["Agent 工作区<br/>config.yml / tsconfig / 你的代码"]
+        CLI["frida-analykit<br/>Python CLI 工具"]
+        DataArchive["本地数据归档<br/>Logs / 导出的 Dex 等"]
+
+        WorkDir -->|"配置 / 构建"| CLI
+        CLI -->|"日志 / 导出"| DataArchive
+    end
+
+    subgraph Framework["Frida Framework（通信与注入底座）"]
+        direction TB
+        FridaCore["Frida Core<br/>Python 绑定"]
+        RPCChannel["Frida RPC / Message 通道"]
+    end
+
+    subgraph Device["Target Device（Android / iOS 设备端）"]
+        direction TB
+        FridaServer["frida-server<br/>Root 守护进程"]
+
+        subgraph App["Target App Process（目标应用进程）"]
+            direction TB
+            AgentRuntime["zsa233/frida-analykit-agent<br/>注入的 runtime"]
+            TargetMem["App 内存"]
+
+            AgentRuntime -->|"Hook / 读写 / 调用"| TargetMem
+        end
+
+        FridaServer -->|"注入 _agent.js"| AgentRuntime
+    end
+
+    CLI -->|"Attach / Spawn"| FridaCore
+    CLI -->|"REPL / 数据"| RPCChannel
+    FridaCore -->|"USB / TCP"| FridaServer
+    RPCChannel -->|"JSON / Bytes"| AgentRuntime
+```
 
 ## Compatibility
 
 - Python dependency range: `frida>=16.5.9,<18`
-- Tested profile pins: `16.5.9` and `17.8.2`
+- Current tested profiles: `legacy-16` with `16.5.9`, and `current-17` with `17.8.2`
 - `frida-analykit doctor` classifies the current environment as `tested`, `supported but untested`, or `unsupported`
 
-Check the current environment with:
+Check the current environment first:
 
 ```sh
 frida-analykit doctor
 ```
 
-## Install The Python CLI
+## Regular Users: Install The Python CLI
 
-The Python package is distributed through GitHub only, not PyPI.
+The Python package is distributed through GitHub repositories / GitHub Releases and is not published to PyPI.
 
-Recommended installation with `uv`:
+The recommended installation uses `uv`:
 
 ```sh
 uv tool install "git+https://github.com/ZSA233/frida-analykit@v2.0.6"
 ```
 
-This path keeps the tag-defined range dependency from `pyproject.toml`, which is currently `frida>=16.5.9,<18`.
-
-If you prefer an exact Frida pin, install into an isolated environment explicitly:
+If you need to maintain multiple Frida-version environments, you can use the built-in environment manager:
 
 ```sh
-uv venv .venv-frida-17.8.2
-uv pip install --python .venv-frida-17.8.2/bin/python \
-  "frida==17.8.2" \
-  "git+https://github.com/ZSA233/frida-analykit@v2.0.6"
-```
-
-If `frida --version` does not change after you switch environments, you are usually still hitting a global `frida-tools` binary. Managed environments install `frida`, `frida-tools`, and `frida-analykit` together so the shell command follows the selected environment.
-
-For local development, the repository helper keeps this workflow reproducible:
-
-```sh
-make dev-env
-make dev-env-list
-make dev-env-gen FRIDA_VERSION=16.5.9
-make dev-env-gen FRIDA_VERSION=16.5.9 NO_REPL=1
-make dev-env-gen FRIDA_VERSION=16.5.9 ENV_NAME=frida-16.5.9
-make dev-env-enter ENV_NAME=frida-16.5.9
-make dev-env-remove ENV_NAME=frida-16.5.9
-```
-
-The general CLI exposes the same workflow:
-
-```sh
-frida-analykit env create --frida-version 16.5.9 --name frida-16.5.9
-frida-analykit env create --frida-version 16.5.9 --no-repl
+frida-analykit env create --frida-version 16.5.9 --name legacy-16
+frida-analykit env create --frida-version 17.8.2 --name current-17
 frida-analykit env list
-frida-analykit env use frida-16.5.9
+frida-analykit env use legacy-16
 frida-analykit env shell
-frida-analykit env remove frida-16.5.9
-frida-analykit env install-frida --version 16.5.9
+frida-analykit env remove legacy-16
 ```
 
-`make dev-env` only prints help. `make dev-env-gen` installs the repo-oriented `dev + repl` dependencies by default, requires an explicit `FRIDA_VERSION`, keeps `ENV_NAME` optional, and accepts `NO_REPL=1` to skip the REPL extra. `frida-analykit env create` installs `repl` by default but does not install the repo `dev` group, and accepts `--no-repl` to skip it. `make dev-env-enter` and `frida-analykit env shell` open a child shell; `frida-analykit env use <name>` only switches the current environment pointer and does not modify the current shell. Inside the child shell you can directly run `uv pip install ...`, `python`, `frida`, and `frida-analykit`; if you want `uv run` / `uv sync` to prefer the active environment, use `--active` explicitly. Exit a child shell with `exit`. If you activate manually with `source .../bin/activate`, leave it with `deactivate`.
+## Regular Users: Main Workflow
 
-`env create` and `dev-env-gen` now pass through the native `uv` output during environment preparation, so the built-in `uv venv`, `uv sync`, and `uv pip install` progress remains visible. These managed-environment commands require a working `uv` binary on `PATH`; if `uv` is missing, the CLI now fails with an explicit install hint instead of a raw traceback.
+The main workflow below assumes that you already have a runnable agent workspace, or that you obtained `config.yml` and `index.ts` from a template repository.
 
-## Flow 1: Use It As A CLI Tool
+1. Prepare the Python environment and target-device connection.
+2. Run `doctor` first to check the current Frida version, device connectivity, and `frida-server` status.
+3. Install and boot the remote `frida-server` when needed.
+4. Build `_agent.js`, then run `spawn` or `attach`.
+5. Add `--repl` when you need interactive debugging in async `ptpython`.
 
-Create `config.yml`:
+```sh
+frida-analykit doctor --config ./config.yml
+frida-analykit server install --config ./config.yml
+frida-analykit server boot --config ./config.yml
+frida-analykit build --config ./config.yml
+frida-analykit spawn --config ./config.yml
+frida-analykit attach --config ./config.yml --build --repl
+```
+
+## Common Config And Commands
+
+Common top-level fields in `config.yml` are:
+
+- `app`: the target package name; required for `spawn`, and also usable as PID-resolution input for `attach`.
+- `jsfile`: the compiled `_agent.js` output path.
+- `server`: device and `frida-server` connection settings.
+- `agent`: Python-side output paths for logs and binary payloads.
+- `script`: agent-side extension config; currently includes `rpc.batch_max_bytes`, `repl.globals`, `nettools.ssl_log_secret`, and `dextools.dex_dir`.
 
 ```yml
 app: com.example.demo
@@ -95,75 +134,74 @@ agent:
 script:
   rpc:
     batch_max_bytes: 8388608
-  dextools:
-    dex_dir: ./data/dextools
+  repl:
+    globals:
+      - Process
+      - Module
+      - Memory
+      - Java
+      - ObjC
+      - Swift
   nettools:
     ssl_log_secret: ./data/nettools/sslkey
+  dextools:
+    dex_dir: ./data/dextools
 ```
 
-Typical commands:
+Common commands:
 
 ```sh
-frida-analykit server boot --config config.yml
-frida-analykit server boot --config config.yml --force-restart
-frida-analykit server stop --config config.yml
-frida-analykit doctor --config config.yml
-frida-analykit doctor --config config.yml --verbose
-frida-analykit server install --config config.yml
-frida-analykit server install --config config.yml --verbose
-frida-analykit server install --config config.yml --version 17.8.2
-frida-analykit server install --config config.yml --local-server ./frida-server-17.8.2-android-arm64.xz
-frida-analykit build --config config.yml
-frida-analykit spawn --config config.yml
-frida-analykit attach --config config.yml --pid 12345
-frida-analykit attach --config config.yml --build --repl
-frida-analykit attach --config config.yml --watch --repl
+frida-analykit build --config ./config.yml
+frida-analykit watch --config ./config.yml
+frida-analykit spawn --config ./config.yml
+frida-analykit attach --config ./config.yml --pid 12345
+frida-analykit attach --config ./config.yml --watch --repl
+frida-analykit doctor --config ./config.yml --verbose
+frida-analykit server stop --config ./config.yml
+frida-analykit server install --config ./config.yml --version 17.8.2
+frida-analykit server install --config ./config.yml --local-server ./frida-server-17.8.2-android-arm64.xz
 ```
 
-Notes:
+Keep these behaviors in mind:
 
-- `spawn` and `attach` keep the session alive by default so logs and binary payloads continue streaming.
-- `--repl` opens `ptpython` and exposes `device`, `session`, `script`, and `config`.
-- `--verbose` prints the actual adb/npm subprocess commands, exit codes, and captured stdout/stderr so you can diagnose mismatches between expected and observed device state.
-- `spawn` and `attach` do not boot a remote `frida-server` automatically; for remote targets, run `server boot` first.
-- `server.host` also supports `local` and `usb` shortcuts in addition to `host:port`.
-- `server.device` pins the target device serial; `doctor`, `spawn`, `attach`, and the `server` subcommands all prefer it so multi-device setups do not drift onto the wrong target.
-- `doctor --config` reads `config.yml`, shows the configured `server.device` and resolved adb target, checks the device-side `server.servername`, reports the detected server version, and shows the resolved asset arch for the current device ABI.
-- `server boot` does not kill an existing remote `frida-server` by default. If a matching process is already running, the command fails and points you to `server stop` or `server boot --force-restart`.
-- `server stop` is the supported cleanup path. It succeeds even when no matching remote process is running, and still attempts to remove the configured adb forward.
-- `server install` supports two sources: `--version` downloads from GitHub with progress output, while `--local-server` pushes a local executable or `.xz` archive. Version-based installs prefer `--version`, then `server.version`, then the installed Python `frida` version. Downloaded archives are cached locally and reused.
+- `spawn` requires `config.app`; `attach` can take an explicit `--pid`.
+- `--build` / `--watch` reuse the workspace `npm run build` / `npm run watch`.
+- `attach --watch` / `spawn --watch` mean "wait for the first successful build, then inject" and do not hot-reload an existing session.
+- `spawn` / `attach` do not boot a remote `frida-server` automatically; for remote flows, run `server boot` first.
+- `server.host` supports `host:port`, `local`, and `usb`, while `server.device` pins the target device serial.
+- `server boot` does not kill an existing remote `frida-server` by default; use `--force-restart` when you need replacement.
+- `server stop` is an idempotent cleanup entry and still succeeds when no matching remote process exists.
+- `script.rpc.batch_max_bytes` is a global RPC batch limit, not a dex-only setting.
+- `script.dextools.dex_dir` is the default Python-side output directory for dex dumps.
 
-## Device Tests
+## Agent Capability Overview
 
-The repository also includes a self-contained Android device test suite. It does not depend on any external example project. Each test generates a temporary `_agent.js + config.yml` pair and only validates the core path: `frida-server` lifecycle, a minimal injection marker, and server installation.
+If you need to expand the agent runtime, prefer explicit capability subpath imports. For the full package-level description, see [packages/frida-analykit-agent/README.md](packages/frida-analykit-agent/README.md) and [packages/frida-analykit-agent/README_EN.md](packages/frida-analykit-agent/README_EN.md).
 
-Required environment variables:
+| Capability | Import Path | Primary Use | Visible From Slim Root Entry |
+|:---|:---|:---|:---|
+| `rpc` | `@zsa233/frida-analykit-agent/rpc` | Install the minimal RPC / REPL runtime | No |
+| `helper` | `@zsa233/frida-analykit-agent/helper` | Access logging, file, memory, and runtime facades | Yes |
+| `process` | `@zsa233/frida-analykit-agent/process` | Access `proc` and process-map helpers | Yes |
+| `jni` | `@zsa233/frida-analykit-agent/jni` | Use `JNIEnv`, JNI wrappers, and explicit-signature calls | No |
+| `ssl` | `@zsa233/frida-analykit-agent/ssl` | Use `SSLTools`, BoringSSL locating, and keylog helpers | No |
+| `elf` | `@zsa233/frida-analykit-agent/elf` | Parse ELF files and locate modules or symbols | No |
+| `dex` | `@zsa233/frida-analykit-agent/dex` | Enumerate class-loader dex files and dump them in streaming mode | No |
+| `native/libart` | `@zsa233/frida-analykit-agent/native/libart` | Access low-level ART symbol bindings | No |
+| `native/libssl` | `@zsa233/frida-analykit-agent/native/libssl` | Access low-level OpenSSL / BoringSSL symbol bindings | No |
+| `native/libc` | `@zsa233/frida-analykit-agent/native/libc` | Access low-level libc wrappers and common syscalls | No |
 
-- `FRIDA_ANALYKIT_ENABLE_DEVICE=1`
-- `FRIDA_ANALYKIT_DEVICE_APP=<package>`
-- optional `ANDROID_SERIAL=<serial>`
-- optional `FRIDA_ANALYKIT_DEVICE_LOCAL_SERVER=<path>` for `server install --local-server`
+## Advanced / Developer Users: Generate And Develop A TypeScript Agent
 
-Targets:
-
-```sh
-make device-check
-make device-test-core
-make device-test-install
-make device-test
-```
-
-## Flow 2: Generate A Custom TypeScript Agent Workspace
-
-This is the primary v2 development workflow. The Python CLI handles injection and persistence; you own the TypeScript agent workspace.
-
-### 1. Generate The Workspace
+This is the main v2 development mode: the Python CLI handles environment setup and injection, while you maintain your own agent in a separate TypeScript workspace.
 
 ```sh
 frida-analykit gen dev --work-dir ./my-agent
+cd my-agent
+npm install
 ```
 
-Generated layout:
+Generated workspace layout:
 
 ```text
 my-agent/
@@ -174,60 +212,60 @@ my-agent/
 └── tsconfig.json
 ```
 
-### 2. Install Dependencies
-
-```sh
-cd my-agent
-npm install
-```
-
-The generated `package.json` pins the exact `@zsa233/frida-analykit-agent` version that matches the current CLI release on npmjs, so a normal `npm install` is enough. No `.npmrc` or extra token is required.
-
-### 3. Customize The Agent
-
-The generated `index.ts` wires in the RPC runtime:
+The minimal agent only needs `/rpc`:
 
 ```ts
 import "@zsa233/frida-analykit-agent/rpc"
+
+setImmediate(() => {
+  console.log("pid =", Process.id)
+})
 ```
 
-Then you can extend it:
+If you need more capabilities, explicit capability subpaths are recommended:
 
 ```ts
 import "@zsa233/frida-analykit-agent/rpc"
 import { help } from "@zsa233/frida-analykit-agent/helper"
 import "@zsa233/frida-analykit-agent/process"
+import { JNIEnv } from "@zsa233/frida-analykit-agent/jni"
 import { SSLTools } from "@zsa233/frida-analykit-agent/ssl"
 import { Libssl } from "@zsa233/frida-analykit-agent/native/libssl"
 
-console.log("pid =", Process.id)
-console.log("api level =", help.runtime.androidApiLevel())
-console.log("maps =", proc.loadProcMap().items.length)
-console.log("libssl module =", Libssl.$getModule().name)
-SSLTools.guess().forEach((item) => console.log(item))
+setImmediate(() => {
+  console.log("pid =", Process.id)
+  console.log("api level =", help.runtime.androidApiLevel())
+  console.log("env =", JNIEnv.$handle)
+  console.log("ssl guesses =", SSLTools.guess().length)
+  console.log("maps =", proc.loadProcMap().items.length)
+  console.log("libssl module =", Libssl.$getModule().name)
+})
 ```
 
-`@zsa233/frida-analykit-agent/rpc` only installs the minimal RPC / REPL runtime. The package root `@zsa233/frida-analykit-agent` is also slim now, so heavier capability areas such as `bridges`, `jni`, `ssl`, `elf`, `dex`, `native/libart`, `native/libssl`, and `native/libc` should be imported through explicit subpaths.
+Keep these development details in mind:
 
-### 4. Let The CLI Drive The Compile Flow
+- The generated `package.json` pins the `@zsa233/frida-analykit-agent` version that matches the current CLI release.
+- The package root `@zsa233/frida-analykit-agent` is intentionally slim, and heavier capabilities should be imported through explicit subpaths.
+- Only capabilities explicitly imported in `index.ts` are bundled into `_agent.js` and exposed to the RPC eval context.
+- `frida-analykit build` / `watch` reuse the workspace `npm run build` / `npm run watch`.
 
-```sh
-frida-analykit build --config ./config.yml
-frida-analykit attach --config ./config.yml --build --repl
-frida-analykit attach --config ./config.yml --watch --repl
-```
+## Advanced / Developer Users: REPL And Runtime Capabilities
 
-The CLI reuses the workspace `npm run build` and `npm run watch` scripts. You can still execute those scripts manually for advanced workflows.
-
-If `config.yml` sets `agent.stdout` / `agent.stderr`, the CLI prints the resolved log paths before injection. In ESM mode the top-level `import` chain runs before later `console.log(...)` statements in `index.ts`, so a missing "first log line" usually means a bootstrap or import failure. Check `logs/outerr.log` first before assuming the log path is wrong.
-
-Run it with the Python CLI:
+`--repl` enters async `ptpython` and injects the `config`, `device`, `pid`, `session`, and `script` objects.
 
 ```sh
 frida-analykit attach --config ./config.yml --build --repl
 ```
 
-## Dex Dump
+Key REPL and runtime behaviors are:
+
+- `script.repl.globals` lazily exposes a set of JS seed handles, and the template defaults to `Process`, `Module`, `Memory`, `Java`, `ObjC`, and `Swift`.
+- These names materialize into `script.jsh(name)` handles only when first used, instead of being enumerated when the REPL opens.
+- Common paths include `script.eval("Process.arch")`, `await script.eval_async("Promise.resolve(Process.arch)")`, `handle.value_`, `handle.type_`, and `await handle.resolve_async()`.
+- Handle metadata uses `.value_` / `.type_` and does not consume the real JS property names `.value` / `.type`.
+- If the device is still running an old `_agent.js`, Python raises `RPC runtime mismatch` directly and tells you to rebuild with the current runtime.
+
+## Advanced / Developer Users: Dex Dump And Runtime Capability
 
 If you need to enumerate and export loaded ART dex files, import the `/dex` capability explicitly:
 
@@ -242,59 +280,44 @@ setImmediate(() => {
 })
 ```
 
-Key behavior:
+Current dex-dump behavior includes:
 
-- `DexTools.dumpAllDex()` uses a streaming flow: `DEX_DUMP_BEGIN -> BATCH(DEX_DUMP_FILES) -> DEX_DUMP_END`
-- `script.rpc.batch_max_bytes` is a global RPC batch limit, not a dex-only setting
-- the agent defaults to `Config.BatchMaxBytes`; `dumpAllDex({ maxBatchBytes })` can override it per call
-- Python writes dex files to `script.dextools.dex_dir` first, then falls back to `agent.datadir/dextools`
-- if a single dex exceeds the batch limit it is still sent as a single batch instead of being sliced further
+- `DexTools.dumpAllDex()` uses the streaming flow `DEX_DUMP_BEGIN -> BATCH(DEX_DUMP_FILES) -> DEX_DUMP_END`.
+- `script.rpc.batch_max_bytes` is the global RPC batch limit; on the agent side the default comes from `Config.BatchMaxBytes`, and `dumpAllDex({ maxBatchBytes })` can override it per call.
+- On the Python side the output directory first prefers `script.dextools.dex_dir`, then falls back to `agent.datadir/dextools`.
+- Even when a single dex exceeds the batch limit, it is still sent as one batch instead of being sliced more finely.
 
-## Config Shape
+## Debugging, Device Tests, Release, And Repository Layout
 
-The v2 YAML shape stays close to v1:
+The repository includes Android device tests that do not depend on any external example project. They generate a minimal `_agent.js + config.yml` in a temporary directory and cover the `frida-server` lifecycle, injection flow, REPL core paths, and runtime-install regressions.
 
-- `app`: target application identifier; required for `spawn`, optional for `attach`
-- `jsfile`: compiled `_agent.js` bundle path
-- `server`: target device and `frida-server` connection settings
-  `server.version` is an optional pin for the desired `frida-server` build
-- `agent`: Python-side output directories for logs and binary payloads
-- `script`: agent-side extension config, currently `repl.globals`, `nettools.ssl_log_secret`, `rpc.batch_max_bytes`, and `dextools.dex_dir`
+Before running them, you need:
 
-## Distribution And Repository Layout
+- `FRIDA_ANALYKIT_ENABLE_DEVICE=1`
+- `FRIDA_ANALYKIT_DEVICE_APP=<package>`
+- optional `ANDROID_SERIAL=<serial>`
+- optional `FRIDA_ANALYKIT_DEVICE_LOCAL_SERVER=<path>`
 
-- Python package: GitHub Releases
-  Each GitHub Release includes one source archive `frida_analykit-X.Y.Z.tar.gz` and one real build wheel
-- npm runtime: npmjs
-- Versioning: Python and npm share the same version number
-- Support-range source of truth: the direct `frida>=...,<...` dependency in `pyproject.toml`
-- Tested-profile source of truth: `src/frida_analykit/resources/compat_profiles.json`
-- Release automation requires exactly one direct `frida>=...,<...` dependency in `pyproject.toml`; extras, markers, or duplicate `frida` entries are rejected
-- Historical multi-wheel releases remain as historical artifacts only; new releases no longer use that distribution model
-- The first-release, RC, stable, and development validation runbook lives in `docs/release-process.md`
-
-Key directories:
-
-```text
-src/frida_analykit/                # Python CLI and orchestration
-packages/frida-analykit-agent/     # npm runtime
-scripts/                           # release asset planning / build helpers
-tests/                             # Python tests
-.github/workflows/                 # CI and release automation
+```sh
+make device-check
+make device-test-core
+make device-test-install
+make device-test-repl-handlers
+make device-test
 ```
 
-## Migrating From v1
+The key entry points for release and repository layout are:
 
-v2 is a breaking release. Old script entrypoints are no longer the supported interface.
+- The Python package is distributed through GitHub Releases, and the npm runtime is distributed through npmjs.
+- Python and npm share the same version number, and the version source of truth is `release-version.toml`.
+- The support-range source of truth is the direct `frida>=...,<...` dependency in `pyproject.toml`, and the tested-profile source of truth is `src/frida_analykit/resources/compat_profiles.json`.
+- The release runbook lives in `docs/release-process.md`, and the README closure baseline lives in `PRE_README.MD`.
+- The example repository is [android-reverse-examples](https://github.com/ZSA233/android-reverse-examples).
 
-| v1 | v2 |
-|:---|:---|
-| `python frida-analykit/main.py ...` | `frida-analykit ...` |
-| `python frida-analykit/gen.py dev` | `frida-analykit gen dev` |
-| `ptpython_spawn.sh` / `ptpython_attach.sh` | `--repl` |
-| repo-relative imports such as `./frida-analykit/script/...` | npm package `@zsa233/frida-analykit-agent` |
-| `requirements.txt` | `pyproject.toml` + `uv.lock` |
-
-## Example Repository
-
-- [android-reverse-examples](https://github.com/ZSA233/android-reverse-examples)
+```text
+src/frida_analykit/                # Python CLI and session orchestration
+packages/frida-analykit-agent/     # npm runtime
+scripts/                           # release and build helper scripts
+tests/                             # Python tests
+.github/workflows/                 # CI and release workflows
+```

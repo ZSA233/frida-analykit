@@ -34,23 +34,40 @@
 
 正式进入 release-version、preflight、RC 或 stable 步骤之前，必须先基于 `PRE_README.MD` 收束对外文档。
 
-需要处理的文档分为三类：
+需要处理的文档分为四类：
 
 1. 根 `README.md`
    面向整体用户，应保持更简洁，只关注项目主线接口、环境准备、接入流程和整体发布物。
 2. `README_EN.md`
-   是根 `README.md` 的英文翻译版本，应在根 README 收束后同步更新，不单独发明另一套结构或事实口径。
+   是根 `README.md` 的严格英文翻译版本，应在根 README 收束后同步更新，不单独发明另一套结构或事实口径。
 3. `packages/frida-analykit-agent/README.md`
    面向 npmjs 上的 `@zsa233/frida-analykit-agent` 包用户，应只保留与该包直接相关的信息，允许比根 README 展开更多包级细节。
+4. `packages/frida-analykit-agent/README_EN.md`
+   是 `packages/frida-analykit-agent/README.md` 的严格英文翻译版本，应在包 README 收束后同步更新。
 
 推荐顺序：
 
 1. 先基于 `PRE_README.MD` 收束根 `README.md`
 2. 再同步更新 `README_EN.md`
 3. 再基于同一份 `PRE_README.MD` 收束 `packages/frida-analykit-agent/README.md`
-4. 文档完成后，再继续下面的 release-version / preflight / RC / stable 流程
+4. 再同步更新 `packages/frida-analykit-agent/README_EN.md`
+5. 对根 README 中英对、包 README 中英对分别做一次双语镜像二次校对
+6. 文档完成后，再继续下面的 release-version / preflight / RC / stable 流程
 
-不要把三份文档当作同一份 README 的不同副本机械同步；它们面向的发布面不同。
+双语镜像二次校对至少要检查：
+
+- 章节顺序是否一致
+- 标题数量与层级是否一致
+- 表格行列与字段是否一致
+- 代码块数量、顺序和参数是否一致
+- 提示项、限制说明、示例数量是否一致
+- 根 README 的 Mermaid 架构图是否与 `docs/arch.mermaid` 完全一致
+
+如果中英 README 任一边存在漏段、漏表、漏示例、漏限制说明，视为文档收束未完成，不允许进入 release-version / preflight / RC / stable。
+
+根 README 的架构说明图必须读取并嵌入 `docs/arch.mermaid`；在架构未变时，应把该文件视为只读事实源，而不是顺手在收束 README 时改图。
+
+不要把四份文档当作同一份 README 的不同副本机械同步；根 README 与包 README 面向的发布面不同，但每一组中英文档都必须严格镜像。
 
 ## 一次性准备
 
@@ -201,7 +218,9 @@ make release-install-check RELEASE_TAG=vX.Y.Z-rc.N
 3. 把 RC 版本切换结果提交到发布分支：
 
 ```sh
-git add README.md README_EN.md packages/frida-analykit-agent/README.md \
+git add README.md README_EN.md \
+  packages/frida-analykit-agent/README.md \
+  packages/frida-analykit-agent/README_EN.md \
   release-version.toml src/frida_analykit/_version.py \
   package.json packages/frida-analykit-agent/package.json package-lock.json
 git commit -m "release: cut vX.Y.Z-rc.N"
@@ -403,7 +422,7 @@ RC 不发布 npm。
 
 现象：
 
-- `validate-promotion` 报 stable 只允许版本元数据差异，但 diff 中出现 `README.md`、`README_EN.md`、`packages/frida-analykit-agent/README.md`
+- `validate-promotion` 报 stable 只允许版本元数据差异，但 diff 中出现 `README.md`、`README_EN.md`、`packages/frida-analykit-agent/README.md`、`packages/frida-analykit-agent/README_EN.md`
 
 根因：
 
@@ -412,7 +431,7 @@ RC 不发布 npm。
 
 确定的解决方案：
 
-- 所有 README 收束必须在 RC 之前完成
+- 四份 README 的收束和双语镜像校对都必须在 RC 之前完成
 - 从 RC 切到 stable 时，只允许保留版本元数据差异
 
 ### 3. 发布设备不支持某个受测 profile

@@ -1,8 +1,14 @@
 # @zsa233/frida-analykit-agent
 
-`@zsa233/frida-analykit-agent` 是给自定义 TypeScript Frida agent 使用的 runtime 包。
+🌍 语言: 中文 | [English](README_EN.md)
 
-它通常由 `frida-analykit gen dev` 生成的工作区消费，也可以手动用于任意 `frida-compile` 项目。
+`@zsa233/frida-analykit-agent` 是给自定义 TypeScript Frida agent 使用的 runtime 包，通常由 `frida-analykit gen dev` 生成的工作区消费，也可以手动用于任意 `frida-compile` 项目。
+
+## 包定位
+
+- 包根 `@zsa233/frida-analykit-agent` 是瘦入口，只保留轻量基础能力。
+- 较重 capability 通过显式 subpath 暴露，避免 `/rpc` 默认拖入整套 runtime。
+- 公开能力面围绕 RPC、helper、process、JNI、ELF、SSL、Dex 和 selected native binding 组织。
 
 ## 安装
 
@@ -18,61 +24,28 @@ npm install @zsa233/frida-analykit-agent
 npx frida-compile index.ts -o _agent.js -c
 ```
 
-## 入口设计
+## 能力总览表
 
-包根 `@zsa233/frida-analykit-agent` 现在是瘦入口，只导出轻量基础能力：
+| 能力 | 导入路径 | 主要用途 | 是否默认轻入口可见 |
+|:---|:---|:---|:---|
+| `config` | `@zsa233/frida-analykit-agent/config` | 访问 `Config`、`LogLevel` 等基础配置对象 | 是 |
+| `rpc` | `@zsa233/frida-analykit-agent/rpc` | 安装最小 RPC / REPL runtime | 否 |
+| `helper` | `@zsa233/frida-analykit-agent/helper` | 使用 `help` facade 访问日志、文件、内存和运行时辅助能力 | 是 |
+| `process` | `@zsa233/frida-analykit-agent/process` | 使用 `proc` 和进程映射辅助能力 | 是 |
+| `bridges` | `@zsa233/frida-analykit-agent/bridges` | 访问 Java / ObjC / Swift bridge 封装 | 否 |
+| `jni` | `@zsa233/frida-analykit-agent/jni` | 使用 `JNIEnv`、JNI wrapper 和显式签名调用 | 否 |
+| `ssl` | `@zsa233/frida-analykit-agent/ssl` | 使用 `SSLTools`、BoringSSL 定位和 keylog 辅助 | 否 |
+| `elf` | `@zsa233/frida-analykit-agent/elf` | 解析 ELF、查找模块和符号 | 否 |
+| `dex` | `@zsa233/frida-analykit-agent/dex` | 枚举 class loader dex 并流式 dump 到 Python 侧 | 否 |
+| `native/libart` | `@zsa233/frida-analykit-agent/native/libart` | 访问 ART 低层符号绑定 | 否 |
+| `native/libssl` | `@zsa233/frida-analykit-agent/native/libssl` | 访问 OpenSSL / BoringSSL 低层符号绑定 | 否 |
+| `native/libc` | `@zsa233/frida-analykit-agent/native/libc` | 访问 libc 低层封装和常见系统调用 | 否 |
 
-- `Config`
-- `LogLevel`
-- `setGlobalProperties`
-- `help`
-- `NativePointerObject`
-- `BatchSender`
-- `ProgressNotify`
-- `LoggerState`
-- `FileHelper`
-- `proc`
+## 普通使用方式
 
-较重 capability 改为显式 subpath：
+### 最小 agent
 
-- `@zsa233/frida-analykit-agent/rpc`
-- `@zsa233/frida-analykit-agent/config`
-- `@zsa233/frida-analykit-agent/bridges`
-- `@zsa233/frida-analykit-agent/helper`
-- `@zsa233/frida-analykit-agent/process`
-- `@zsa233/frida-analykit-agent/jni`
-- `@zsa233/frida-analykit-agent/ssl`
-- `@zsa233/frida-analykit-agent/elf`
-- `@zsa233/frida-analykit-agent/dex`
-- `@zsa233/frida-analykit-agent/native/libart`
-- `@zsa233/frida-analykit-agent/native/libssl`
-- `@zsa233/frida-analykit-agent/native/libc`
-
-当前不再提供 `./*` 通配 export，也不承诺任何内部深层路径兼容。
-
-## `/rpc` 轻入口
-
-`@zsa233/frida-analykit-agent/rpc` 现在只安装最小 RPC / REPL 基础能力：
-
-```ts
-import "@zsa233/frida-analykit-agent/rpc"
-```
-
-它不会再自动 import 这些较重能力：
-
-- `help`
-- `proc`
-- `JNIEnv`
-- `SSLTools`
-- `ElfTools`
-- `Libssl`
-- `Libc`
-
-如果你没有在自己的 `index.ts` 里显式 import 对应 capability，它们就不会被打进 `_agent.js`，也不会自动出现在 RPC eval context 中。
-
-## 推荐导入方式
-
-最小 agent：
+最小 agent 只需要安装 `/rpc`：
 
 ```ts
 import "@zsa233/frida-analykit-agent/rpc"
@@ -82,7 +55,9 @@ setImmediate(() => {
 })
 ```
 
-按需导入 capability：
+### 按需导入 capability
+
+如果需要更多能力，推荐显式导入对应 capability：
 
 ```ts
 import "@zsa233/frida-analykit-agent/rpc"
@@ -110,102 +85,72 @@ setImmediate(() => {
 })
 ```
 
-如果你只需要轻量基础能力，包根可以直接用：
+如果你只需要轻量基础能力，也可以直接从包根导入：
 
 ```ts
 import "@zsa233/frida-analykit-agent/rpc"
 import { help, proc } from "@zsa233/frida-analykit-agent"
 ```
 
-但当前推荐主线是显式 subpath，因为它更容易控制 bundle 体积和导入边界。
+当前更推荐显式 subpath，因为它更容易控制 bundle 体积和导入边界。
 
-## Helper Facade
+## 高级能力
 
-`helper` 现在主线是分组 facade：
+### RPC / REPL
 
-- `help.log.debug/info/warn/error`
-- `help.progress.create(tag)`
-- `help.fs.read/readText/write/open/save/getLogFile/joinPath/isFilePath`
-- `help.proc.readMaps/readCmdline/getFdLink/getFileStreamLink`
-- `help.mem.scan/withReadableRange/withReadablePages/backtrace/downAlign/upAlign/pageStart/pageEnd`
-- `help.runtime.assert/send/setOutputDir/getOutputDir/getDataDir/androidApiLevel/newBatchSender`
+安装 `/rpc` 后，agent 会暴露结构化 RPC exports，供 Python CLI 的 `script.eval(...)`、`script.jsh(...)`、REPL 句柄访问和作用域调用使用。
 
-当前仍保留的 flat alias 只包括：
+- RPC eval context 每次执行时都会动态读取 `globalThis`。
+- capability 是否可见，取决于你是否已经在 `index.ts` 里显式 import 了对应模块。
+- `/rpc` 不再默认拖入整套 runtime，只保留最小基础。
+- `Libart`、`Libssl`、`Libc` 也遵循同样的按需可见规则。
 
-- `help.$debug`
-- `help.$info`
-- `help.$warn`
-- `help.$error`
-- `help.assert`
-- `help.$send`
+### DexTools
 
-## Capability 概览
-
-- `jni`
-  提供 `JNIEnv`、JNI wrapper、string helper，以及显式 `sig` 驱动的 member facade
-- `ssl`
-  提供 `SSLTools`、`BoringSSL` 与 SSL keylog/定位相关能力
-- `elf`
-  提供 `ElfTools` 和 ELF 解析辅助能力
-- `dex`
-  提供 `DexTools`，支持枚举 class loader 中的 dex，并按批量上限流式 dump 到 Python 侧
-- `native/libart`
-  提供 `Libart` 低层符号绑定；导入后会注册全局 `Libart`
-- `native/libssl`
-  提供 `Libssl` 低层符号绑定；导入后会注册全局 `Libssl`
-- `native/libc`
-  提供 `Libc` / `libc`；导入后会注册全局 `Libc`
-- `process`
-  导入后会注册全局 `proc`
-
-## RPC / REPL 行为
-
-`/rpc` 安装后，agent 侧会暴露结构化 RPC exports，供 Python CLI 的 `script.eval(...)`、`script.jsh(...)`、REPL 句柄访问与作用域调用使用。
-
-当前行为要点：
-
-- RPC eval context 每次执行时都会动态读取 `globalThis`
-- capability 是否可见，取决于你是否已经在 `index.ts` 里显式 import 了对应模块
-- `/rpc` 不再默认拖入整套 runtime，只保留最小基础
-- `Libart` / `Libssl` / `Libc` 也遵循同样的按需可见规则
-
-## DexTools
-
-显式导入后：
+显式导入后即可使用：
 
 ```ts
+import "@zsa233/frida-analykit-agent/rpc"
 import { DexTools } from "@zsa233/frida-analykit-agent/dex"
+
+setImmediate(() => {
+  const loaders = DexTools.enumerateClassLoaderDexFiles()
+  console.log("dex loaders =", loaders.length)
+  DexTools.dumpAllDex({ tag: "manual" })
+})
 ```
 
-当前提供：
+- `DexTools` 当前提供 `enumerateClassLoaderDexFiles()` 和 `dumpAllDex(...)`。
+- `dumpAllDex()` 会发送 `DEX_DUMP_BEGIN -> BATCH(DEX_DUMP_FILES) -> DEX_DUMP_END`。
+- 默认最大批量大小来自 Python 配置 `script.rpc.batch_max_bytes`，agent 侧对应 `Config.BatchMaxBytes`。
+- 单个超大 dex 会单独成批发送而不会继续切片，Python 侧默认写到 `script.dextools.dex_dir`，未配置时回退到 `agent.datadir/dextools`。
 
-- `DexTools.enumerateClassLoaderDexFiles()`
-- `DexTools.dumpAllDex({ tag?, dumpDir?, maxBatchBytes?, log? })`
+### JNI / native bindings
 
-`dumpAllDex()` 在 RPC 模式下会发送 `DEX_DUMP_BEGIN -> BATCH(DEX_DUMP_FILES) -> DEX_DUMP_END`。默认最大批量大小来自 Python 配置 `script.rpc.batch_max_bytes`，这是通用 RPC batch 上限，不只作用于 dex；agent 侧对应 `Config.BatchMaxBytes`。单个超大 dex 会单独成批发送而不会继续切片。Python 侧默认写到 `script.dextools.dex_dir`，未配置时回退到 `agent.datadir/dextools`。
+`jni` 与 `native/*` capability 适合需要直接访问 ART、JNI 或 libc/libssl 符号的场景。
 
-## JNI 能力说明
+```ts
+import { JNIEnv } from "@zsa233/frida-analykit-agent/jni"
+import { Libart } from "@zsa233/frida-analykit-agent/native/libart"
+import { Libssl } from "@zsa233/frida-analykit-agent/native/libssl"
+import { libc } from "@zsa233/frida-analykit-agent/native/libc"
 
-`@zsa233/frida-analykit-agent/jni` 当前除了 `JNIEnv` wrapper 外，还提供 member facade：
+setImmediate(() => {
+  console.log("jni env =", JNIEnv.$handle)
+  console.log("libart =", Libart.$getModule().name)
+  console.log("libssl =", Libssl.$getModule().name)
+  console.log("pid =", libc.getpid())
+})
+```
 
-- `jobject.$method(name, sig)` / `.$call(name, sig, ...args)`
-- `jobject.$field(name, sig)` / `.$getField(...)` / `.$setField(...)`
-- `jclass.$staticMethod(name, sig)` / `.$staticCall(...)`
-- `jclass.$constructor(sig)` / `.$new(sig, ...args)`
-- `.$nonvirtualMethod(...)` / `.$nonvirtualCall(...)`
+- `jobject.$method(name, sig)`、`.$call(name, sig, ...args)`、`jclass.$staticMethod(name, sig)` 等 member facade 都要求显式 `sig`。
+- JNI 默认返回 wrapper，不自动转成 JS primitive 或 string。
+- accessor 提供 `withLocal(...)` 用于局部引用生命周期收口。
+- 导入 `native/libart`、`native/libssl`、`native/libc` 后，会按需注册对应全局对象。
 
-当前约束：
+## 调试与非公共内容
 
-- `sig` 必填，不做 name-only lookup，也不做 overload 猜测
-- 默认返回 JNI wrapper，不自动转 JS primitive/string
-- accessor 提供 `withLocal(...)` 用于局部引用生命周期收口
-
-## 非公共内容
-
-仓库里还有一个私有包 `@zsa233/frida-analykit-agent-device-tests`，只服务于 `tests/device` 真机回归：
-
-- 它不会进入本包的 `dependencies`
-- 它不会进入本包的 `exports`
-- 它不会进入用户脚手架主线
-
-如果你是普通 npm 用户，可以忽略它。
+- 当前不再提供 `./*` 通配 export，也不承诺任何内部深层路径兼容。
+- `src/internal/*` 和其他深层内部路径不属于公共 API，不应在业务 agent 中直接依赖。
+- 仓库里存在私有包 `@zsa233/frida-analykit-agent-device-tests`，它只服务于 `tests/device` 真机回归，不会进入本包 `dependencies` 或 `exports`。
+- 如果你需要调试 bundle、导出边界或真机行为，优先参考仓库内的 README、type test 和 device test，而不是依赖未公开内部路径。

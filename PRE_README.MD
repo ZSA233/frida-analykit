@@ -13,23 +13,36 @@
 
 本文件的初始化快照基于当前仓库状态整理，当前更新快照时间为 `2026-03-30`。
 
+## README 收束风格基线
+
+README 收束时，应同时遵循下面这些约束：
+
+- `PRE_README.MD` 是事实基线，也是 README 风格基线。
+- 对外 README 应比 `PRE_README.MD` 更短、更稳、更主线化，不要把本文件中的工作痕迹、排查细节和中间态说明原样搬进去。
+- 根 `README.md` 与 `README_EN.md` 必须是严格镜像的中英版本，只允许语言翻译上的差异，不允许一边多写、一边漏写。
+- `packages/frida-analykit-agent/README.md` 与 `packages/frida-analykit-agent/README_EN.md` 也必须遵循同样的严格镜像规则。
+- 根 README 的默认叙述顺序应为：项目定位与架构图、普通用户安装与使用 CLI、普通用户主线工作流、常用配置与命令、高级/开发能力、调试/测试/发布与仓库结构。
+- agent 包 README 的默认叙述顺序应为：包定位、安装、能力总览表、普通使用方式、高级能力、调试与非公共内容。
+- 当能力项较多、导入路径较多或需要区分轻入口/显式 capability 时，应优先用表格呈现，而不是散列 bullet。
+- 根 README 的架构图必须读取并嵌入 `docs/arch.mermaid` 的 Mermaid 源码；在架构未变时，这个 `.mermaid` 文件视为只读事实源。
+- README 收束完成后，必须执行一次二次校对，至少检查标题树、表格、代码块、提示项和限制说明是否在中英文两侧完全同构。
+
 ## 当前仓库快照
 
 ### 分支与版本状态
 
 - 当前工作分支：`release/v2.0.6`
 - 当前版本真源：`release-version.toml`
-- 当前声明发布版本：`2.0.5`
+- 当前声明发布版本：`2.0.6`
 - 当前声明发布通道：`stable`
-- 当前 Python 包版本：`src/frida_analykit/_version.py` 中为 `2.0.5`
-- 当前根 `package.json` 版本：`2.0.5`
-- 当前 npm runtime 包 `@zsa233/frida-analykit-agent` 版本：`2.0.5`
+- 当前 Python 包版本：`src/frida_analykit/_version.py` 中为 `2.0.6`
+- 当前根 `package.json` 版本：`2.0.6`
+- 当前 npm runtime 包 `@zsa233/frida-analykit-agent` 版本：`2.0.6`
 
 需要特别记录的一点：
 
-- 分支名已经进入 `release/v2.0.6`，但版本真源当前仍然是 `2.0.5 stable`。
-- 这意味着仓库 HEAD 已经包含了 post-`v2.0.5` 的持续变更，但正式版本号尚未切换到 `2.0.6`。
-- 后续如果要进行 release 收束，需要先确认届时究竟是发布 `v2.0.6`，还是继续在 `2.0.5` 线上做文档修订。
+- 当前分支名与版本真源都已经收束到 `v2.0.6 stable`。
+- 后续如果继续准备下一次 release，应先更新这里的版本快照，再继续 README 和发版文档收束。
 
 ## 项目定义
 
