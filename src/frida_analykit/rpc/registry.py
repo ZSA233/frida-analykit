@@ -10,6 +10,7 @@ import colorama
 from ..config import AppConfig
 from ..utils import ensure_filepath
 from .handler.dex import DexDumpHandler
+from .handler.elf import ElfHandler
 from .message import RPCBatchSource, RPCMsgBatch, RPCMsgProgressing, RPCMsgSSLSecret, RPCMsgType, RPCPayload, unpack_batch_payload
 
 
@@ -27,6 +28,7 @@ class HandlerRegistry:
         self._exception_handler: ExceptionHandler = self._default_exception_handler
         self._ssl_secret_loggers: dict[str, TextIO] = {}
         self._dex_handler = DexDumpHandler(config, stdout, stderr)
+        self._elf_handler = ElfHandler(config, stdout, stderr)
         self._register_defaults()
 
     def on_message(self, msg_type: RPCMsgType | str, func: MessageHandler | None = None):
@@ -75,6 +77,11 @@ class HandlerRegistry:
         self.on_message(RPCMsgType.DUMP_DEX_FILE, self._dex_handler.handle_file)
         self.on_message(RPCMsgType.DEX_DUMP_END, self._dex_handler.handle_end)
         self.on_batch(RPCBatchSource.DEX_DUMP_FILES, self._dex_handler.handle_batch)
+        self.on_message(RPCMsgType.ELF_SNAPSHOT_BEGIN, self._elf_handler.handle_snapshot_begin)
+        self.on_message(RPCMsgType.ELF_SNAPSHOT_CHUNK, self._elf_handler.handle_snapshot_chunk)
+        self.on_message(RPCMsgType.ELF_SNAPSHOT_END, self._elf_handler.handle_snapshot_end)
+        self.on_message(RPCMsgType.ELF_SYMBOL_CALL_LOG, self._elf_handler.handle_symbol_log)
+        self.on_batch(RPCBatchSource.ELF_SNAPSHOT_CHUNKS, self._elf_handler.handle_snapshot_batch)
 
     def _default_exception_handler(self, message: dict, data: bytes | None) -> None:
         del data

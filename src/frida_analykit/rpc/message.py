@@ -18,12 +18,17 @@ class RPCMsgType(str, Enum):
     DEX_DUMP_BEGIN = "DEX_DUMP_BEGIN"
     DUMP_DEX_FILE = "DUMP_DEX_FILE"
     DEX_DUMP_END = "DEX_DUMP_END"
+    ELF_SNAPSHOT_BEGIN = "ELF_SNAPSHOT_BEGIN"
+    ELF_SNAPSHOT_CHUNK = "ELF_SNAPSHOT_CHUNK"
+    ELF_SNAPSHOT_END = "ELF_SNAPSHOT_END"
+    ELF_SYMBOL_CALL_LOG = "ELF_SYMBOL_CALL_LOG"
     SSL_SECRET = "SSL_SECRET"
     PROGRESSING = "PROGRESSING"
 
 
 class RPCBatchSource(str, Enum):
     DEX_DUMP_FILES = "DEX_DUMP_FILES"
+    ELF_SNAPSHOT_CHUNKS = "ELF_SNAPSHOT_CHUNKS"
 
 
 class RPCMsgInitConfig(BaseModel):
@@ -95,6 +100,44 @@ class RPCMsgDexDumpEnd(BaseModel):
     expected_count: int
     received_count: int
     total_bytes: int = 0
+
+
+class RPCMsgElfSnapshotBegin(BaseModel):
+    snapshot_id: str
+    tag: str = ""
+    output_dir: str | None = None
+    module_name: str
+    module_path: str = ""
+    module_base: str
+    module_size: int
+    expected_files: list[str] = Field(default_factory=list)
+    total_bytes: int = 0
+
+
+class RPCMsgElfSnapshotChunk(BaseModel):
+    snapshot_id: str
+    tag: str = ""
+    artifact: str
+    output_name: str
+    chunk_index: int
+    total_size: int
+
+
+class RPCMsgElfSnapshotEnd(BaseModel):
+    snapshot_id: str
+    tag: str = ""
+    module_name: str
+    expected_files: list[str] = Field(default_factory=list)
+    total_bytes: int = 0
+    received_bytes: int = 0
+
+
+class RPCMsgElfSymbolCallLog(BaseModel):
+    tag: str
+    module_name: str
+    module_base: str
+    symbol: str
+    fields: dict[str, Any] = Field(default_factory=dict)
 
 
 class RPCMsgSSLSecret(BaseModel):
@@ -171,6 +214,10 @@ _MESSAGE_TYPES: dict[RPCMsgType, type[BaseModel]] = {
     RPCMsgType.DEX_DUMP_BEGIN: RPCMsgDexDumpBegin,
     RPCMsgType.DUMP_DEX_FILE: RPCMsgDumpDexFile,
     RPCMsgType.DEX_DUMP_END: RPCMsgDexDumpEnd,
+    RPCMsgType.ELF_SNAPSHOT_BEGIN: RPCMsgElfSnapshotBegin,
+    RPCMsgType.ELF_SNAPSHOT_CHUNK: RPCMsgElfSnapshotChunk,
+    RPCMsgType.ELF_SNAPSHOT_END: RPCMsgElfSnapshotEnd,
+    RPCMsgType.ELF_SYMBOL_CALL_LOG: RPCMsgElfSymbolCallLog,
     RPCMsgType.SSL_SECRET: RPCMsgSSLSecret,
     RPCMsgType.PROGRESSING: RPCMsgProgressing,
 }

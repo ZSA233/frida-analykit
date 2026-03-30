@@ -114,7 +114,7 @@ frida-analykit attach --config ./config.yml --build --repl
 - `jsfile`：编译产物 `_agent.js` 路径。
 - `server`：设备与 `frida-server` 连接信息。
 - `agent`：Python 侧日志与二进制数据输出路径。
-- `script`：agent 侧扩展配置；当前包括 `rpc.batch_max_bytes`、`repl.globals`、`nettools.ssl_log_secret`、`dextools.dex_dir`。
+- `script`：agent 侧扩展配置；当前包括 `rpc.batch_max_bytes`、`repl.globals`、`nettools.ssl_log_secret`、`dextools.output_dir`。
 
 ```yml
 app: com.example.demo
@@ -145,7 +145,7 @@ script:
   nettools:
     ssl_log_secret: ./data/nettools/sslkey
   dextools:
-    dex_dir: ./data/dextools
+    output_dir: ./data/dextools
 ```
 
 常用命令：
@@ -172,7 +172,7 @@ frida-analykit server install --config ./config.yml --local-server ./frida-serve
 - `server boot` 默认不会杀掉已有远端 `frida-server`；如需强制替换，使用 `--force-restart`。
 - `server stop` 是幂等清理入口，即使远端当前没有匹配进程也会返回成功。
 - `script.rpc.batch_max_bytes` 是通用 RPC batch 上限，不只作用于 dex dump。
-- `script.dextools.dex_dir` 是 Python 侧接收 dex dump 的默认目录。
+- `script.dextools.output_dir` 是 Python 侧接收 dex dump 的默认目录。
 
 ## Agent 能力概览
 
@@ -284,7 +284,7 @@ Dex dump 的当前行为包括：
 
 - `DexTools.dumpAllDex()` 会走 `DEX_DUMP_BEGIN -> BATCH(DEX_DUMP_FILES) -> DEX_DUMP_END` 的流式链路。
 - `script.rpc.batch_max_bytes` 是通用 RPC batch 上限；agent 侧默认读取 `Config.BatchMaxBytes`，也可用 `dumpAllDex({ maxBatchBytes })` 按次覆盖。
-- Python 侧默认输出目录优先取 `script.dextools.dex_dir`，未配置时回退到 `agent.datadir/dextools`。
+- Python 侧默认输出目录优先取 `script.dextools.output_dir`，未配置时回退到 `agent.datadir/dextools`。
 - 单个 dex 即使超过批量上限，也会单独成批发送，不继续做更细粒度切片。
 
 ## 调试、真机测试、发布与仓库结构

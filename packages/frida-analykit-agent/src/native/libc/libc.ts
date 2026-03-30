@@ -95,6 +95,7 @@ export class Libc {
     readonly fileno = this.$lazyLoadFunc("fileno", "int", ["pointer"])
     readonly pthread_self = this.$lazyLoadFunc("pthread_self", "int64", [])
     readonly getpid = this.$lazyLoadFunc("getpid", "uint", [])
+    readonly getppid = this.$lazyLoadFunc("getppid", "uint", [])
     readonly getuid = this.$lazyLoadFunc("getuid", "uint", [])
     readonly gettid = this.$lazyLoadFunc("gettid", "uint", [])
 

@@ -408,8 +408,8 @@ class ElfModuleX {
         return tables
     }
 
-    attachSymbol<RetType extends NativeFunctionReturnType, ArgTypes extends any[]>(
-        symName: string, fn: AnyFunction, retType: RetType, argTypes: ArgTypes, abi = undefined,
+    attachSymbol<RetType extends NativeFunctionReturnType, ArgTypes extends NativeFunctionArgumentType[] | []>(
+        symName: string, fn: AnyFunction, retType: RetType, argTypes: ArgTypes, abi: NativeABI | undefined = undefined,
     ) {
         if(this.dynSymbols == null) {
             return false
@@ -423,7 +423,8 @@ class ElfModuleX {
             const args = [impl, ...Array.from(arguments)]
             return fn(...args)
         }
-        const cb = new NativeCallback(wrapper, retType, argTypes, abi)
+        const callbackArgTypes = argTypes.filter((item) => item !== "...") as NativeCallbackArgumentType[] | []
+        const cb = new NativeCallback(wrapper, retType, callbackArgTypes, abi)
         let isWritten = false
         
         const doWrite = () => {

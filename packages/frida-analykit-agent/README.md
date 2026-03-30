@@ -35,7 +35,8 @@ npx frida-compile index.ts -o _agent.js -c
 | `bridges` | `@zsa233/frida-analykit-agent/bridges` | 访问 Java / ObjC / Swift bridge 封装 | 否 |
 | `jni` | `@zsa233/frida-analykit-agent/jni` | 使用 `JNIEnv`、JNI wrapper 和显式签名调用 | 否 |
 | `ssl` | `@zsa233/frida-analykit-agent/ssl` | 使用 `SSLTools`、BoringSSL 定位和 keylog 辅助 | 否 |
-| `elf` | `@zsa233/frida-analykit-agent/elf` | 解析 ELF、查找模块和符号 | 否 |
+| `elf` | `@zsa233/frida-analykit-agent/elf` | 解析 ELF、创建 `ElfSymbolHooks` 和流式 snapshot | 否 |
+| `elf/enhanced` | `@zsa233/frida-analykit-agent/elf/enhanced` | 手动导入常用 symbol hook preset，避免默认打进核心 bundle | 否 |
 | `dex` | `@zsa233/frida-analykit-agent/dex` | 枚举 class loader dex 并流式 dump 到 Python 侧 | 否 |
 | `native/libart` | `@zsa233/frida-analykit-agent/native/libart` | 访问 ART 低层符号绑定 | 否 |
 | `native/libssl` | `@zsa233/frida-analykit-agent/native/libssl` | 访问 OpenSSL / BoringSSL 低层符号绑定 | 否 |
@@ -66,6 +67,7 @@ import "@zsa233/frida-analykit-agent/process"
 import { JNIEnv } from "@zsa233/frida-analykit-agent/jni"
 import { SSLTools } from "@zsa233/frida-analykit-agent/ssl"
 import { ElfTools } from "@zsa233/frida-analykit-agent/elf"
+import { castElfSymbolHooks } from "@zsa233/frida-analykit-agent/elf/enhanced"
 import { DexTools } from "@zsa233/frida-analykit-agent/dex"
 import { Libart } from "@zsa233/frida-analykit-agent/native/libart"
 import { Libssl } from "@zsa233/frida-analykit-agent/native/libssl"
@@ -78,6 +80,7 @@ setImmediate(() => {
   console.log("jni env =", JNIEnv.$handle)
   console.log("ssl guesses =", SSLTools.guess().length)
   console.log("main module =", ElfTools.findModuleByName("libc.so")?.name)
+  console.log("elf hook facade =", castElfSymbolHooks(ElfTools.createSymbolHooks("libc.so", { observeDlsym: false })).findSymbol("getpid")?.name)
   console.log("dex loaders =", DexTools.enumerateClassLoaderDexFiles().length)
   console.log("libart loaded =", Libart.$getModule().name)
   console.log("libssl module =", Libssl.$getModule().name)
@@ -105,6 +108,30 @@ import { help, proc } from "@zsa233/frida-analykit-agent"
 - `/rpc` 不再默认拖入整套 runtime，只保留最小基础。
 - `Libart`、`Libssl`、`Libc` 也遵循同样的按需可见规则。
 
+### ElfTools / SymbolHooks
+
+显式导入后可以把 `/elf` 作为核心能力、把 `/elf/enhanced` 作为可选 preset 增强层：
+
+```ts
+import "@zsa233/frida-analykit-agent/rpc"
+import { ElfTools } from "@zsa233/frida-analykit-agent/elf"
+import { castElfSymbolHooks } from "@zsa233/frida-analykit-agent/elf/enhanced"
+
+setImmediate(() => {
+  const hooks = ElfTools.createSymbolHooks("libc.so", { logTag: "demo", observeDlsym: false })
+  const enhanced = castElfSymbolHooks(hooks)
+  enhanced.getpid()
+  const summary = ElfTools.snapshot("libc.so", { tag: "manual" })
+  console.log("snapshot =", summary.snapshotId, summary.moduleName)
+})
+```
+
+- `/elf` 当前提供 `ElfTools.createSymbolHooks(...)`、`ElfTools.snapshot(...)` 和现有模块解析入口。
+- `ElfSymbolHooks` 是模块级 symbol hook 状态对象，支持 lazy symbol registry、`dlsym` 联动和显式签名 `attach(...)`。
+- `/elf/enhanced` 只在你手动 import 时提供常用 preset，不会自动进入 `globalThis` 或核心 bundle。
+- `snapshot()` 会发送 `ELF_SNAPSHOT_BEGIN -> BATCH(ELF_SNAPSHOT_CHUNKS) -> ELF_SNAPSHOT_END`。
+- Python 侧默认写到 `script.elftools.output_dir`，未配置时回退到 `agent.datadir/elftools`，输出布局是 `snapshots/<tag-or-id>/` 与 `logs/<tag>.log`。
+
 ### DexTools
 
 显式导入后即可使用：
@@ -123,7 +150,7 @@ setImmediate(() => {
 - `DexTools` 当前提供 `enumerateClassLoaderDexFiles()` 和 `dumpAllDex(...)`。
 - `dumpAllDex()` 会发送 `DEX_DUMP_BEGIN -> BATCH(DEX_DUMP_FILES) -> DEX_DUMP_END`。
 - 默认最大批量大小来自 Python 配置 `script.rpc.batch_max_bytes`，agent 侧对应 `Config.BatchMaxBytes`。
-- 单个超大 dex 会单独成批发送而不会继续切片，Python 侧默认写到 `script.dextools.dex_dir`，未配置时回退到 `agent.datadir/dextools`。
+- 单个超大 dex 会单独成批发送而不会继续切片，Python 侧默认写到 `script.dextools.output_dir`，未配置时回退到 `agent.datadir/dextools`。
 
 ### JNI / native bindings
 

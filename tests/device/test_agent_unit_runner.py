@@ -15,6 +15,18 @@ if TYPE_CHECKING:
 
 PROBE_MARKER = "FRIDA_ANALYKIT_AGENT_UNIT_PROBE="
 DEX_DUMP_CASE = "dump_all_dex_streams_to_python_handler"
+ELF_SNAPSHOT_CASE = "snapshot_streams_to_python_session_dir"
+ELF_PRESET_CASE = "enhanced_cast_exposes_getppid_preset"
+EXPECTED_AGENT_UNIT_SUITES = [
+    "dex_tools",
+    "elf_tools",
+    "helper_core",
+    "helper_runtime",
+    "jni_env_wrappers",
+    "jni_member_facade",
+    "jni_member_facade_arrays",
+    "jni_member_facade_nonvirtual",
+]
 AGENT_UNIT_ENTRY_SOURCE = """\
 import "@zsa233/frida-analykit-agent/rpc"
 import { installAgentUnitRpcExports } from "@zsa233/frida-analykit-agent-device-tests"
@@ -63,14 +75,14 @@ def _run_agent_unit_probe(
             "if resume_pid:",
             "    device.resume(pid)",
             "try:",
-            "    payload = {",
-            "        'exports': sorted(script.list_exports_sync()),",
-            "        'suites': script.exports_sync.list_agent_unit_suites(),",
-            f"        'result': script.exports_sync.run_agent_unit_suite({suite!r}),",
-            "    }",
-            "finally:",
-            "    try:",
-            "        session.detach()",
+                "    payload = {",
+                "        'exports': sorted(script.list_exports_sync()),",
+                "        'suites': script.exports_sync.list_agent_unit_suites(),",
+                f"        'result': script.exports_sync.run_agent_unit_suite({suite!r}),",
+                "    }",
+                "finally:",
+                "    try:",
+                "        session.detach()",
             "    except Exception:",
             "        pass",
             f"print({PROBE_MARKER!r} + json.dumps(payload, ensure_ascii=False))",
@@ -172,15 +184,7 @@ def test_agent_unit_runner_reports_jni_wrapper_suite_on_device(
     assert "rpc_runtime_info" in exports
     assert "list_agent_unit_suites" in exports
     assert "run_agent_unit_suite" in exports
-    assert suites == [
-        "dex_tools",
-        "helper_core",
-        "helper_runtime",
-        "jni_env_wrappers",
-        "jni_member_facade",
-        "jni_member_facade_arrays",
-        "jni_member_facade_nonvirtual",
-    ]
+    assert suites == EXPECTED_AGENT_UNIT_SUITES
 
     assert result["suite"] == "jni_env_wrappers"
     assert result["failed"] == 0
@@ -205,15 +209,7 @@ def test_agent_unit_runner_reports_member_facade_suite_on_device(
     suites = payload["suites"]
     result = payload["result"]
 
-    assert suites == [
-        "dex_tools",
-        "helper_core",
-        "helper_runtime",
-        "jni_env_wrappers",
-        "jni_member_facade",
-        "jni_member_facade_arrays",
-        "jni_member_facade_nonvirtual",
-    ]
+    assert suites == EXPECTED_AGENT_UNIT_SUITES
     assert result["suite"] == "jni_member_facade"
     assert result["failed"] == 0
     assert result["passed"] >= 9
@@ -237,15 +233,7 @@ def test_agent_unit_runner_reports_array_member_facade_suite_on_device(
     suites = payload["suites"]
     result = payload["result"]
 
-    assert suites == [
-        "dex_tools",
-        "helper_core",
-        "helper_runtime",
-        "jni_env_wrappers",
-        "jni_member_facade",
-        "jni_member_facade_arrays",
-        "jni_member_facade_nonvirtual",
-    ]
+    assert suites == EXPECTED_AGENT_UNIT_SUITES
     assert result["suite"] == "jni_member_facade_arrays"
     assert result["failed"] == 0
     assert result["passed"] >= 2
@@ -269,15 +257,7 @@ def test_agent_unit_runner_reports_nonvirtual_member_facade_suite_on_device(
     suites = payload["suites"]
     result = payload["result"]
 
-    assert suites == [
-        "dex_tools",
-        "helper_core",
-        "helper_runtime",
-        "jni_env_wrappers",
-        "jni_member_facade",
-        "jni_member_facade_arrays",
-        "jni_member_facade_nonvirtual",
-    ]
+    assert suites == EXPECTED_AGENT_UNIT_SUITES
     assert result["suite"] == "jni_member_facade_nonvirtual"
     assert result["failed"] == 0
     assert result["passed"] >= 2
@@ -301,15 +281,7 @@ def test_agent_unit_runner_reports_helper_core_suite_on_device(
     suites = payload["suites"]
     result = payload["result"]
 
-    assert suites == [
-        "dex_tools",
-        "helper_core",
-        "helper_runtime",
-        "jni_env_wrappers",
-        "jni_member_facade",
-        "jni_member_facade_arrays",
-        "jni_member_facade_nonvirtual",
-    ]
+    assert suites == EXPECTED_AGENT_UNIT_SUITES
     assert result["suite"] == "helper_core"
     assert result["failed"] == 0
     assert result["passed"] >= 5
@@ -333,15 +305,7 @@ def test_agent_unit_runner_reports_dex_tools_suite_on_device(
     suites = payload["suites"]
     result = payload["result"]
 
-    assert suites == [
-        "dex_tools",
-        "helper_core",
-        "helper_runtime",
-        "jni_env_wrappers",
-        "jni_member_facade",
-        "jni_member_facade_arrays",
-        "jni_member_facade_nonvirtual",
-    ]
+    assert suites == EXPECTED_AGENT_UNIT_SUITES
     assert result["suite"] == "dex_tools"
     assert result["failed"] == 0
     assert result["passed"] >= 2
@@ -379,6 +343,57 @@ def test_agent_unit_runner_reports_dex_tools_suite_on_device(
 
 
 @pytest.mark.device
+def test_agent_unit_runner_reports_elf_tools_suite_on_device(
+    device_helpers: 'DeviceHelpers',
+    booted_device_agent_unit_workspace,
+    running_device_agent_unit_app_pid: int,
+) -> None:
+    payload = _run_agent_unit_probe(
+        device_helpers,
+        booted_device_agent_unit_workspace,
+        "elf_tools",
+        pid=running_device_agent_unit_app_pid,
+    )
+
+    suites = payload["suites"]
+    result = payload["result"]
+
+    assert suites == EXPECTED_AGENT_UNIT_SUITES
+    assert result["suite"] == "elf_tools"
+    assert result["failed"] == 0
+    assert result["passed"] >= 4
+    for case in result["cases"]:
+        assert case["ok"] is True, case
+
+    snapshot_detail = json.loads(_suite_case_detail(result, ELF_SNAPSHOT_CASE))
+    snapshot_dir = booted_device_agent_unit_workspace.root / "data" / "elftools" / "snapshots" / str(snapshot_detail["tag"])
+    expected_files = [
+        snapshot_detail["moduleName"],
+        "symbols.json",
+        "proc_maps.txt",
+        "info.json",
+    ]
+
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        if snapshot_dir.is_dir() and all((snapshot_dir / name).is_file() for name in expected_files):
+            break
+        time.sleep(1)
+    else:
+        pytest.fail(
+            "timed out waiting for elf snapshot outputs\n"
+            f"snapshot_dir={snapshot_dir}\n"
+            f"expected_files={expected_files}"
+        )
+
+    assert (snapshot_dir / expected_files[0]).stat().st_size > 0
+    assert (snapshot_dir / "symbols.json").stat().st_size > 0
+    preset_detail = json.loads(_suite_case_detail(result, ELF_PRESET_CASE))
+    assert preset_detail["symbol"] == "getppid"
+    assert preset_detail["logTag"]
+
+
+@pytest.mark.device
 def test_agent_unit_runner_reports_helper_runtime_suite_on_device(
     device_helpers: 'DeviceHelpers',
     booted_device_agent_unit_workspace,
@@ -394,15 +409,7 @@ def test_agent_unit_runner_reports_helper_runtime_suite_on_device(
     suites = payload["suites"]
     result = payload["result"]
 
-    assert suites == [
-        "dex_tools",
-        "helper_core",
-        "helper_runtime",
-        "jni_env_wrappers",
-        "jni_member_facade",
-        "jni_member_facade_arrays",
-        "jni_member_facade_nonvirtual",
-    ]
+    assert suites == EXPECTED_AGENT_UNIT_SUITES
     assert result["suite"] == "helper_runtime"
     assert result["failed"] == 0
     assert result["passed"] >= 5

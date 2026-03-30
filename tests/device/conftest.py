@@ -112,7 +112,7 @@ class DeviceHelpers:
                 f"  stderr: {log_path}",
                 "script:",
                 "  dextools:",
-                "    dex_dir: ./data/dextools",
+                "    output_dir: ./data/dextools",
                 "  nettools: {}",
             ]
         )

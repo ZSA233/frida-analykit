@@ -231,7 +231,7 @@ Python 侧目前已经有一套 RPC message / handler 体系。
 - `DexTools.enumerateClassLoaderDexFiles()` 返回 plain metadata，不暴露旧版 Java wrapper
 - `DexTools.dumpAllDex()` 会按最大批量字节数流式发送 dex 文件
 - 默认最大批量上限为 `8 MiB`
-- Python 侧默认输出目录优先取 `script.dextools.dex_dir`，否则回退到 `agent.datadir/dextools`
+- Python 侧默认输出目录优先取 `script.dextools.output_dir`，否则回退到 `agent.datadir/dextools`
 
 - ART 相关 native 符号绑定已抽到共享 `@zsa233/frida-analykit-agent/native/libart`
 
@@ -244,7 +244,7 @@ script:
   rpc:
     batch_max_bytes: 8388608
   dextools:
-    dex_dir: ./data/dextools/
+    output_dir: ./data/dextools/
 ```
 
 行为说明：
@@ -252,8 +252,25 @@ script:
 - `batch_max_bytes` 是通用 RPC batch 传输上限，不只服务于 dex dump
 - 它会注入到 agent `Config.BatchMaxBytes`
 - `BatchSender` 在未显式覆盖时默认使用这个全局上限
-- `dex_dir` 为 Python 侧接收 dex dump 的默认目录
+- `output_dir` 为 Python 侧接收 dex dump 的默认目录
 - agent 侧 `DexTools.dumpAllDex()` 可通过 `maxBatchBytes` 参数临时覆盖配置值
+
+### 7.1 ElfTools 配置
+
+当前 `config.yml` 已支持：
+
+```yml
+script:
+  elftools:
+    output_dir: ./data/elftools/
+```
+
+行为说明：
+
+- `output_dir` 为 Python 侧接收 ELF snapshot 与 symbol call log 的默认目录
+- `snapshot()` 的产物会写到 `snapshots/<tag-or-id>/`
+- `ELF_SYMBOL_CALL_LOG` 会写到 `logs/<tag>.log`
+- 如果未配置 `script.elftools.output_dir`，则回退到 `agent.datadir/elftools`
 
 当前默认行为：
 
@@ -535,6 +552,7 @@ script:
 - `@zsa233/frida-analykit-agent/jni`
 - `@zsa233/frida-analykit-agent/ssl`
 - `@zsa233/frida-analykit-agent/elf`
+- `@zsa233/frida-analykit-agent/elf/enhanced`
 - `@zsa233/frida-analykit-agent/dex`
 - `@zsa233/frida-analykit-agent/native/libart`
 - `@zsa233/frida-analykit-agent/native/libssl`
@@ -644,7 +662,7 @@ script:
 - `dumpAllDex()` 在 RPC 模式下会走 `DEX_DUMP_BEGIN -> BATCH(DEX_DUMP_FILES) -> DEX_DUMP_END`
 - 默认最大批量上限为 `8 MiB`
 - 单个超大 dex 会单独成批发送，而不是继续切片
-- Python 侧默认写入 `script.dextools.dex_dir`，未配置时回退到 `agent.datadir/dextools`
+- Python 侧默认写入 `script.dextools.output_dir`，未配置时回退到 `agent.datadir/dextools`
 
 当前 agent 侧还有专门的 type-tests 与 device suite 覆盖 DexTools 的类型面和真实流式落盘行为。
 
@@ -655,6 +673,22 @@ script:
 - `ElfTools.findModuleByName(name, tryFix?)`
 - `ElfTools.getModuleByName(name, tryFix?)`
 - `ElfTools.loadFromModule(mod, tryFix?)`
+- `ElfTools.createSymbolHooks(target, options?)`
+- `ElfTools.snapshot(target, options?)`
+
+其中核心 hook 对象已经统一命名为 `ElfSymbolHooks`，不再沿用旧版 `SymbolAttach` 命名。它当前的职责边界是：
+
+- 管理模块级 symbol hook 状态
+- 维护 lazy symbol registry
+- 在可用时通过 `dlsym` 联动补全 deferred hook
+- 提供显式签名 `attach(name, fn, retType, argTypes, options?)`
+
+当前 `/elf/enhanced` 作为手动导入的 preset 增强层存在：
+
+- `@zsa233/frida-analykit-agent/elf/enhanced`
+- `castElfSymbolHooks(hooks)`
+
+它只在用户显式 import 时才会进入 bundle，用于提供常见 libc / libdl / pthread / memory / file / android symbol hook preset，不会自动回流到 `/elf` 核心入口或 `globalThis`。
 
 其背后的增强对象是 `ElfModuleX`。从当前 `src/elf/module.ts` 来看，它已经不仅是模块句柄包装，而是带有增强 ELF 解析能力的 module facade，当前至少覆盖：
 
@@ -671,7 +705,20 @@ script:
 - `ElfModuleFixer`
 - `ElfFileFixer`
 
-这说明 README 后续收束时，应把 ELF 能力描述成“增强 ELF 模块分析与修复辅助”，而不是只写成“能找模块名”的小工具。
+当前 ELF workflow 还补齐了结构化 RPC 链路：
+
+- `ELF_SNAPSHOT_BEGIN`
+- `ELF_SNAPSHOT_CHUNK`
+- `ELF_SNAPSHOT_END`
+- `ELF_SYMBOL_CALL_LOG`
+- `BATCH(source=ELF_SNAPSHOT_CHUNKS)`
+
+`snapshot()` 在 RPC 模式下会走上述消息链路；Python 侧默认产物布局是：
+
+- `script.elftools.output_dir/snapshots/<tag-or-id>/`
+- `script.elftools.output_dir/logs/<tag>.log`
+
+这说明 README 后续收束时，应把 ELF 能力描述成“增强 ELF 模块分析、symbol hook 与流式 snapshot 辅助”，而不是只写成“能找模块名”的小工具。
 
 #### 12.8 SSL 能力 / SSL / SSLTools / BoringSSL
 

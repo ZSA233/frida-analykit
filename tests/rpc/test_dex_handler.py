@@ -55,8 +55,8 @@ def test_registry_handles_streaming_dex_dump_batches(tmp_path: Path) -> None:
     stderr = io.StringIO()
     registry = HandlerRegistry(_config(tmp_path), stdout, stderr)
     transfer_id = "dex-1"
-    dex_dir = tmp_path / "custom-dex"
-    target_dir = dex_dir / "demo"
+    output_dir = tmp_path / "custom-dex"
+    target_dir = output_dir / "demo"
     target_dir.mkdir(parents=True, exist_ok=True)
     (target_dir / "classes00.dex").write_bytes(b"old")
     (target_dir / "classes.json").write_text("[]", encoding="utf-8")
@@ -69,7 +69,7 @@ def test_registry_handles_streaming_dex_dump_batches(tmp_path: Path) -> None:
                 data=RPCMsgDexDumpBegin(
                     transfer_id=transfer_id,
                     tag="demo",
-                    dump_dir=str(dex_dir),
+                    dump_dir=str(output_dir),
                     expected_count=2,
                     total_bytes=5,
                     max_batch_bytes=1024,

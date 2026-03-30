@@ -20,7 +20,9 @@ script:
   rpc:
     batch_max_bytes: 1234
   dextools:
-    dex_dir: ./dextools
+    output_dir: ./dextools
+  elftools:
+    output_dir: ./elftools
   nettools:
     ssl_log_secret: ./ssl
 """.strip(),
@@ -35,7 +37,8 @@ script:
     assert config.agent.datadir == (tmp_path / "data").resolve()
     assert config.agent.stdout == (tmp_path / "logs" / "stdout.log").resolve()
     assert config.agent.stderr == (tmp_path / "logs" / "stderr.log").resolve()
-    assert config.script.dextools.dex_dir == (tmp_path / "dextools").resolve()
+    assert config.script.dextools.output_dir == (tmp_path / "dextools").resolve()
+    assert config.script.elftools.output_dir == (tmp_path / "elftools").resolve()
     assert config.script.rpc.batch_max_bytes == 1234
     assert config.script.nettools.ssl_log_secret == (tmp_path / "ssl").resolve()
     assert config.script.repl.globals == list(DEFAULT_SCRIPT_REPL_GLOBALS)
@@ -62,3 +65,4 @@ script:
 
     assert config.script.repl.globals == ["Process", "Java"]
     assert config.script.rpc.batch_max_bytes == 8 * 1024 * 1024
+    assert config.script.elftools.output_dir is None

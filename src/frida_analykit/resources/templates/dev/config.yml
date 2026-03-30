@@ -27,6 +27,8 @@ script:
       - ObjC
       - Swift
   dextools:
-    dex_dir: ./data/dextools/
+    output_dir: ./data/dextools/
+  elftools:
+    output_dir: ./data/elftools/
   nettools:
     ssl_log_secret: ./data/nettools/sslkey/

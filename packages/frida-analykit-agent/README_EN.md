@@ -35,7 +35,8 @@ npx frida-compile index.ts -o _agent.js -c
 | `bridges` | `@zsa233/frida-analykit-agent/bridges` | Access Java / ObjC / Swift bridge wrappers | No |
 | `jni` | `@zsa233/frida-analykit-agent/jni` | Use `JNIEnv`, JNI wrappers, and explicit-signature calls | No |
 | `ssl` | `@zsa233/frida-analykit-agent/ssl` | Use `SSLTools`, BoringSSL locating, and keylog helpers | No |
-| `elf` | `@zsa233/frida-analykit-agent/elf` | Parse ELF files and locate modules or symbols | No |
+| `elf` | `@zsa233/frida-analykit-agent/elf` | Parse ELF files, create `ElfSymbolHooks`, and stream snapshots | No |
+| `elf/enhanced` | `@zsa233/frida-analykit-agent/elf/enhanced` | Manually import common symbol-hook presets without bloating the core bundle | No |
 | `dex` | `@zsa233/frida-analykit-agent/dex` | Enumerate class-loader dex files and dump them to Python in streaming mode | No |
 | `native/libart` | `@zsa233/frida-analykit-agent/native/libart` | Access low-level ART symbol bindings | No |
 | `native/libssl` | `@zsa233/frida-analykit-agent/native/libssl` | Access low-level OpenSSL / BoringSSL symbol bindings | No |
@@ -66,6 +67,7 @@ import "@zsa233/frida-analykit-agent/process"
 import { JNIEnv } from "@zsa233/frida-analykit-agent/jni"
 import { SSLTools } from "@zsa233/frida-analykit-agent/ssl"
 import { ElfTools } from "@zsa233/frida-analykit-agent/elf"
+import { castElfSymbolHooks } from "@zsa233/frida-analykit-agent/elf/enhanced"
 import { DexTools } from "@zsa233/frida-analykit-agent/dex"
 import { Libart } from "@zsa233/frida-analykit-agent/native/libart"
 import { Libssl } from "@zsa233/frida-analykit-agent/native/libssl"
@@ -78,6 +80,7 @@ setImmediate(() => {
   console.log("jni env =", JNIEnv.$handle)
   console.log("ssl guesses =", SSLTools.guess().length)
   console.log("main module =", ElfTools.findModuleByName("libc.so")?.name)
+  console.log("elf hook facade =", castElfSymbolHooks(ElfTools.createSymbolHooks("libc.so", { observeDlsym: false })).findSymbol("getpid")?.name)
   console.log("dex loaders =", DexTools.enumerateClassLoaderDexFiles().length)
   console.log("libart loaded =", Libart.$getModule().name)
   console.log("libssl module =", Libssl.$getModule().name)
@@ -105,6 +108,30 @@ After `/rpc` is installed, the agent exposes structured RPC exports for Python C
 - `/rpc` no longer pulls the full runtime by default and only keeps the minimal foundation.
 - `Libart`, `Libssl`, and `Libc` follow the same on-demand visibility rules.
 
+### ElfTools / SymbolHooks
+
+After explicit import, you can use `/elf` as the core capability and `/elf/enhanced` as the optional preset layer:
+
+```ts
+import "@zsa233/frida-analykit-agent/rpc"
+import { ElfTools } from "@zsa233/frida-analykit-agent/elf"
+import { castElfSymbolHooks } from "@zsa233/frida-analykit-agent/elf/enhanced"
+
+setImmediate(() => {
+  const hooks = ElfTools.createSymbolHooks("libc.so", { logTag: "demo", observeDlsym: false })
+  const enhanced = castElfSymbolHooks(hooks)
+  enhanced.getpid()
+  const summary = ElfTools.snapshot("libc.so", { tag: "manual" })
+  console.log("snapshot =", summary.snapshotId, summary.moduleName)
+})
+```
+
+- `/elf` now provides `ElfTools.createSymbolHooks(...)`, `ElfTools.snapshot(...)`, and the existing module-resolution APIs.
+- `ElfSymbolHooks` is a module-level symbol-hook state object with lazy symbol registry support, `dlsym` coordination, and explicit-signature `attach(...)`.
+- `/elf/enhanced` only adds common presets when you import it manually; it does not auto-register into `globalThis` or the core bundle.
+- `snapshot()` sends `ELF_SNAPSHOT_BEGIN -> BATCH(ELF_SNAPSHOT_CHUNKS) -> ELF_SNAPSHOT_END`.
+- Python writes ELF outputs to `script.elftools.output_dir` first, then falls back to `agent.datadir/elftools`, using `snapshots/<tag-or-id>/` and `logs/<tag>.log`.
+
 ### DexTools
 
 After explicit import, you can use:
@@ -123,7 +150,7 @@ setImmediate(() => {
 - `DexTools` currently provides `enumerateClassLoaderDexFiles()` and `dumpAllDex(...)`.
 - `dumpAllDex()` sends `DEX_DUMP_BEGIN -> BATCH(DEX_DUMP_FILES) -> DEX_DUMP_END`.
 - The default max batch size comes from Python config `script.rpc.batch_max_bytes`, and on the agent side this maps to `Config.BatchMaxBytes`.
-- A single oversized dex is still sent as its own batch without further slicing, and Python writes to `script.dextools.dex_dir` first, then falls back to `agent.datadir/dextools`.
+- A single oversized dex is still sent as its own batch without further slicing, and Python writes to `script.dextools.output_dir` first, then falls back to `agent.datadir/dextools`.
 
 ### JNI / Native Bindings
 

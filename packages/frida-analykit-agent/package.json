@@ -58,6 +58,10 @@
       "types": "./dist/elf/index.d.ts",
       "default": "./dist/elf/index.js"
     },
+    "./elf/enhanced": {
+      "types": "./dist/elf/enhanced/index.d.ts",
+      "default": "./dist/elf/enhanced/index.js"
+    },
     "./dex": {
       "types": "./dist/dex/index.d.ts",
       "default": "./dist/dex/index.js"

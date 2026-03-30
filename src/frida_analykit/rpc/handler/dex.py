@@ -108,13 +108,13 @@ class DexDumpHandler:
             self.handle_file(item)
 
     def _resolve_directory(self, data: RPCMsgDexDumpBegin) -> Path:
-        base_dir = self._config.script.dextools.dex_dir
+        base_dir = self._config.script.dextools.output_dir
         if data.dump_dir:
             base_dir = Path(data.dump_dir).expanduser()
         elif base_dir is None and self._config.agent.datadir is not None:
             base_dir = self._config.agent.datadir / "dextools"
         if base_dir is None:
-            raise RuntimeError("script.dextools.dex_dir or agent.datadir is required for dex dumping")
+            raise RuntimeError("script.dextools.output_dir or agent.datadir is required for dex dumping")
         target = base_dir
         if data.tag:
             target = target / Path(data.tag).name

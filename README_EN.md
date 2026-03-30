@@ -114,7 +114,7 @@ Common top-level fields in `config.yml` are:
 - `jsfile`: the compiled `_agent.js` output path.
 - `server`: device and `frida-server` connection settings.
 - `agent`: Python-side output paths for logs and binary payloads.
-- `script`: agent-side extension config; currently includes `rpc.batch_max_bytes`, `repl.globals`, `nettools.ssl_log_secret`, and `dextools.dex_dir`.
+- `script`: agent-side extension config; currently includes `rpc.batch_max_bytes`, `repl.globals`, `nettools.ssl_log_secret`, and `dextools.output_dir`.
 
 ```yml
 app: com.example.demo
@@ -145,7 +145,7 @@ script:
   nettools:
     ssl_log_secret: ./data/nettools/sslkey
   dextools:
-    dex_dir: ./data/dextools
+    output_dir: ./data/dextools
 ```
 
 Common commands:
@@ -172,7 +172,7 @@ Keep these behaviors in mind:
 - `server boot` does not kill an existing remote `frida-server` by default; use `--force-restart` when you need replacement.
 - `server stop` is an idempotent cleanup entry and still succeeds when no matching remote process exists.
 - `script.rpc.batch_max_bytes` is a global RPC batch limit, not a dex-only setting.
-- `script.dextools.dex_dir` is the default Python-side output directory for dex dumps.
+- `script.dextools.output_dir` is the default Python-side output directory for dex dumps.
 
 ## Agent Capability Overview
 
@@ -284,7 +284,7 @@ Current dex-dump behavior includes:
 
 - `DexTools.dumpAllDex()` uses the streaming flow `DEX_DUMP_BEGIN -> BATCH(DEX_DUMP_FILES) -> DEX_DUMP_END`.
 - `script.rpc.batch_max_bytes` is the global RPC batch limit; on the agent side the default comes from `Config.BatchMaxBytes`, and `dumpAllDex({ maxBatchBytes })` can override it per call.
-- On the Python side the output directory first prefers `script.dextools.dex_dir`, then falls back to `agent.datadir/dextools`.
+- On the Python side the output directory first prefers `script.dextools.output_dir`, then falls back to `agent.datadir/dextools`.
 - Even when a single dex exceeds the batch limit, it is still sent as one batch instead of being sliced more finely.
 
 ## Debugging, Device Tests, Release, And Repository Layout
