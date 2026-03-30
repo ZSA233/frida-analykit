@@ -3,6 +3,7 @@ type InjectedConfig = {
     OutputDir?: string
     LogLevel?: number
     LogCollapse?: boolean
+    BatchMaxBytes?: number
 }
 
 const injectedConfig = ((globalThis as typeof globalThis & {
@@ -46,6 +47,7 @@ export class Config {
     static OutputDir?: string = injectedConfig.OutputDir
     static LogLevel: number = injectedConfig.LogLevel ?? LogLevel.INFO
     static LogCollapse: boolean = injectedConfig.LogCollapse ?? true
+    static BatchMaxBytes: number = injectedConfig.BatchMaxBytes ?? (8 * 1024 * 1024)
 }
 
 

@@ -83,6 +83,8 @@ const ANALYKIT_GLOBAL_NAMES = [
     "SSLTools",
     "BoringSSL",
     "ElfTools",
+    "DexTools",
+    "Libart",
     "Libssl",
     "Libc",
 ] as const

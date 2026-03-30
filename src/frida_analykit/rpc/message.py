@@ -15,13 +15,21 @@ class RPCMsgType(str, Enum):
     BATCH = "BATCH"
     INIT_CONFIG = "INIT_CONFIG"
     SAVE_FILE = "SAVE_FILE"
+    DEX_DUMP_BEGIN = "DEX_DUMP_BEGIN"
+    DUMP_DEX_FILE = "DUMP_DEX_FILE"
+    DEX_DUMP_END = "DEX_DUMP_END"
     SSL_SECRET = "SSL_SECRET"
     PROGRESSING = "PROGRESSING"
+
+
+class RPCBatchSource(str, Enum):
+    DEX_DUMP_FILES = "DEX_DUMP_FILES"
 
 
 class RPCMsgInitConfig(BaseModel):
     OnRPC: bool = True
     LogCollapse: bool = False
+    BatchMaxBytes: int = 8 * 1024 * 1024
 
 
 class RPCMsgError(BaseModel):
@@ -55,6 +63,38 @@ class RPCMsgSaveFile(BaseModel):
     source: str
     filepath: str
     mode: str
+
+
+class RPCMsgDexDumpBegin(BaseModel):
+    transfer_id: str
+    tag: str = ""
+    dump_dir: str | None = None
+    expected_count: int
+    total_bytes: int = 0
+    max_batch_bytes: int = 8 * 1024 * 1024
+
+
+class RPCMsgDexDumpFileInfo(BaseModel):
+    name: str
+    base: str
+    size: int
+    loader: str
+    loader_class: str
+    output_name: str
+
+
+class RPCMsgDumpDexFile(BaseModel):
+    transfer_id: str
+    tag: str = ""
+    info: RPCMsgDexDumpFileInfo
+
+
+class RPCMsgDexDumpEnd(BaseModel):
+    transfer_id: str
+    tag: str = ""
+    expected_count: int
+    received_count: int
+    total_bytes: int = 0
 
 
 class RPCMsgSSLSecret(BaseModel):
@@ -128,6 +168,9 @@ _MESSAGE_TYPES: dict[RPCMsgType, type[BaseModel]] = {
     RPCMsgType.BATCH: RPCMsgBatch,
     RPCMsgType.INIT_CONFIG: RPCMsgInitConfig,
     RPCMsgType.SAVE_FILE: RPCMsgSaveFile,
+    RPCMsgType.DEX_DUMP_BEGIN: RPCMsgDexDumpBegin,
+    RPCMsgType.DUMP_DEX_FILE: RPCMsgDumpDexFile,
+    RPCMsgType.DEX_DUMP_END: RPCMsgDexDumpEnd,
     RPCMsgType.SSL_SECRET: RPCMsgSSLSecret,
     RPCMsgType.PROGRESSING: RPCMsgProgressing,
 }

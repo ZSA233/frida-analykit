@@ -9,7 +9,8 @@ import colorama
 
 from ..config import AppConfig
 from ..utils import ensure_filepath
-from .message import RPCMsgBatch, RPCMsgProgressing, RPCMsgSSLSecret, RPCMsgType, RPCPayload, unpack_batch_payload
+from .handler.dex import DexDumpHandler
+from .message import RPCBatchSource, RPCMsgBatch, RPCMsgProgressing, RPCMsgSSLSecret, RPCMsgType, RPCPayload, unpack_batch_payload
 
 
 MessageHandler = Callable[[RPCPayload], None]
@@ -25,6 +26,7 @@ class HandlerRegistry:
         self._batch_handlers: dict[str, MessageHandler] = {}
         self._exception_handler: ExceptionHandler = self._default_exception_handler
         self._ssl_secret_loggers: dict[str, TextIO] = {}
+        self._dex_handler = DexDumpHandler(config, stdout, stderr)
         self._register_defaults()
 
     def on_message(self, msg_type: RPCMsgType | str, func: MessageHandler | None = None):
@@ -39,13 +41,14 @@ class HandlerRegistry:
 
         return wrapper
 
-    def on_batch(self, source: str, func: MessageHandler | None = None):
+    def on_batch(self, source: RPCBatchSource | str, func: MessageHandler | None = None):
+        key = source.value if isinstance(source, RPCBatchSource) else str(source)
         if func is not None:
-            self._batch_handlers[source] = func
+            self._batch_handlers[key] = func
             return func
 
         def wrapper(callback: MessageHandler) -> MessageHandler:
-            self._batch_handlers[source] = callback
+            self._batch_handlers[key] = callback
             return callback
 
         return wrapper
@@ -68,6 +71,10 @@ class HandlerRegistry:
     def _register_defaults(self) -> None:
         self.on_message(RPCMsgType.PROGRESSING, self._handle_progressing)
         self.on_message(RPCMsgType.SSL_SECRET, self._handle_ssl_secret)
+        self.on_message(RPCMsgType.DEX_DUMP_BEGIN, self._dex_handler.handle_begin)
+        self.on_message(RPCMsgType.DUMP_DEX_FILE, self._dex_handler.handle_file)
+        self.on_message(RPCMsgType.DEX_DUMP_END, self._dex_handler.handle_end)
+        self.on_batch(RPCBatchSource.DEX_DUMP_FILES, self._dex_handler.handle_batch)
 
     def _default_exception_handler(self, message: dict, data: bytes | None) -> None:
         del data

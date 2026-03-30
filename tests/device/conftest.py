@@ -107,9 +107,12 @@ class DeviceHelpers:
         lines.extend(
             [
                 "agent:",
+                "  datadir: ./data",
                 f"  stdout: {log_path}",
                 f"  stderr: {log_path}",
                 "script:",
+                "  dextools:",
+                "    dex_dir: ./data/dextools",
                 "  nettools: {}",
             ]
         )

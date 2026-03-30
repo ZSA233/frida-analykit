@@ -1,3 +1,4 @@
+import { Config } from "@zsa233/frida-analykit-agent/config";
 import { BatchSender, LoggerState, ProgressNotify, help } from "@zsa233/frida-analykit-agent/helper";
 
 import { assertCondition, runSuite } from "../support.js";
@@ -36,6 +37,48 @@ export function runHelperCoreSuite(): AgentUnitSuiteResult {
                 sender.clear();
                 assertCondition(sender.rpcResponse().length === 0, "expected cleared batch sender to return an empty response");
                 return `sizes=${message.data.data_sizes.join(",")}`;
+            },
+        },
+        {
+            name: "batch_sender_flushes_when_max_batch_bytes_is_hit",
+            run: () => {
+                const flushed: number[] = [];
+                const sender = help.runtime.newBatchSender("helper_core", {
+                    maxBatchBytes: 2,
+                    sender(message, payload) {
+                        flushed.push(payload.byteLength);
+                        assertCondition(message.source === "helper_core", `expected helper_core source, got ${message.source}`);
+                    },
+                });
+                sender.send({ a: 1 }, new Uint8Array([1]).buffer);
+                sender.send({ b: 2 }, new Uint8Array([2, 3]).buffer);
+                sender.send({ c: 3 }, new Uint8Array([4]).buffer);
+                sender.flush();
+                assertCondition(flushed.join(",") === "1,2,1", `expected 3 flush groups, got ${flushed.join(",")}`);
+                return flushed.join(",");
+            },
+        },
+        {
+            name: "batch_sender_uses_global_batch_limit_by_default",
+            run: () => {
+                const prev = Config.BatchMaxBytes;
+                const flushed: number[] = [];
+                Config.BatchMaxBytes = 2;
+                try {
+                    const sender = new BatchSender("helper_core", {
+                        sender(_message, payload) {
+                            flushed.push(payload.byteLength);
+                        },
+                    });
+                    sender.send({ a: 1 }, new Uint8Array([1]).buffer);
+                    sender.send({ b: 2 }, new Uint8Array([2, 3]).buffer);
+                    sender.send({ c: 3 }, new Uint8Array([4]).buffer);
+                    sender.flush();
+                } finally {
+                    Config.BatchMaxBytes = prev;
+                }
+                assertCondition(flushed.join(",") === "1,2,1", `expected global batch limit flush groups, got ${flushed.join(",")}`);
+                return flushed.join(",");
             },
         },
         {

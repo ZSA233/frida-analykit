@@ -23,7 +23,9 @@ def test_agent_package_exports_prebuilt_runtime() -> None:
     assert package_json["exports"]["./jni"]["default"] == "./dist/jni/index.js"
     assert package_json["exports"]["./ssl"]["default"] == "./dist/ssl/index.js"
     assert package_json["exports"]["./elf"]["default"] == "./dist/elf/index.js"
+    assert package_json["exports"]["./dex"]["default"] == "./dist/dex/index.js"
     assert package_json["exports"]["./native/libssl"]["default"] == "./dist/native/libssl/index.js"
+    assert package_json["exports"]["./native/libart"]["default"] == "./dist/native/libart/index.js"
     assert package_json["exports"]["./native/libc"]["default"] == "./dist/native/libc/index.js"
     assert package_json["exports"]["./rpc"]["default"] == "./dist/rpc/index.js"
     assert package_json["exports"]["./rpc"]["types"] == "./dist/rpc/index.d.ts"
@@ -35,6 +37,7 @@ def test_agent_package_exports_prebuilt_runtime() -> None:
     assert "JNIEnv" not in root_entry
     assert "SSLTools" not in root_entry
     assert "ElfTools" not in root_entry
+    assert "Libart" not in root_entry
     assert "Libssl" not in root_entry
 
 
