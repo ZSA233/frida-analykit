@@ -29,7 +29,10 @@ runs:
     - name: Install Android SDK packages
       shell: bash
       run: |
-        yes | sdkmanager --licenses >/dev/null
+        # `sdkmanager --licenses` exits cleanly once it has consumed enough
+        # input, so the feeder can hit SIGPIPE under `bash -o pipefail`.
+        # Keep the pipeline green unless `sdkmanager` itself fails.
+        (yes || :) | sdkmanager --licenses >/dev/null
         sdkmanager "platforms;android-35" "build-tools;35.0.0"
 
     - name: Preflight release checks
