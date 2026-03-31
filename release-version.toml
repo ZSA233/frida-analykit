@@ -5,5 +5,5 @@
 # This file only drives release-critical files. README/docs install examples
 # are intentionally updated separately when user-facing guidance changes.
 
-base_version = "2.0.6"
+base_version = "2.0.7"
 channel = "stable"

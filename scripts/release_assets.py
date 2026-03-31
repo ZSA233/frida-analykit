@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -37,6 +38,7 @@ ROOT_PACKAGE_JSON_PATH = Path("package.json")
 AGENT_PACKAGE_JSON_PATH = Path("packages/frida-analykit-agent/package.json")
 PACKAGE_LOCK_PATH = Path("package-lock.json")
 RELEASE_VERSION_PATH = Path("release-version.toml")
+DEVICE_TEST_RELEASE_APK_PREFIX = "frida-analykit-device-test-app"
 PROMOTION_ALLOWED_DIFFS = {
     PACKAGE_LOCK_PATH.as_posix(),
     ROOT_PACKAGE_JSON_PATH.as_posix(),
@@ -210,6 +212,39 @@ def expected_sdist_name(package_name: str, package_version: str) -> str:
 
 def expected_npm_tgz_name(package_name: str, package_version: str) -> str:
     return f"{package_name.lstrip('@').replace('/', '-')}-{package_version}.tgz"
+
+
+def expected_device_test_apk_name(tag: str) -> str:
+    try:
+        release = parse_release_tag(tag)
+    except ReleaseVersionError as exc:
+        raise ReleaseConfigError(f"Unsupported release tag for device test APK: {tag}") from exc
+    return f"{DEVICE_TEST_RELEASE_APK_PREFIX}-{release.tag}.apk"
+
+
+def _build_device_test_app(repo_root: Path) -> Path:
+    from frida_analykit.device.test_app import build_device_test_app
+
+    return build_device_test_app(repo_root)
+
+
+def stage_device_test_apk(
+    repo_root: Path,
+    *,
+    tag: str,
+    dist_dir: Path,
+) -> Path:
+    dist_dir.mkdir(parents=True, exist_ok=True)
+    for stale_path in dist_dir.glob(f"{DEVICE_TEST_RELEASE_APK_PREFIX}-*.apk"):
+        stale_path.unlink()
+
+    try:
+        source_apk = _build_device_test_app(repo_root)
+    except RuntimeError as exc:
+        raise ReleaseConfigError(f"Failed to build the device test APK: {exc}") from exc
+    target_apk = dist_dir / expected_device_test_apk_name(tag)
+    shutil.copy2(source_apk, target_apk)
+    return target_apk
 
 
 def _parse_support_range(requirement: Requirement) -> SupportRange:
@@ -531,6 +566,23 @@ def _pick_release_wheel(dist_dir: Path, metadata: PackageMetadata) -> Path:
     return _pick_single_file(candidates, description="release wheel in dist/")
 
 
+def _pick_release_device_test_apk(dist_dir: Path, *, tag: str) -> Path:
+    expected_name = expected_device_test_apk_name(tag)
+    candidates = sorted(dist_dir.glob(f"{DEVICE_TEST_RELEASE_APK_PREFIX}-*.apk"))
+    if not candidates:
+        raise ReleaseConfigError(f"Missing device test APK: {dist_dir / expected_name}")
+    if len(candidates) != 1:
+        raise ReleaseConfigError(
+            f"Expected exactly one release device test APK in dist/, found {len(candidates)}"
+        )
+    candidate = candidates[0]
+    if candidate.name != expected_name:
+        raise ReleaseConfigError(
+            f"Expected device test APK named {expected_name}, found {candidate.name}"
+        )
+    return candidate
+
+
 def install_check(
     repo_root: Path,
     *,
@@ -554,6 +606,8 @@ def install_check(
     )
     if not tgz_path.exists():
         raise ReleaseConfigError(f"Missing npm package tarball: {tgz_path}")
+
+    device_test_apk = _pick_release_device_test_apk(dist_dir, tag=tag)
 
     min_supported_frida = contract["min_inclusive"]
 
@@ -642,6 +696,7 @@ def install_check(
         "sdist_name": sdist_path.name,
         "wheel_name": wheel_path.name,
         "npm_tgz": tgz_path.name,
+        "device_test_apk": device_test_apk.name,
         "support_range": contract["support_range"],
     }
 
@@ -674,6 +729,11 @@ def main(argv: list[str] | None = None) -> int:
     install_parser.add_argument("--ref")
     install_parser.add_argument("--dist-dir", default="dist")
     install_parser.add_argument("--json", action="store_true")
+
+    stage_apk_parser = subparsers.add_parser("stage-device-test-apk")
+    stage_apk_parser.add_argument("--tag", required=True)
+    stage_apk_parser.add_argument("--dist-dir", default="dist")
+    stage_apk_parser.add_argument("--json", action="store_true")
 
     args = parser.parse_args(argv)
     repo_root = Path.cwd()
@@ -727,8 +787,23 @@ def main(argv: list[str] | None = None) -> int:
                 _dump_json(payload)
             else:
                 print(
-                    f"verified {payload['sdist_name']}, {payload['wheel_name']}, and {payload['npm_tgz']}"
+                    "verified "
+                    f"{payload['sdist_name']}, {payload['wheel_name']}, "
+                    f"{payload['npm_tgz']}, and {payload['device_test_apk']}"
                 )
+            return 0
+
+        if args.command == "stage-device-test-apk":
+            apk_path = stage_device_test_apk(
+                repo_root,
+                tag=args.tag,
+                dist_dir=Path(args.dist_dir),
+            )
+            payload = {"tag_name": args.tag, "device_test_apk": apk_path.name}
+            if args.json:
+                _dump_json(payload)
+            else:
+                print(f"staged {apk_path}")
             return 0
     except ReleaseConfigError as exc:
         print(f"error: {exc}", file=sys.stderr)

@@ -8,14 +8,8 @@ from .._version import __version__
 from .paths import _activate_path, _binary_path, _python_path
 
 
-class DevEnvError(RuntimeError):
+class EnvError(RuntimeError):
     pass
-
-
-@dataclass(frozen=True)
-class CompatProfile:
-    name: str
-    tested_version: str
 
 
 @dataclass(frozen=True)

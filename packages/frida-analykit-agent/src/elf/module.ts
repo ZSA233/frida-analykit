@@ -45,18 +45,21 @@ class ElfModuleX {
     strtab: { [key: number]: string } | null = null
 
     private _keepNativeCb: {[key: string]: any}
+    private readonly _symbolScanLimit: number
+    private _fullDynSymbols: Sym[] | null | undefined = undefined
 
     constructor(module: BaseModule, fixers?: ElfModuleFixer[], { symbolScanLimit=1000 }: {symbolScanLimit?: number } = {}) {
         this.name = module.name
         this.base = module.base
         this.size = module.size
         this.module = module
+        this._symbolScanLimit = Math.max(0, Math.floor(symbolScanLimit))
 
         this.ehdr = this.readEhdr()
         this.phdrs = this.readPhdrs()
         this.dyntabs = this.readDyntabs()
         this.soinfo = this.prelink_image()
-        this.dynSymbols = this.scanSymbols(0, symbolScanLimit)
+        this.dynSymbols = this.scanSymbols(0, this._symbolScanLimit)
 
         try {
             this.shdrs = this.readShdrs()
@@ -82,7 +85,7 @@ class ElfModuleX {
 
         this._keepNativeCb = {}
 
-        this.link_image()
+        this.link_image(this.dynSymbols)
 
         return new Proxy(this, {
             get(target: any, prop: string) {
@@ -224,8 +227,8 @@ class ElfModuleX {
         return soinfo
     }
 
-    link_image() {
-        if (this.dynSymbols == null || (this.rela == null && this.plt_rela == null)) {
+    link_image(symbols: Sym[] | null = this.dynSymbols) {
+        if (symbols == null || (this.rela == null && this.plt_rela == null)) {
             return
         }
 
@@ -238,7 +241,7 @@ class ElfModuleX {
             if (type === 0n) {
                 continue
             }
-            const s = this.dynSymbols[Number(sym)]
+            const s = symbols[Number(sym)]
             if (sym === 0n) {
             } else if (s?.name && reloc) {
                 const relocPtr = this.module.base.add(reloc)
@@ -326,6 +329,9 @@ class ElfModuleX {
         if(this.soinfo == null) {
             return null
         }
+        if (limit <= 0) {
+            return []
+        }
         const base = this.soinfo.symtab
         const structOf = this.ehdr.ei_class === 1 ? Elf_Sym.B32 : Elf_Sym.B64
         const symbols: Sym[] = []
@@ -368,6 +374,50 @@ class ElfModuleX {
         return symbols
     }
 
+    getDynSymbols({ full = false }: { full?: boolean } = {}): Sym[] {
+        if (!full) {
+            return this.dynSymbols || []
+        }
+        return this.ensureFullDynSymbols() || []
+    }
+
+    ensureFullDynSymbols(): Sym[] | null {
+        if (this._fullDynSymbols !== undefined) {
+            return this._fullDynSymbols
+        }
+
+        if (this.dynSymbols == null) {
+            this._fullDynSymbols = null
+            return null
+        }
+
+        if (this.dynSymbols.length < this._symbolScanLimit) {
+            this._fullDynSymbols = this.dynSymbols
+            return this._fullDynSymbols
+        }
+
+        const fullSymbols = [...this.dynSymbols]
+        const chunkSize = Math.max(this._symbolScanLimit, 4096)
+        let cursor = fullSymbols.length
+        while (true) {
+            const chunk = this.scanSymbols(cursor, chunkSize)
+            if (chunk == null || chunk.length === 0) {
+                break
+            }
+            fullSymbols.push(...chunk)
+            cursor += chunk.length
+            if (chunk.length < chunkSize) {
+                break
+            }
+        }
+
+        // Relocations for symbols beyond the lightweight bootstrap window are only resolved
+        // once a caller explicitly asks for the full dynamic symbol set.
+        this.link_image(fullSymbols)
+        this._fullDynSymbols = fullSymbols
+        return this._fullDynSymbols
+    }
+
     readRela() {
         if(this.soinfo == null) {
             return null
@@ -408,13 +458,13 @@ class ElfModuleX {
         return tables
     }
 
-    attachSymbol<RetType extends NativeFunctionReturnType, ArgTypes extends any[]>(
-        symName: string, fn: AnyFunction, retType: RetType, argTypes: ArgTypes, abi = undefined,
+    attachSymbol<RetType extends NativeFunctionReturnType, ArgTypes extends NativeFunctionArgumentType[] | []>(
+        symName: string, fn: AnyFunction, retType: RetType, argTypes: ArgTypes, abi: NativeABI | undefined = undefined,
     ) {
-        if(this.dynSymbols == null) {
+        const sym = this.findDynSymbol(symName, { full: true })
+        if(!sym) {
             return false
         }
-        const sym = this.dynSymbols.find(sym => sym.name == symName)
         if (!sym || sym.st_value == null || sym.relocPtr == null) {
             return false
         }
@@ -423,7 +473,8 @@ class ElfModuleX {
             const args = [impl, ...Array.from(arguments)]
             return fn(...args)
         }
-        const cb = new NativeCallback(wrapper, retType, argTypes, abi)
+        const callbackArgTypes = argTypes.filter((item) => item !== "...") as NativeCallbackArgumentType[] | []
+        const cb = new NativeCallback(wrapper, retType, callbackArgTypes, abi)
         let isWritten = false
         
         const doWrite = () => {
@@ -455,11 +506,12 @@ class ElfModuleX {
         return isWritten
     }
 
+    findDynSymbol(symName: string, { full = false }: { full?: boolean } = {}): Sym | undefined {
+        return this.getDynSymbols({ full }).find(sym => sym.name === symName)
+    }
+
     findSymbol(symName: string): Sym | undefined {
-        let sym
-        if(this.dynSymbols !== null) {
-            sym = this.dynSymbols.find(sym => sym.name === symName)
-        }
+        let sym = this.findDynSymbol(symName, { full: true })
         if (!sym && this.symtab !== null) {
             return this.symtab.find(sym => sym.name === symName)   
         }

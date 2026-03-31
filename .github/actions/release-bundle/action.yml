@@ -17,7 +17,23 @@ runs:
       with:
         node-version-file: .nvmrc
 
+    - uses: actions/setup-java@v4
+      with:
+        distribution: temurin
+        java-version: "17"
+
     - uses: astral-sh/setup-uv@v5
+
+    - uses: android-actions/setup-android@v3
+
+    - name: Install Android SDK packages
+      shell: bash
+      run: |
+        # `sdkmanager --licenses` exits cleanly once it has consumed enough
+        # input, so the feeder can hit SIGPIPE under `bash -o pipefail`.
+        # Keep the pipeline green unless `sdkmanager` itself fails.
+        (yes || :) | sdkmanager --licenses >/dev/null
+        sdkmanager "platforms;android-35" "build-tools;35.0.0"
 
     - name: Preflight release checks
       shell: bash

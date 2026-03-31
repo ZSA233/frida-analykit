@@ -21,6 +21,7 @@
   - `./jni`
   - `./dex`
   - `./elf`
+  - `./elf/enhanced`
   - `./ssl`
   - `./native/libart`
   - `./native/libssl`

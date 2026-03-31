@@ -46,7 +46,13 @@ class ScriptNetToolsConfig(BaseModel):
 class ScriptDexToolsConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    dex_dir: Path | None = None
+    output_dir: Path | None = None
+
+
+class ScriptElfToolsConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    output_dir: Path | None = None
 
 
 class ScriptRpcConfig(BaseModel):
@@ -66,6 +72,7 @@ class ScriptConfig(BaseModel):
 
     nettools: ScriptNetToolsConfig = Field(default_factory=ScriptNetToolsConfig)
     dextools: ScriptDexToolsConfig = Field(default_factory=ScriptDexToolsConfig)
+    elftools: ScriptElfToolsConfig = Field(default_factory=ScriptElfToolsConfig)
     rpc: ScriptRpcConfig = Field(default_factory=ScriptRpcConfig)
     repl: ScriptReplConfig = Field(default_factory=ScriptReplConfig)
 
@@ -117,7 +124,12 @@ class AppConfig(BaseModel):
                     update={
                         "dextools": self.script.dextools.model_copy(
                             update={
-                                "dex_dir": resolve(self.script.dextools.dex_dir),
+                                "output_dir": resolve(self.script.dextools.output_dir),
+                            }
+                        ),
+                        "elftools": self.script.elftools.model_copy(
+                            update={
+                                "output_dir": resolve(self.script.elftools.output_dir),
                             }
                         ),
                         "nettools": self.script.nettools.model_copy(

@@ -1,9 +1,10 @@
-.PHONY: sync test compat scaffold build npm-pack release-check release-preflight release-local release-install-check release-version-show release-version-rc release-version-stable dev-env dev-env-list dev-env-gen dev-env-enter dev-env-remove dev-smoke device-check device-test-core device-test-install device-test
+.PHONY: sync test compat scaffold build npm-pack release-check release-preflight release-local release-install-check release-version-show release-version-rc release-version-stable env env-list env-create env-enter env-remove dev-smoke device-check device-test-core device-test-install device-test-repl-handlers device-test-attach-marker device-test device-test-all device-test-app-build device-test-app-install device-test-app-install-all
 
 RELEASE_TAG ?=
 RC_TAG ?=
 DIST_DIR ?= dist
 PYTHON_BIN ?= .venv/bin/python
+DEVICE_TEST_ENV = env FRIDA_ANALYKIT_ENABLE_DEVICE=1$(if $(strip $(DEVICE_TEST_APP)), FRIDA_ANALYKIT_DEVICE_APP=$(DEVICE_TEST_APP))$(if $(strip $(DEVICE_TEST_SKIP_APP)), FRIDA_ANALYKIT_DEVICE_SKIP_APP_TESTS=$(DEVICE_TEST_SKIP_APP))
 
 sync:
 	uv sync --extra repl --dev
@@ -44,8 +45,9 @@ release-preflight:
 
 release-local:
 	@if [ -z "$(RELEASE_TAG)" ]; then echo "RELEASE_TAG is required" >&2; exit 1; fi
-	uv build --sdist --wheel
+	uv build --sdist --wheel --out-dir "$(DIST_DIR)"
 	npm pack ./packages/frida-analykit-agent
+	uv run python scripts/release_assets.py stage-device-test-apk --tag "$(RELEASE_TAG)" --dist-dir "$(DIST_DIR)"
 
 release-install-check:
 	@if [ -z "$(RELEASE_TAG)" ]; then echo "RELEASE_TAG is required" >&2; exit 1; fi
@@ -68,53 +70,66 @@ release-version-stable:
 	fi
 	uv run python scripts/release_version.py set-stable --base "$(BASE_VERSION)" $(if $(filter 1,$(CHECK)),--check) $(if $(RC_TAG),--rc-tag "$(RC_TAG)")
 
-dev-env:
-	uv run python scripts/dev_env.py help
+env:
+	uv run python scripts/env.py help
 
-dev-env-list:
-	uv run python scripts/dev_env.py list
+env-list:
+	uv run python scripts/env.py list
 
-dev-env-gen:
+env-create:
 	@if [ -z "$(FRIDA_VERSION)" ]; then \
-		echo "Usage: make dev-env-gen FRIDA_VERSION=<version> [ENV_NAME=<name>] [NO_REPL=1]" >&2; \
+		echo "Usage: make env-create FRIDA_VERSION=<version> [ENV_NAME=<name>] [NO_REPL=1]" >&2; \
 		exit 2; \
 	fi
-	uv run python scripts/dev_env.py gen \
+	uv run python scripts/env.py gen \
 		--frida-version "$(FRIDA_VERSION)" \
 		$(if $(ENV_NAME),--name "$(ENV_NAME)") \
 		$(if $(NO_REPL),--no-repl)
 
-dev-env-enter:
+env-enter:
 	@if [ -z "$(ENV_NAME)" ]; then \
-		echo "Usage: make dev-env-enter ENV_NAME=<name>" >&2; \
+		echo "Usage: make env-enter ENV_NAME=<name>" >&2; \
 		exit 2; \
 	fi
-	uv run python scripts/dev_env.py enter --name "$(ENV_NAME)"
+	uv run python scripts/env.py enter --name "$(ENV_NAME)"
 
-dev-env-remove:
+env-remove:
 	@if [ -z "$(ENV_NAME)" ]; then \
-		echo "Usage: make dev-env-remove ENV_NAME=<name>" >&2; \
+		echo "Usage: make env-remove ENV_NAME=<name>" >&2; \
 		exit 2; \
 	fi
-	uv run python scripts/dev_env.py remove --name "$(ENV_NAME)"
+	uv run python scripts/env.py remove --name "$(ENV_NAME)"
 
 dev-smoke:
 	FRIDA_ANALYKIT_ENABLE_SMOKE=1 "$(PYTHON_BIN)" -m pytest tests/test_smoke.py -m smoke
 
 device-check:
-	FRIDA_ANALYKIT_ENABLE_DEVICE=1 "$(PYTHON_BIN)" -m pytest tests/device/test_preflight.py -m device -v
+	$(DEVICE_TEST_ENV) "$(PYTHON_BIN)" -m pytest tests/device/test_preflight.py -m device -v
 
 device-test-core:
-	FRIDA_ANALYKIT_ENABLE_DEVICE=1 "$(PYTHON_BIN)" -m pytest tests/device/test_server_lifecycle.py tests/device/test_attach_marker.py -m device -v
+	$(DEVICE_TEST_ENV) "$(PYTHON_BIN)" -m pytest tests/device/test_server_lifecycle.py tests/device/test_attach_marker.py -m device -v
 
 device-test-install:
-	FRIDA_ANALYKIT_ENABLE_DEVICE=1 "$(PYTHON_BIN)" -m pytest tests/device/test_server_install.py -m device -v
+	$(DEVICE_TEST_ENV) "$(PYTHON_BIN)" -m pytest tests/device/test_server_install.py -m device -v
 
 device-test-repl-handlers:
-	FRIDA_ANALYKIT_ENABLE_DEVICE=1 "$(PYTHON_BIN)" -m pytest tests/device/test_repl_handles.py -m device -v
+	$(DEVICE_TEST_ENV) "$(PYTHON_BIN)" -m pytest tests/device/test_repl_handles.py -m device -v
 
 device-test-attach-marker:
-	FRIDA_ANALYKIT_ENABLE_DEVICE=1 "$(PYTHON_BIN)" -m pytest tests/device/test_attach_marker.py -m device -v
+	$(DEVICE_TEST_ENV) "$(PYTHON_BIN)" -m pytest tests/device/test_attach_marker.py -m device -v
 
 device-test:
-	FRIDA_ANALYKIT_ENABLE_DEVICE=1 "$(PYTHON_BIN)" -m pytest tests/device -m device -v
+	$(DEVICE_TEST_ENV) "$(PYTHON_BIN)" -m pytest tests/device -m device -v
+
+device-test-all:
+	$(DEVICE_TEST_ENV) "$(PYTHON_BIN)" -m frida_analykit.device.orchestrator --make-target device-test
+
+device-test-app-build:
+	"$(PYTHON_BIN)" -m frida_analykit.device.test_app build
+
+device-test-app-install:
+	@if [ -z "$(ANDROID_SERIAL)" ]; then echo "ANDROID_SERIAL is required" >&2; exit 2; fi
+	"$(PYTHON_BIN)" -m frida_analykit.device.test_app install --serial "$(ANDROID_SERIAL)"
+
+device-test-app-install-all:
+	"$(PYTHON_BIN)" -m frida_analykit.device.test_app install-all

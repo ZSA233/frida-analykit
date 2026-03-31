@@ -1,0 +1,47 @@
+plugins {
+    id "com.android.application"
+}
+
+def deviceTestKeystoreFile = rootProject.file("keystore/device-test-debug.keystore")
+def deviceTestKeystorePassword = "android"
+def deviceTestKeyAlias = "androiddebugkey"
+def deviceTestKeyPassword = "android"
+
+android {
+    namespace "com.frida_analykit.test"
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "com.frida_analykit.test"
+        minSdk 21
+        targetSdk 35
+        versionCode 1
+        versionName "1.0"
+    }
+
+    signingConfigs {
+        debug {
+            storeFile deviceTestKeystoreFile
+            storePassword deviceTestKeystorePassword
+            keyAlias deviceTestKeyAlias
+            keyPassword deviceTestKeyPassword
+        }
+    }
+
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.debug
+        }
+
+        release {
+            signingConfig signingConfigs.debug
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}

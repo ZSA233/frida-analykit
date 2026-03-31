@@ -4,6 +4,7 @@ import pytest
 
 
 @pytest.mark.device
+@pytest.mark.device_app
 def test_injection_writes_device_marker(device_helpers, booted_device_workspace, device_app) -> None:
     workspace = booted_device_workspace
     attempts: list[str] = []

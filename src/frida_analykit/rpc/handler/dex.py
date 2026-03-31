@@ -25,6 +25,7 @@ class DexDumpTransferState:
     manifest: list[dict[str, object]] = field(default_factory=list)
     received_count: int = 0
     received_bytes: int = 0
+    mismatched_files: list[str] = field(default_factory=list)
 
 
 class DexDumpHandler:
@@ -62,16 +63,27 @@ class DexDumpHandler:
         output_name = Path(data.info.output_name).name
         filepath = self._prepare_output_path(state.directory / output_name)
         payload_bytes = payload.data or b""
+        payload_size = len(payload_bytes)
         with open(filepath, "wb") as handle:
             handle.write(payload_bytes)
         state.received_count += 1
-        state.received_bytes += len(payload_bytes)
+        state.received_bytes += payload_size
+        if payload_size != data.info.size:
+            state.mismatched_files.append(output_name)
+            print(
+                (
+                    f"[dex] size mismatch {state.transfer_id}: {output_name} "
+                    f"payload={payload_size}, declared={data.info.size}"
+                ),
+                file=self._stderr,
+            )
         state.manifest.append({**data.info.model_dump(mode="json"), "output_name": output_name})
         self._write_manifest(state)
         print(
             (
                 f"[dex] file {state.transfer_id}: {output_name} "
-                f"size={len(payload_bytes)} name={data.info.name} loader={data.info.loader_class}"
+                f"size={payload_size} declared={data.info.size} "
+                f"name={data.info.name} loader={data.info.loader_class}"
             ),
             file=self._stdout,
         )
@@ -85,12 +97,20 @@ class DexDumpHandler:
             return
 
         self._write_manifest(state)
-        if state.received_count != data.received_count or state.expected_count != data.expected_count:
+        is_complete = (
+            state.expected_count == data.expected_count
+            and state.received_count == data.received_count == state.expected_count
+            and state.received_bytes == state.total_bytes == data.total_bytes
+            and not state.mismatched_files
+        )
+        if not is_complete:
             print(
                 (
                     f"[dex] incomplete transfer {data.transfer_id}: "
-                    f"expected={data.expected_count}, sender={data.received_count}, "
-                    f"received={state.received_count}, bytes={state.received_bytes}/{state.total_bytes}"
+                    f"expected={state.expected_count}/{data.expected_count}, "
+                    f"sender={data.received_count}, received={state.received_count}, "
+                    f"bytes={state.received_bytes}/{state.total_bytes}/{data.total_bytes}, "
+                    f"mismatched={state.mismatched_files}"
                 ),
                 file=self._stderr,
             )
@@ -108,13 +128,13 @@ class DexDumpHandler:
             self.handle_file(item)
 
     def _resolve_directory(self, data: RPCMsgDexDumpBegin) -> Path:
-        base_dir = self._config.script.dextools.dex_dir
+        base_dir = self._config.script.dextools.output_dir
         if data.dump_dir:
             base_dir = Path(data.dump_dir).expanduser()
         elif base_dir is None and self._config.agent.datadir is not None:
             base_dir = self._config.agent.datadir / "dextools"
         if base_dir is None:
-            raise RuntimeError("script.dextools.dex_dir or agent.datadir is required for dex dumping")
+            raise RuntimeError("script.dextools.output_dir or agent.datadir is required for dex dumping")
         target = base_dir
         if data.tag:
             target = target / Path(data.tag).name

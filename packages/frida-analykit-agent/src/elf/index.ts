@@ -1,1 +1,12 @@
 export { ElfTools } from "./tools.js"
+export { ElfSymbolHooks } from "./symbol_hooks.js"
+export type {
+    ElfModuleTarget,
+    ElfResolvedSymbol,
+    ElfSnapshotArtifact,
+    ElfSnapshotOptions,
+    ElfSnapshotSummary,
+    ElfSymbolHookOptions,
+    ElfSymbolHookResult,
+    ElfSymbolHooksOptions,
+} from "./types.js"

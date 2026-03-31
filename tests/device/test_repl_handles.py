@@ -6,6 +6,7 @@ import textwrap
 import pytest
 
 PROBE_MARKER = "FRIDA_ANALYKIT_DEVICE_PROBE="
+pytestmark = pytest.mark.device_app
 
 
 def _extract_probe_payload(stdout: str, stderr: str) -> dict[str, object]:
@@ -107,29 +108,27 @@ def device_repl_workspace(
     return workspace
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 def booted_device_repl_workspace(
     device_helpers,
     device_repl_workspace,
-    device_session_guard,
+    device_app: str,
+    device_server_ready,
 ) -> object:
     workspace = device_repl_workspace
     if workspace.log_path.exists():
         workspace.log_path.unlink()
-    process = device_helpers.start_boot_process(workspace.config_path, force_restart=True)
-    try:
-        yield workspace
-    finally:
-        device_helpers.stop_boot_process(process, workspace.config_path)
+    attach_pid, attach_error = device_helpers.find_attachable_app_pid(device_app, timeout=60)
+    assert attach_pid is not None, attach_error
+    yield workspace
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 def running_device_repl_app_pid(
     device_helpers,
     device_app: str,
     booted_device_repl_workspace,
 ) -> int:
-    device_helpers.force_stop_app(device_app, timeout=30)
     attach_pid, attach_error = device_helpers.find_attachable_app_pid(device_app, timeout=30)
     assert attach_pid is not None, attach_error
     return attach_pid

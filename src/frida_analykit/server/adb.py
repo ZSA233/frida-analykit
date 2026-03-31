@@ -68,11 +68,13 @@ class ServerAdbClient:
         return self.run_adb(config, shell_args, capture_output=True, check=check)
 
     def popen_adb(self, config: AppConfig, args: list[str]) -> tuple[list[str], PopenProcess]:
-        command = self._command(config, args)
+        effective_args = ["shell", "-T", *args[1:]] if args[:1] == ["shell"] else args
+        command = self._command(config, effective_args)
         verbose_echo(f"starting adb process: {format_command(command)}")
         try:
             process = self._runtime.subprocess_popen(
                 command,
+                stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import click
 
-from ...dev_env import DevEnvError, render_env_summary, render_install_summary, render_remove_summary
+from ...env import EnvError, render_env_summary, render_install_summary, render_remove_summary
 from .. import common as cli_common
 
 
@@ -30,7 +30,7 @@ def env_create(profile: str | None, frida_version: str | None, name: str | None,
             frida_version=frida_version,
             with_repl=not no_repl,
         )
-    except DevEnvError as exc:
+    except EnvError as exc:
         raise click.ClickException(str(exc)) from exc
     click.echo(render_env_summary(env, action="created"))
 
@@ -45,7 +45,7 @@ def env_list() -> None:
 def env_shell(name: str | None) -> None:
     try:
         cli_common._global_env_manager().enter(name)
-    except DevEnvError as exc:
+    except EnvError as exc:
         raise click.ClickException(str(exc)) from exc
 
 
@@ -54,7 +54,7 @@ def env_shell(name: str | None) -> None:
 def env_remove(name: str) -> None:
     try:
         env = cli_common._global_env_manager().remove(name)
-    except DevEnvError as exc:
+    except EnvError as exc:
         raise click.ClickException(str(exc)) from exc
     click.echo(render_remove_summary(env))
 
@@ -64,7 +64,7 @@ def env_remove(name: str) -> None:
 def env_use(name: str) -> None:
     try:
         env = cli_common._global_env_manager().use(name)
-    except DevEnvError as exc:
+    except EnvError as exc:
         raise click.ClickException(str(exc)) from exc
     click.echo(f"current env: {env.name}")
     click.echo("current shell unchanged; run `frida-analykit env shell` to enter it.")
@@ -84,7 +84,7 @@ def env_install_frida(frida_version: str, python_path: Path | None) -> None:
     target_python = python_path or Path(sys.executable)
     try:
         payload = manager.install_frida(target_python, frida_version)
-    except DevEnvError as exc:
+    except EnvError as exc:
         raise click.ClickException(str(exc)) from exc
     click.echo(
         render_install_summary(

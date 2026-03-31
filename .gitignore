@@ -8,3 +8,5 @@ dist/
 node_modules/
 cmodule-includes/
 *.tgz
+dist-apk-check
+dist-release-test

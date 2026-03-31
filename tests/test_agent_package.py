@@ -23,6 +23,7 @@ def test_agent_package_exports_prebuilt_runtime() -> None:
     assert package_json["exports"]["./jni"]["default"] == "./dist/jni/index.js"
     assert package_json["exports"]["./ssl"]["default"] == "./dist/ssl/index.js"
     assert package_json["exports"]["./elf"]["default"] == "./dist/elf/index.js"
+    assert package_json["exports"]["./elf/enhanced"]["default"] == "./dist/elf/enhanced/index.js"
     assert package_json["exports"]["./dex"]["default"] == "./dist/dex/index.js"
     assert package_json["exports"]["./native/libssl"]["default"] == "./dist/native/libssl/index.js"
     assert package_json["exports"]["./native/libart"]["default"] == "./dist/native/libart/index.js"

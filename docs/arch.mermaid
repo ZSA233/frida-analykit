@@ -1,0 +1,36 @@
+flowchart LR
+    subgraph Host["Host PC（宿主机 / 电脑端）"]
+        direction TB
+        WorkDir["Agent 工作区<br/>config.yml / tsconfig / 你的代码"]
+        CLI["frida-analykit<br/>Python CLI 工具"]
+        DataArchive["本地数据归档<br/>Logs / 导出的 Dex 等"]
+
+        WorkDir -->|"配置 / 构建"| CLI
+        CLI -->|"日志 / 导出"| DataArchive
+    end
+
+    subgraph Framework["Frida Framework（通信与注入底座）"]
+        direction TB
+        FridaCore["Frida Core<br/>Python 绑定"]
+        RPCChannel["Frida RPC / Message 通道"]
+    end
+
+    subgraph Device["Target Device（Android / iOS 设备端）"]
+        direction TB
+        FridaServer["frida-server<br/>Root 守护进程"]
+
+        subgraph App["Target App Process（目标应用进程）"]
+            direction TB
+            AgentRuntime["zsa233/frida-analykit-agent<br/>注入的 runtime"]
+            TargetMem["App 内存"]
+
+            AgentRuntime -->|"Hook / 读写 / 调用"| TargetMem
+        end
+
+        FridaServer -->|"注入 _agent.js"| AgentRuntime
+    end
+
+    CLI -->|"Attach / Spawn"| FridaCore
+    CLI -->|"REPL / 数据"| RPCChannel
+    FridaCore -->|"USB / TCP"| FridaServer
+    RPCChannel -->|"JSON / Bytes"| AgentRuntime

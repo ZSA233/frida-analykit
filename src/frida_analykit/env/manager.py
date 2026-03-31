@@ -5,6 +5,7 @@ import subprocess
 from pathlib import Path
 
 from .._version import __version__
+from ..development.profiles import load_profiles
 from .constants import (
     _DEFAULT_PYTHON_VERSION,
     _ENV_NAME_RE,
@@ -12,7 +13,7 @@ from .constants import (
     _REPL_EXTRA,
     _UV_REQUIRED_MESSAGE,
 )
-from .models import DevEnvError, ManagedEnv
+from .models import EnvError, ManagedEnv
 from .paths import (
     _env_root_for_python,
     _global_storage_root,
@@ -21,21 +22,20 @@ from .paths import (
     _repo_install_source,
     _repo_storage_root,
 )
-from .profiles import load_profiles
-from .registry import DevEnvRegistryStore, _utc_now
-from .runtime import DevEnvRuntime, DevEnvSubprocessRun
-from .shell import DevEnvShellLauncher
+from .registry import EnvRegistryStore, _utc_now
+from .runtime import EnvRuntime, EnvSubprocessRun
+from .shell import EnvShellLauncher
 
 
-class DevEnvManager:
+class EnvManager:
     def __init__(
         self,
         *,
         storage_root: Path,
         repo_root: Path | None,
-        subprocess_run: DevEnvSubprocessRun = subprocess.run,
+        subprocess_run: EnvSubprocessRun = subprocess.run,
     ) -> None:
-        runtime = DevEnvRuntime(
+        runtime = EnvRuntime(
             storage_root=storage_root,
             env_root=storage_root / "envs",
             registry_path=storage_root / "envs.json",
@@ -43,16 +43,16 @@ class DevEnvManager:
             subprocess_run=subprocess_run,
         )
         self._runtime = runtime
-        self._registry_store = DevEnvRegistryStore(runtime)
-        self._shell_launcher = DevEnvShellLauncher(runtime)
+        self._registry_store = EnvRegistryStore(runtime)
+        self._shell_launcher = EnvShellLauncher(runtime)
 
     @classmethod
     def for_repo(
         cls,
         repo_root: Path,
         *,
-        subprocess_run: DevEnvSubprocessRun = subprocess.run,
-    ) -> "DevEnvManager":
+        subprocess_run: EnvSubprocessRun = subprocess.run,
+    ) -> "EnvManager":
         return cls(
             storage_root=_repo_storage_root(repo_root),
             repo_root=repo_root,
@@ -63,8 +63,8 @@ class DevEnvManager:
     def for_global(
         cls,
         *,
-        subprocess_run: DevEnvSubprocessRun = subprocess.run,
-    ) -> "DevEnvManager":
+        subprocess_run: EnvSubprocessRun = subprocess.run,
+    ) -> "EnvManager":
         return cls(
             storage_root=_global_storage_root(),
             repo_root=None,
@@ -183,7 +183,7 @@ class DevEnvManager:
         envs = {env.name: env for env in self._registry_store.iter_registry_envs(registry)}
         if name not in envs:
             available = ", ".join(sorted(envs)) or "none"
-            raise DevEnvError(f"Unknown environment {name}. Available: {available}")
+            raise EnvError(f"Unknown environment {name}. Available: {available}")
 
         env = envs[name]
         self._registry_store.remove_env_dir(env)
@@ -253,7 +253,7 @@ class DevEnvManager:
     ) -> dict[str, str]:
         env_dir = _env_root_for_python(python_path)
         if env_dir is None:
-            raise DevEnvError(
+            raise EnvError(
                 f"`{python_path}` is not inside a virtual environment; use `frida-analykit env create` first"
             )
         self._run_checked(
@@ -285,22 +285,22 @@ class DevEnvManager:
         frida_version: str | None,
     ) -> tuple[str, str, str]:
         if bool(profile) == bool(frida_version):
-            raise DevEnvError("choose exactly one of `--profile` or `--frida-version`")
+            raise EnvError("choose exactly one of `--profile` or `--frida-version`")
         if profile is not None:
             repo_root = self._runtime.repo_root
             if repo_root is None:
-                raise DevEnvError("profiles are only available for repository-local environments")
+                raise EnvError("profiles are only available for repository-local environments")
             profiles = load_profiles(repo_root)
             if profile not in profiles:
                 available = ", ".join(sorted(profiles))
-                raise DevEnvError(f"Unknown profile {profile}. Available: {available}")
+                raise EnvError(f"Unknown profile {profile}. Available: {available}")
             return ("profile", profile, profiles[profile].tested_version)
         assert frida_version is not None
         return ("version", frida_version, frida_version)
 
     def _validate_new_env_name(self, name: str) -> None:
         if not _ENV_NAME_RE.fullmatch(name):
-            raise DevEnvError(
+            raise EnvError(
                 "environment names must match `[A-Za-z0-9][A-Za-z0-9._-]*` and cannot include path separators"
             )
 
@@ -324,13 +324,13 @@ class DevEnvManager:
             )
         except FileNotFoundError as exc:
             if command and command[0] == "uv":
-                raise DevEnvError(_UV_REQUIRED_MESSAGE) from exc
+                raise EnvError(_UV_REQUIRED_MESSAGE) from exc
             tool = command[0] if command else "<unknown>"
-            raise DevEnvError(f"Required command `{tool}` was not found on PATH") from exc
+            raise EnvError(f"Required command `{tool}` was not found on PATH") from exc
         if result.returncode != 0:
             detail = "\n".join(
                 part for part in (getattr(result, "stdout", None), getattr(result, "stderr", None)) if part
             ).strip()
             if detail:
-                raise DevEnvError(f"{error_message}: {detail}")
-            raise DevEnvError(error_message)
+                raise EnvError(f"{error_message}: {detail}")
+            raise EnvError(error_message)

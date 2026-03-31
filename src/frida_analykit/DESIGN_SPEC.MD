@@ -15,6 +15,7 @@
 - 当前仓库已经形成的风格包括：
   - `SessionRuntime` / `ScriptRuntime`
   - `ServerRuntime`
+  - `DeviceServerRuntime`
   - `SessionWrapper` / `ScriptWrapper`
   - `RPCClient`
 - 组件边界应尽量清楚：
@@ -41,6 +42,9 @@
 - Python 模块按职责边界组织，主线语义包括：
   - `cli`
   - `config`
+  - `env`
+  - `device`
+  - `development`
   - `session`
   - `rpc`
   - `server`
@@ -48,6 +52,13 @@
   - `logging`
 - 域内复杂逻辑应继续在域内细分，而不是回流到包根或入口文件。
 - 例如 `rpc` 侧已经按 `client / protocol / message / resolver / registry / handler / exports` 拆开；后续新增能力也应沿这种域内分层继续扩展。
+- `env` 域只负责多 Frida Python 环境管理，例如 managed env 创建、删除、选择、进入 shell、registry 和 render；compat profile 不再属于 `env`。
+- `device` 域只负责设备选择、adb/host 派生、app 探测、workspace、remote server runtime 和测试 APK 工具，不再持有 managed env 解析或跨版本兼容扫描编排。
+- 同时依赖 `env + device` 的编排逻辑，应收敛到 `development` 域，例如 compat profiles、managed env 选择、`doctor device-compat` 和真机测试上下文。
+- `tests/device/conftest.py` 只能做真机回归 fixture glue，不再拥有设备管理或环境管理业务逻辑。
+- adb 目标解析属于共享基础语义；`device`、`server`、`doctor` 和 CLI 入口不能各自复制一套“选哪台设备”的逻辑。
+- `device` 域内若职责继续增长，应优先拆成显式 owner 模块，例如 `defaults / models / selection / helpers / runtime / test_app`；不要再回流到单个大文件。
+- `development` 域内也应保持薄入口，优先拆成 `profiles / managed_envs / device_testing / device_compat` 这类显式 owner，而不是把交叉逻辑重新堆回包根。
 - 包根 `__init__`、CLI 根入口和对外 convenience 模块不应承担内部中转层职责。
 - 如果某个文件已经同时承载配置解析、生命周期、错误处理、协议序列化、日志落盘等多种责任，应主动拆分。
 - 测试目录也遵循相同思路：
@@ -70,4 +81,8 @@
 - `monkeypatch` 应命中真实拥有者模块或真实归属对象，不要依赖偶然可达的中转面。
 - 单测应尽量只验证一个清晰行为面；RPC、REPL、server、config、CLI、device 场景不要混成一个巨型测试文件。
 - 真机测试与普通单测保持隔离；需要验证 Python 与 agent 的组合行为时，应继续放在 `tests/device/` 这类独立层级中。
+- 如果重构影响 adb 目标解析、config 继承或 CLI 到 server/device 的接线，必须补三类回归测试：
+  - 单设备自动解析
+  - 多设备歧义报错
+  - `ANDROID_SERIAL` 覆盖
 - 如果某次重构改变了模块边界、导入拥有者或测试组织方式，应同步更新本文件，避免文档和真实测试风格脱节。

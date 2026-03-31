@@ -48,8 +48,36 @@ class FridaServerManager:
     ) -> str:
         return self._installer.resolve_server_version(config, version_override=version_override)
 
-    def inspect_remote_server(self, config: AppConfig, *, probe_abi: bool = True) -> RemoteServerStatus:
-        return self._installer.inspect_remote_server(config, probe_abi=probe_abi)
+    def resolve_server_version_with_source(
+        self,
+        config: AppConfig,
+        *,
+        version_override: str | None = None,
+    ) -> tuple[str, str]:
+        return self._installer.resolve_server_version_with_source(
+            config,
+            version_override=version_override,
+        )
+
+    def resolve_target_config(self, config: AppConfig, *, action: str) -> AppConfig:
+        return self._installer.resolve_target_config(config, action=action)
+
+    def resolve_target_config_with_source(
+        self,
+        config: AppConfig,
+        *,
+        action: str,
+    ) -> tuple[AppConfig, str]:
+        return self._installer.resolve_target_config_with_source(config, action=action)
+
+    def inspect_remote_server(
+        self,
+        config: AppConfig,
+        *,
+        probe_abi: bool = True,
+        probe_host: bool = False,
+    ) -> RemoteServerStatus:
+        return self._installer.inspect_remote_server(config, probe_abi=probe_abi, probe_host=probe_host)
 
     def install_remote_server(
         self,

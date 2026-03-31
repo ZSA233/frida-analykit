@@ -10,7 +10,7 @@ SRC_ROOT = PROJECT_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from frida_analykit.dev_env import repo_cli_main
+from frida_analykit.env import repo_cli_main
 
 
 def main(argv: list[str] | None = None) -> int:

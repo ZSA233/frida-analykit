@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Mapping, Protocol, Sequence
 
 
-class DevEnvSubprocessRun(Protocol):
+class EnvSubprocessRun(Protocol):
     def __call__(
         self,
         args: Sequence[str],
@@ -20,9 +20,9 @@ class DevEnvSubprocessRun(Protocol):
 
 
 @dataclass(slots=True)
-class DevEnvRuntime:
+class EnvRuntime:
     storage_root: Path
     env_root: Path
     registry_path: Path
     repo_root: Path | None
-    subprocess_run: DevEnvSubprocessRun
+    subprocess_run: EnvSubprocessRun

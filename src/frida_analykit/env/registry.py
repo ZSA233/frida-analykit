@@ -8,11 +8,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from .._version import __version__
+from ..development.profiles import load_profiles
 from .constants import _LEGACY_ENV_GLOB
-from .models import DevEnvError, ManagedEnv, ManagedEnvRecord, RegistryPayload
+from .models import EnvError, ManagedEnv, ManagedEnvRecord, RegistryPayload
 from .paths import _python_path
-from .profiles import load_profiles
-from .runtime import DevEnvRuntime
+from .runtime import EnvRuntime
 
 
 def _utc_now() -> str:
@@ -25,8 +25,8 @@ def _timestamp_for_path(path: Path) -> str:
     )
 
 
-class DevEnvRegistryStore:
-    def __init__(self, runtime: DevEnvRuntime) -> None:
+class EnvRegistryStore:
+    def __init__(self, runtime: EnvRuntime) -> None:
         self._runtime = runtime
 
     def load_registry(self) -> RegistryPayload:
@@ -36,15 +36,15 @@ class DevEnvRegistryStore:
         try:
             payload = json.loads(registry_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
-            raise DevEnvError(f"Failed to read registry {registry_path}: {exc}") from exc
+            raise EnvError(f"Failed to read registry {registry_path}: {exc}") from exc
         if not isinstance(payload, dict):
-            raise DevEnvError(f"{registry_path} is invalid: top-level payload must be an object")
+            raise EnvError(f"{registry_path} is invalid: top-level payload must be an object")
         current = payload.get("current")
         envs = payload.get("envs", [])
         if current is not None and not isinstance(current, str):
-            raise DevEnvError(f"{registry_path} is invalid: `current` must be a string or null")
+            raise EnvError(f"{registry_path} is invalid: `current` must be a string or null")
         if not isinstance(envs, list):
-            raise DevEnvError(f"{registry_path} is invalid: `envs` must be an array")
+            raise EnvError(f"{registry_path} is invalid: `envs` must be an array")
         return {
             "current": current,
             "envs": [item for item in envs if isinstance(item, dict)],
@@ -75,7 +75,7 @@ class DevEnvRegistryStore:
                     tmp_path.unlink(missing_ok=True)
                 except OSError:
                     pass
-            raise DevEnvError(f"Failed to write registry {registry_path}: {exc}") from exc
+            raise EnvError(f"Failed to write registry {registry_path}: {exc}") from exc
 
     def iter_registry_envs(self, registry: RegistryPayload) -> list[ManagedEnv]:
         envs: list[ManagedEnv] = []
@@ -204,7 +204,7 @@ class DevEnvRegistryStore:
         if name is not None:
             if name not in envs:
                 available = ", ".join(sorted(envs)) or "none"
-                raise DevEnvError(f"Unknown environment {name}. Available: {available}")
+                raise EnvError(f"Unknown environment {name}. Available: {available}")
             return envs[name]
 
         current = registry.get("current")
@@ -214,13 +214,13 @@ class DevEnvRegistryStore:
             only_env = next(iter(envs.values()))
             self.set_current(only_env.name)
             return only_env
-        raise DevEnvError("No current environment selected; run `list` or pass `--name`/`ENV_NAME`")
+        raise EnvError("No current environment selected; run `list` or pass `--name`/`ENV_NAME`")
 
     def set_current(self, name: str) -> None:
         registry, _ = self.refresh_registry()
         envs = {env.name: env for env in self.iter_registry_envs(registry)}
         if name not in envs:
-            raise DevEnvError(f"Unknown environment {name}")
+            raise EnvError(f"Unknown environment {name}")
         if registry.get("current") == name:
             return
         registry["current"] = name
@@ -254,26 +254,26 @@ class DevEnvRegistryStore:
 
     def remove_existing_env_dir(self, env_dir: Path) -> None:
         if env_dir.is_symlink():
-            raise DevEnvError(f"Refusing to recreate {env_dir.name}: managed env path is a symlink")
+            raise EnvError(f"Refusing to recreate {env_dir.name}: managed env path is a symlink")
         if not env_dir.is_dir():
-            raise DevEnvError(f"Refusing to recreate {env_dir.name}: managed env path is not a directory")
+            raise EnvError(f"Refusing to recreate {env_dir.name}: managed env path is not a directory")
         if not self._is_within_env_root(env_dir):
-            raise DevEnvError(f"Refusing to recreate {env_dir.name}: path escapes managed env root")
+            raise EnvError(f"Refusing to recreate {env_dir.name}: path escapes managed env root")
         shutil.rmtree(env_dir)
 
     def remove_env_dir(self, env: ManagedEnv) -> None:
         env_dir = env.env_dir
         if env_dir.is_symlink():
-            raise DevEnvError(f"Refusing to remove {env.name}: managed env path is a symlink")
+            raise EnvError(f"Refusing to remove {env.name}: managed env path is a symlink")
         if not env_dir.is_dir():
-            raise DevEnvError(f"Refusing to remove {env.name}: managed env path is not a directory")
+            raise EnvError(f"Refusing to remove {env.name}: managed env path is not a directory")
         if env.legacy:
             if self._runtime.repo_root is None:
-                raise DevEnvError(f"Refusing to remove {env.name}: legacy environments are only supported in repo mode")
+                raise EnvError(f"Refusing to remove {env.name}: legacy environments are only supported in repo mode")
             if not self._is_within_repo_root(env_dir):
-                raise DevEnvError(f"Refusing to remove {env.name}: legacy path escapes repository root")
+                raise EnvError(f"Refusing to remove {env.name}: legacy path escapes repository root")
         elif not self._is_within_env_root(env_dir):
-            raise DevEnvError(f"Refusing to remove {env.name}: path escapes managed env root")
+            raise EnvError(f"Refusing to remove {env.name}: path escapes managed env root")
         shutil.rmtree(env_dir)
 
     def _normalize_registry_envs(self, registry: RegistryPayload) -> tuple[list[ManagedEnv], bool]:

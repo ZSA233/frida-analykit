@@ -42,6 +42,7 @@ class ServerSubprocessPopen(Protocol):
         self,
         args: Sequence[str],
         *,
+        stdin: int | None = None,
         stdout: int | None = None,
         stderr: int | None = None,
         text: bool = False,

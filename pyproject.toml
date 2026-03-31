@@ -73,7 +73,8 @@ testpaths = ["tests"]
 markers = [
   "smoke: requires a local Frida attachment target",
   "scaffold: requires npm install/build tooling",
-  "device: requires an attached Android device and FRIDA_ANALYKIT_ENABLE_DEVICE=1"
+  "device: requires an attached Android device and FRIDA_ANALYKIT_ENABLE_DEVICE=1",
+  "device_app: requires a launchable Android app package for device tests"
 ]
 
 [dependency-groups]

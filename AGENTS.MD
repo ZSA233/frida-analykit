@@ -168,20 +168,35 @@
 
 ## README 文档维护规则
 
-- 本项目有两份面向发布的 README，且它们职责不同。
-- 根文档 `README.md`：面向整体用户，描述整个 `frida-analykit` 项目的主线使用方式、CLI 接口、环境准备、接入流程和整体发布物。
-- `README_EN.md`：是根文档 `README.md` 的英文翻译版本，不是独立事实来源；其内容应跟随根 `README.md` 的最终收束结果同步翻译。
-- 包文档 `packages/frida-analykit-agent/README.md`：面向 npmjs 上的 `@zsa233/frida-analykit-agent` 用户，只描述这个包自身的定位、安装、导出能力、使用方式和与 agent 工作区直接相关的细节。
-- `PRE_README.MD` 是这两份 README 共同的中间来源文档，用于持续记录当前项目真实支持的能力、接口、使用方式、约束、版本变化和文档差异。
-- 只要本次改动影响了用户可见能力、CLI 行为、配置方式、接入流程、runtime 导出、限制条件、使用示例或对外接口，AI agent 就应先更新 `PRE_README.MD`，而不是直接零散修改两份 README。
-- 不要把 `README.md` 和 `packages/frida-analykit-agent/README.md` 视为同一份文档的不同副本；两者面向的发布面和读者不同，不应机械同步。
-- 当用户要求进行整体项目的 release 文档收束时，应基于 `PRE_README.MD` 更新根 `README.md`，并保持其更简洁、更稳定、更偏接口与主流程说明。
-- 当根 `README.md` 收束完成后，应再同步更新 `README_EN.md`，保持其作为根文档的英文翻译版本，而不是重新发明另一套结构或事实口径。
-- 当用户要求进行 npm 包发布或 npmjs 文档收束时，应基于 `PRE_README.MD` 更新 `packages/frida-analykit-agent/README.md`，并只提取与 `@zsa233/frida-analykit-agent` 这个包直接相关的信息。
-- 根 `README.md` 不应过度展开包内部细节、runtime 细枝末节或只对 npm 包读者有意义的说明。
-- `packages/frida-analykit-agent/README.md` 不应承担整个项目的环境管理、远端 `frida-server` 运维、完整 CLI 工作流或整体 release 说明；只有当这些信息与该包的实际使用直接相关时才简要提及。
-- release 前更新任一 README 时，不要只是把最近几次变更机械拼接进去；应先判断目标发布面，再统一检查主线是否清晰、章节顺序是否合理、术语是否一致、示例是否准确。
+- 本项目维护四份对外 README，且它们面向的发布面不同：
+- 根 `README.md`：面向整体用户，描述整个 `frida-analykit` 项目的主线使用方式、CLI 接口、环境准备、接入流程和整体发布物。
+- 根 `README_EN.md`：是根 `README.md` 的严格英文翻译版本，不是独立事实来源。
+- `packages/frida-analykit-agent/README.md`：面向 npmjs 上的 `@zsa233/frida-analykit-agent` 用户，只描述这个包自身的定位、安装、导出能力、使用方式和与 agent 工作区直接相关的细节。
+- `packages/frida-analykit-agent/README_EN.md`：是包文档 `packages/frida-analykit-agent/README.md` 的严格英文翻译版本，不是独立事实来源。
+- `PRE_README.MD` 是上述 README 的共同中间来源文档，也是 README 收束时的事实与风格基线。
+- 只要本次改动影响了用户可见能力、CLI 行为、配置方式、接入流程、runtime 导出、限制条件、使用示例或对外接口，AI agent 就应先更新 `PRE_README.MD`，而不是直接零散修改 README。
+- README 应比 `PRE_README.MD` 更短、更稳、更主线化；不能脱离 `PRE_README.MD` 自行增删事实，也不能为了英文版“更自然”而改变信息密度、删段或补充另一套口径。
+- 根 `README.md` 与根 `README_EN.md` 必须严格镜像：
+- 章节顺序一致
+- 标题数量与层级一致
+- 表格行列与字段一致
+- 代码块数量、顺序和参数一致
+- 提示项、限制说明、示例数量一致
+- `packages/frida-analykit-agent/README.md` 与 `packages/frida-analykit-agent/README_EN.md` 也必须遵循同样的严格镜像规则。
+- 根 README 的默认结构应优先服务普通用户，再进入高级/开发用户，最后再放调试、测试、发布和仓库结构；不要把主线 CLI 用法和高级 runtime 细节混写。
+- agent 包 README 的默认结构应优先按“包定位 -> 安装 -> 能力总览表 -> 普通使用方式 -> 高级能力 -> 调试与非公共内容”组织。
+- 当能力面较多、导入路径较多或存在轻入口/重 capability 区分时，应优先使用表格提升可读性；尤其是 agent 包 README 的 capability 概览，默认使用表格而不是散列 bullet。
+- 根 README 的架构说明必须读取并嵌入 `docs/arch.mermaid` 的 Mermaid 源码；在架构未变时，该文件视为只读事实源，不允许为了更新 README 顺手改图。
+- 不要把根 README 和 agent 包 README 当作同一份文档的不同副本机械同步；它们面向的读者不同，只能共享事实基线，不能共享发布面。
+- 当用户要求进行整体项目的 README 收束或 release 文档收束时，应基于 `PRE_README.MD` 先更新根 `README.md`，再翻译根 `README_EN.md`，再更新包 README，最后翻译包 README_EN。
+- 中英文 README 更新完成后，必须做一次二次校对，至少逐项检查：
+- 标题树是否完全一致
+- 表格行列和字段是否完全一致
+- 代码块数量、顺序和参数是否完全一致
+- 提示项、限制说明和示例数量是否完全一致
+- Mermaid 架构图是否与 `docs/arch.mermaid` 完全一致
 - 如果某项能力已经实现，但尚未写入 `PRE_README.MD`，则视为文档维护未完成；如果已经写入 `PRE_README.MD`，但尚未收束到对应 README，则说明还处于中间态，而不是最终对外态。
+- 如果中英 README 任一侧存在漏段、漏表、漏示例、漏限制说明，视为 README 收束未完成。
 
 ## 发版流程规则
 
@@ -190,9 +205,14 @@
 - 用户明确提出发版请求后，正式版本切换、打 tag、dry-run、发布前检查之前，必须先基于 `PRE_README.MD` 收束文档。
 - 该文档收束顺序应为：
 - 先更新根 `README.md`
-- 再同步更新 `README_EN.md` 作为根文档的英文翻译
-- 再按需要更新 `packages/frida-analykit-agent/README.md`
+- 再同步更新 `README_EN.md` 作为根文档的严格英文翻译
+- 再更新 `packages/frida-analykit-agent/README.md`
+- 再同步更新 `packages/frida-analykit-agent/README_EN.md` 作为包文档的严格英文翻译
+- 两组 README 都完成后，必须先做一次双语镜像二次校对
 - 文档收束完成后，才进入 `docs/release-process.md` 中定义的 release-version、preflight、RC、stable、publish 流程。
+- 如果四份 README 中任意一份仍缺段、缺表、缺示例、缺限制说明，或者中英结构不一致，则不允许进入正式发版流程。
+- 发版时 `git commit`、`git tag`、`workflow_dispatch`、`push tag` 必须串行执行，不要并行；尤其不要把 `git commit` 和 `git tag` 并行跑，否则 tag 可能落在错误提交上。
+- stable 的远程 dry-run / 正式发布依赖远端已存在可追溯的 RC tag；如果 RC tag 还没有 push 到远端，不要直接继续 stable dry-run。
 - 发版过程中如果发现严重 bug，不要立刻边发版边修；应立即停止当前发版流程，明确告诉用户问题出在哪里、影响范围是什么、发布风险是否高。
 - “严重 bug” 包括但不限于：
 - 会导致产物无法安装或无法运行
@@ -228,4 +248,4 @@
 - 如果需要收束 README，这次目标到底是根 `README.md` 还是 `packages/frida-analykit-agent/README.md`？
 - 如果这是一次发版操作，用户是否已经明确给出目标版本号？
 - 如果这是一次发版操作，目标版本号是否与当前已发布版本形成合理递增？
-- 如果这是一次发版操作，`README.md`、`README_EN.md` 和 `packages/frida-analykit-agent/README.md` 是否已经先基于 `PRE_README.MD` 完成收束？
+- 如果这是一次发版操作，四份 README 是否都已经先基于 `PRE_README.MD` 完成收束并做过双语镜像二次校对？
