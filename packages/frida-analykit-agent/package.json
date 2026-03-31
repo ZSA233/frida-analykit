@@ -1,6 +1,6 @@
 {
   "name": "@zsa233/frida-analykit-agent",
-  "version": "2.0.7-rc.1",
+  "version": "2.0.7-rc.2",
   "description": "Frida agent runtime for frida-analykit",
   "keywords": [
     "frida",
