@@ -108,7 +108,7 @@ make release-version-rc BASE_VERSION=X.Y.Z RC=N CHECK=1
 切到 stable：
 
 ```sh
-make release-version-stable BASE_VERSION=X.Y.Z CHECK=1 RC_TAG=vX.Y.Z-rc.N
+make release-version-stable BASE_VERSION=X.Y.Z CHECK=1 [RC_TAG=vX.Y.Z-rc.N]
 ```
 
 这些命令会同步以下文件：
@@ -170,38 +170,37 @@ git rev-parse vX.Y.Z[-rc.N]
 
 - 不发布空包占位
 - 首次发布直接发布真实 stable 版本
-- RC 仍然只做 GitHub prerelease 和本地 tarball 验证
+- RC 如果使用，仍然只做 GitHub prerelease 和本地 tarball 验证
 
 推荐流程：
 
-1. 先完成至少一个 RC，并确认该 RC 可接受。
-2. 在发布分支上切回 stable：
+1. 默认直接在发布分支上切到 stable：
 
 ```sh
-make release-version-stable BASE_VERSION=X.Y.Z CHECK=1 RC_TAG=vX.Y.Z-rc.N
+make release-version-stable BASE_VERSION=X.Y.Z CHECK=1
 make release-local RELEASE_TAG=vX.Y.Z
 make release-install-check RELEASE_TAG=vX.Y.Z
 ```
 
-3. 通过 `workflow_dispatch` 触发 `.github/workflows/release.yml`，传入 `vX.Y.Z` 做远程 dry-run。
+2. 通过 `workflow_dispatch` 触发 `.github/workflows/release.yml`，传入 `vX.Y.Z` 做远程 dry-run。
    dry-run 只执行 build，并上传 `release-bundle-vX.Y.Z` artifact。
-4. 如果 npm Trusted Publishing 已经可用，则直接按“后续 stable 流程”执行。
-5. 如果 npm 上还没有该包，或者 npm 侧还不能完成 Trusted Publishing 绑定，就把这次 stable 作为一次手动 bootstrap：
+3. 如果 npm Trusted Publishing 已经可用，则直接按“后续 stable 流程”执行。
+4. 如果 npm 上还没有该包，或者 npm 侧还不能完成 Trusted Publishing 绑定，就把这次 stable 作为一次手动 bootstrap：
 
 ```sh
 gh release create vX.Y.Z dist/*.tar.gz dist/*.whl dist/*.apk *.tgz
 npm publish ./zsa233-frida-analykit-agent-X.Y.Z.tgz --access public
 ```
 
-6. 首发成功后，到 npm 包设置里把 trusted publisher 绑定到 `.github/workflows/release.yml`。
-7. 从下一个 stable 开始，直接走自动化 stable 发布流程。
+5. 首发成功后，到 npm 包设置里把 trusted publisher 绑定到 `.github/workflows/release.yml`。
+6. 从下一个 stable 开始，直接走自动化 stable 发布流程。
 
 自动 stable 发布的 `publish` job 需要使用支持 Trusted Publishing 的较新 npm CLI。
 仓库 workflow 会在发布前升级 npm；如果看到带 provenance 的 `npm publish` 仍返回误导性的 `E404`，先检查 job 实际使用的 npm 版本，而不是先怀疑 package scope 或 tarball 内容。
 
 ## RC 流程
 
-RC 用于公开验证。RC 只创建 GitHub prerelease，不发布 npm。
+RC 用于公开验证。RC 只创建 GitHub prerelease，不发布 npm。只有在发布操作者或用户明确要求“先 RC，再 stable”时，才进入这条流程。
 
 步骤如下：
 
@@ -231,7 +230,7 @@ git tag vX.Y.Z-rc.N
 test "$(git rev-parse HEAD)" = "$(git rev-parse vX.Y.Z-rc.N)"
 ```
 
-4. 如需在不提前公开 RC tag 的前提下做远程 dry-run，可先把 RC commit 推到一个临时分支，再通过 `workflow_dispatch` 触发 `.github/workflows/release-rc.yml`：
+4. 如需在不提前公开 RC tag 的前提下做远程 dry-run，可先把 RC commit 推到当前目标版本对应的临时分支，再通过 `workflow_dispatch` 触发 `.github/workflows/release-rc.yml`：
 
 ```sh
 git push origin HEAD:refs/heads/tmp/release-vX.Y.Z-rc.N
@@ -239,6 +238,7 @@ gh workflow run "Release RC" --ref tmp/release-vX.Y.Z-rc.N -f tag=vX.Y.Z-rc.N
 ```
 
    dry-run 只执行 build，并上传 `release-bundle-vX.Y.Z-rc.N` artifact。
+   不要为了方便随意推与当前目标版本无关的其他 `tmp/` 分支；如果确有必要，必须先向用户说明并得到明确同意。
 5. dry-run 通过后，再 push `vX.Y.Z-rc.N`。
 6. push RC tag 后，`Release RC` 工作流会：
    - 复用 `.github/actions/release-bundle/action.yml`
@@ -247,8 +247,11 @@ gh workflow run "Release RC" --ref tmp/release-vX.Y.Z-rc.N -f tag=vX.Y.Z-rc.N
    - 执行 `make release-install-check`
    - 创建 GitHub prerelease
    - 上传 `dist/*.tar.gz`、`dist/*.whl`、`dist/*.apk` 和 `*.tgz`
-7. 若使用了临时 dry-run 分支，可在 RC tag 成功 push 后删除该临时分支。
-8. 如果 RC 需要修复，在同一发布分支继续提交，递增 `rc.N` 后重新执行流程。
+7. RC prerelease 成功后，流程必须在这里停下：
+   - 向用户汇报 RC tag、workflow 结果、已完成的手工验证和待验证事项
+   - 等待用户明确回复“继续 stable”后，才允许进入 stable 版本切换、stable dry-run 和正式发布
+8. 若使用了临时 dry-run 分支，可在 RC tag 成功 push 后删除该临时分支。
+9. 如果 RC 需要修复，在同一发布分支继续提交，递增 `rc.N` 后重新执行流程；每次 RC 成功发布后，都应再次停在该检查点等待用户决定是否继续 stable。
 
 如果当前发布设备明确不支持某个受测 profile，不要为了凑流程在不支持的设备上反复尝试。此时应：
 
@@ -266,9 +269,9 @@ RC 阶段的 bug 处理规则：
 
 ## stable 流程
 
-stable 是从已接受的 RC 提升出来的正式发布。
+stable 是正式发布。默认情况下，stable 不要求先有 RC；只有在你明确选择了“RC -> stable”提升路线时，stable 才是从已接受的 RC 提升出来。
 
-从 RC 切到 stable 时，只允许保留版本元数据差异，允许变动的路径为：
+当 stable 走显式 RC 提升路线时，只允许保留版本元数据差异，允许变动的路径为：
 
 - `release-version.toml`
 - `src/frida_analykit/_version.py`
@@ -278,10 +281,10 @@ stable 是从已接受的 RC 提升出来的正式发布。
 
 步骤如下：
 
-1. 在同一个发布分支上切回 stable：
+1. 在发布分支上切到 stable：
 
 ```sh
-make release-version-stable BASE_VERSION=X.Y.Z CHECK=1 RC_TAG=vX.Y.Z-rc.N
+make release-version-stable BASE_VERSION=X.Y.Z CHECK=1 [RC_TAG=vX.Y.Z-rc.N]
 make release-local RELEASE_TAG=vX.Y.Z
 make release-install-check RELEASE_TAG=vX.Y.Z
 ```
@@ -296,7 +299,8 @@ git commit -m "release: cut vX.Y.Z"
 
 3. 通过 `workflow_dispatch` 触发 `.github/workflows/release.yml`，传入 `vX.Y.Z` 做远程 dry-run。
    dry-run 只执行 build，并上传 `release-bundle-vX.Y.Z` artifact。
-4. stable dry-run 之前，远端仓库必须已经存在可从当前发布分支追溯到的 RC tag `vX.Y.Z-rc.N`；否则 `validate-promotion` 会在远端报 `No RC tag found for stable release vX.Y.Z`。
+4. 如果本次走的是显式 RC 提升路线，则 stable dry-run 之前，远端仓库必须已经存在可从当前发布分支追溯到的 RC tag `vX.Y.Z-rc.N`；否则 `validate-promotion` 会报 `No RC tag found for stable release vX.Y.Z`。
+   如果本次是默认 direct stable，不需要先有 RC tag，也不执行 promotion 校验。
 5. dry-run 通过后，再创建并 push `vX.Y.Z`：
 
 ```sh
@@ -404,7 +408,7 @@ RC 不发布 npm。
 
 ## 常见QA
 
-### 1. stable 远程 dry-run 找不到 RC
+### 1. 显式 RC 提升的 stable 远程 dry-run 找不到 RC
 
 现象：
 
@@ -418,8 +422,9 @@ RC 不发布 npm。
 
 确定的解决方案：
 
-- stable dry-run 前，先确保 RC tag 已 push 到远端
+- 只有在显式 RC 提升路线下，stable dry-run 前才需要先确保 RC tag 已 push 到远端
 - stable `workflow_dispatch` 使用的 `--ref` 必须能追溯到该 RC tag
+- 如果本次不需要 RC 提升，就不要传 `RC_TAG`，直接按 direct stable 流程执行
 
 ### 2. 文档变更混进 stable promotion
 

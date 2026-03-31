@@ -34,10 +34,13 @@ def test_device_helpers_workspace_accepts_extra_dependencies(tmp_path: Path) -> 
     assert package_json["dependencies"]["@zsa233/frida-analykit-agent"] == "file:/tmp/runtime.tgz"
     assert package_json["dependencies"]["@zsa233/frida-analykit-agent-device-tests"] == "file:/tmp/device-tests.tgz"
     assert package_json["overrides"]["frida-java-bridge"] == f"file:{repo_root / 'node_modules' / 'frida-java-bridge'}"
-    assert package_json["devDependencies"] == {
-        "@types/frida-gum": f"file:{repo_root / 'node_modules' / '@types' / 'frida-gum'}",
-        "typescript": f"file:{repo_root / 'node_modules' / 'typescript'}",
-    }
+    assert package_json["devDependencies"]["@types/frida-gum"] == (
+        f"file:{repo_root / 'node_modules' / '@types' / 'frida-gum'}"
+    )
+    assert package_json["devDependencies"]["typescript"] == (
+        f"file:{repo_root / 'node_modules' / 'typescript'}"
+    )
+    assert package_json["devDependencies"]["frida-compile"] == "^19.0.4"
     assert tsconfig_json["compilerOptions"]["types"] == ["frida-gum"]
 
 

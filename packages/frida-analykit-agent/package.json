@@ -8,7 +8,7 @@
     "instrumentation",
     "typescript"
   ],
-  "homepage": "https://github.com/ZSA233/frida-analykit#readme",
+  "homepage": "https://github.com/ZSA233/frida-analykit/blob/main/packages/frida-analykit-agent/README.md",
   "bugs": {
     "url": "https://github.com/ZSA233/frida-analykit/issues"
   },
@@ -23,6 +23,7 @@
   "files": [
     "dist/**/*",
     "README.md",
+    "README_EN.md",
     "LICENSE"
   ],
   "exports": {

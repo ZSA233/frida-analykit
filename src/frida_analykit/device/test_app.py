@@ -54,11 +54,16 @@ def _resolve_java_home(env: dict[str, str]) -> str | None:
     return None
 
 
+def _is_usable_java_home(path: str | None) -> bool:
+    return bool(path) and Path(path, "bin", "java").is_file()
+
+
 def _prepare_tool_env(env: dict[str, str] | None) -> dict[str, str]:
     effective = dict(os.environ if env is None else env)
     java_home = _resolve_java_home(effective)
     if java_home is not None:
-        effective.setdefault("JAVA_HOME", java_home)
+        if not _is_usable_java_home(effective.get("JAVA_HOME")):
+            effective["JAVA_HOME"] = java_home
         java_bin = str(Path(java_home) / "bin")
         path = effective.get("PATH")
         if path:

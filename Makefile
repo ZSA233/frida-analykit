@@ -31,14 +31,7 @@ release-preflight:
 	uv run python scripts/release_version.py check-sync --tag "$(RELEASE_TAG)"
 	uv run python scripts/release_assets.py validate-config
 	uv run python scripts/release_assets.py validate-release-version --tag "$(RELEASE_TAG)"
-	@case "$(RELEASE_TAG)" in \
-		v*-rc.*) ;; \
-		*) if [ -n "$(RC_TAG)" ]; then \
-			uv run python scripts/release_assets.py validate-promotion --tag "$(RELEASE_TAG)" --rc-tag "$(RC_TAG)"; \
-		else \
-			uv run python scripts/release_assets.py validate-promotion --tag "$(RELEASE_TAG)"; \
-		fi ;; \
-	esac
+	$(if $(strip $(RC_TAG)),uv run python scripts/release_assets.py validate-promotion --tag "$(RELEASE_TAG)" --rc-tag "$(RC_TAG)")
 	npm ci
 	uv run pytest -x -vv -m "not smoke and not scaffold and not device"
 	npm run agent:build

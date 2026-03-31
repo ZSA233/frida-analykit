@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import io
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+from frida_analykit.device import test_app as test_app_module
 from frida_analykit.device import (
     DEFAULT_DEVICE_TEST_APP_ID,
     build_device_test_app,
@@ -65,6 +67,43 @@ def test_build_device_test_app_uses_gradle_wrapper(
     assert captured["kwargs"]["env"]["BASE_ENV"] == "1"
     assert "JAVA_HOME" in captured["kwargs"]["env"]
     assert captured["kwargs"]["timeout"] == 123
+
+
+def test_prepare_tool_env_overrides_invalid_java_home_with_resolved_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "frida_analykit.device.test_app._resolve_java_home",
+        lambda env: "/resolved/java",
+    )
+
+    prepared = test_app_module._prepare_tool_env(
+        {
+            "JAVA_HOME": "/broken/java",
+            "PATH": "/usr/bin",
+        }
+    )
+
+    assert prepared["JAVA_HOME"] == "/resolved/java"
+    assert prepared["PATH"].split(os.pathsep)[0] == "/resolved/java/bin"
+
+
+def test_prepare_tool_env_keeps_valid_java_home(
+    tmp_path: Path,
+) -> None:
+    java_home = tmp_path / "jdk"
+    (java_home / "bin").mkdir(parents=True)
+    (java_home / "bin" / "java").write_text("", encoding="utf-8")
+
+    prepared = test_app_module._prepare_tool_env(
+        {
+            "JAVA_HOME": str(java_home),
+            "PATH": "/usr/bin",
+        }
+    )
+
+    assert prepared["JAVA_HOME"] == str(java_home)
+    assert prepared["PATH"].split(os.pathsep)[0] == str(java_home / "bin")
 
 
 def test_install_device_test_app_builds_then_installs_to_serial(

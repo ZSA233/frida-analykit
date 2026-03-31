@@ -1,6 +1,6 @@
 # @zsa233/frida-analykit-agent
 
-🌍 Language: [中文](README.md) | English
+🌍 Language: [中文](https://github.com/ZSA233/frida-analykit/blob/main/packages/frida-analykit-agent/README.md) | English
 
 `@zsa233/frida-analykit-agent` is the runtime package for custom TypeScript Frida agents. It is typically consumed by workspaces generated with `frida-analykit gen dev`, but it can also be used manually in any `frida-compile` project.
 

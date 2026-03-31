@@ -339,6 +339,36 @@ def test_set_stable_release_with_check_runs_preflight_and_rc_tag(
     assert calls == [("v2.0.0", "v2.0.0-rc.1")]
 
 
+def test_set_stable_release_with_check_runs_preflight_without_rc_tag(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_config = release_version_script.ReleaseVersionConfig(base_version="2.0.0", channel="stable")
+    repo_root = _make_version_repo(tmp_path, config=original_config)
+    calls: list[tuple[str, str | None]] = []
+
+    def fake_run_lockfile_sync(current_repo_root: Path) -> None:
+        _write_lockfile(
+            current_repo_root,
+            release_version_script.ReleaseVersion(base_version="2.0.0"),
+        )
+
+    def fake_run_release_preflight(current_repo_root: Path, *, tag: str, rc_tag: str | None = None) -> None:
+        calls.append((tag, rc_tag))
+
+    monkeypatch.setattr(release_version_script, "run_lockfile_sync", fake_run_lockfile_sync)
+    monkeypatch.setattr(release_version_script, "run_release_preflight", fake_run_release_preflight)
+
+    payload = release_version_script.set_stable_release(
+        repo_root,
+        base_version="2.0.0",
+        check=True,
+    )
+
+    assert payload["tag"] == "v2.0.0"
+    assert calls == [("v2.0.0", None)]
+
+
 def test_set_stable_release_with_check_rolls_back_when_preflight_fails(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
