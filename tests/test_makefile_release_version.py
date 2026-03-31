@@ -66,6 +66,37 @@ def test_make_release_preflight_uses_fail_fast_verbose_pytest() -> None:
 
 
 @pytest.mark.skipif(not Path(MAKE_BIN).exists(), reason="make is not available")
+def test_make_release_preflight_skips_promotion_without_rc_tag_for_stable() -> None:
+    result = subprocess.run(
+        [MAKE_BIN, "-n", "release-preflight", "RELEASE_TAG=v2.0.0"],
+        cwd=REPO_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+        env=_make_test_env(),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "validate-release-version --tag \"v2.0.0\"" in result.stdout
+    assert "validate-promotion" not in result.stdout
+
+
+@pytest.mark.skipif(not Path(MAKE_BIN).exists(), reason="make is not available")
+def test_make_release_preflight_runs_promotion_when_rc_tag_is_supplied() -> None:
+    result = subprocess.run(
+        [MAKE_BIN, "-n", "release-preflight", "RELEASE_TAG=v2.0.0", "RC_TAG=v2.0.0-rc.1"],
+        cwd=REPO_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+        env=_make_test_env(),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert 'validate-promotion --tag "v2.0.0" --rc-tag "v2.0.0-rc.1"' in result.stdout
+
+
+@pytest.mark.skipif(not Path(MAKE_BIN).exists(), reason="make is not available")
 def test_make_release_version_rc_dispatch() -> None:
     result = subprocess.run(
         [MAKE_BIN, "-n", "release-version-rc", "BASE_VERSION=2.0.0", "RC=1"],

@@ -212,14 +212,17 @@
 - 文档收束完成后，才进入 `docs/release-process.md` 中定义的 release-version、preflight、RC、stable、publish 流程。
 - 如果四份 README 中任意一份仍缺段、缺表、缺示例、缺限制说明，或者中英结构不一致，则不允许进入正式发版流程。
 - 发版时 `git commit`、`git tag`、`workflow_dispatch`、`push tag` 必须串行执行，不要并行；尤其不要把 `git commit` 和 `git tag` 并行跑，否则 tag 可能落在错误提交上。
-- stable 的远程 dry-run / 正式发布依赖远端已存在可追溯的 RC tag；如果 RC tag 还没有 push 到远端，不要直接继续 stable dry-run。
+- 默认发版流程应直接走 stable；只有用户明确要求“先 RC，再 stable”时，才进入 RC 提升路线。
+- 如果本次明确走 RC 流程，则 RC 发布完成后必须停下来，向用户汇报 RC tag、workflow 状态和待验证事项；在用户明确表示继续 stable 之前，不允许继续执行 stable 版本切换、stable dry-run、stable tag 或正式发布。
+- 只有在显式 RC 提升路线中，stable 的远程 dry-run / 正式发布才依赖远端已存在可追溯的 RC tag；默认 direct stable 不要求先有 RC tag。
+- 默认不要为了 dry-run 随意推远端临时分支。stable dry-run 直接使用当前 `release/vX.Y.Z`；RC dry-run 如确有必要，只允许使用当前目标版本对应的 `tmp/release-vX.Y.Z-rc.N`。任何与当前目标版本无关的临时远端分支，都必须先征得用户明确同意。
 - 发版过程中如果发现严重 bug，不要立刻边发版边修；应立即停止当前发版流程，明确告诉用户问题出在哪里、影响范围是什么、发布风险是否高。
 - “严重 bug” 包括但不限于：
 - 会导致产物无法安装或无法运行
 - 会导致关键主流程失效
 - 会导致 release 契约、版本元数据或发布物明显错误
 - 会导致高风险兼容性回退或公开错误发布
-- 如果只是很小的 bug，且当前仍处于 RC 阶段，可以在 RC 分支修复后继续验证和发布；必要时递增 `rc.N` 重新走 RC 流程。
+- 如果只是很小的 bug，且当前仍处于 RC 阶段，可以在 RC 分支修复后继续验证和发布；必要时递增 `rc.N` 重新走 RC 流程。RC 修复完成后，仍应在 RC 成功发布点再次停下，等待用户决定是否进入 stable。
 - stable 提升阶段应尽量避免再混入功能性修复；如果在 stable 提升时发现问题严重到影响发布正确性，应停止 stable 发布，而不是临时补丁后直接继续。
 
 ## 结合本项目的落地建议

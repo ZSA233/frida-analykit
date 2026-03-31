@@ -14,6 +14,11 @@ def test_agent_package_exports_prebuilt_runtime() -> None:
     assert package_json["main"] == "./dist/index.js"
     assert package_json["types"] == "./dist/index.d.ts"
     assert "dist/**/*" in package_json["files"]
+    assert "README.md" in package_json["files"]
+    assert "README_EN.md" in package_json["files"]
+    assert package_json["homepage"] == (
+        "https://github.com/ZSA233/frida-analykit/blob/main/packages/frida-analykit-agent/README.md"
+    )
     assert package_json["exports"]["."]["default"] == "./dist/index.js"
     assert package_json["exports"]["."]["types"] == "./dist/index.d.ts"
     assert package_json["exports"]["./config"]["default"] == "./dist/config/index.js"

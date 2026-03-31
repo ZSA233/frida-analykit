@@ -77,7 +77,7 @@ Python 包通过 GitHub 仓库 / GitHub Release 分发，不发布到 PyPI。
 推荐直接用 `uv` 安装：
 
 ```sh
-uv tool install "git+https://github.com/ZSA233/frida-analykit@v2.0.7"
+uv tool install "git+https://github.com/ZSA233/frida-analykit@v2.0.8"
 ```
 
 如果你需要维护多套 Frida 版本环境，可以使用内置环境管理：

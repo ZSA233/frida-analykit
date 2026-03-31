@@ -591,10 +591,13 @@ class DeviceHelpers:
         package["overrides"] = {
             "frida-java-bridge": f"file:{self.repo_root / 'node_modules' / 'frida-java-bridge'}",
         }
-        package["devDependencies"] = {
+        dev_dependencies = package.setdefault("devDependencies", {})
+        dev_dependencies.update(
+            {
             "@types/frida-gum": f"file:{self.repo_root / 'node_modules' / '@types' / 'frida-gum'}",
             "typescript": f"file:{self.repo_root / 'node_modules' / 'typescript'}",
-        }
+            }
+        )
         package_path.write_text(json.dumps(package, indent=2) + "\n", encoding="utf-8")
         tsconfig_path = tmp_path / "tsconfig.json"
         tsconfig = json.loads(tsconfig_path.read_text(encoding="utf-8"))
