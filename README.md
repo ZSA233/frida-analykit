@@ -59,11 +59,13 @@ flowchart LR
 - Python 依赖范围：`frida>=16.5.9,<18`
 - 当前受测 profile：`legacy-16` 的 `16.5.9` 与 `current-17` 的 `17.8.2`
 - `frida-analykit doctor` 会把当前环境标记为 `tested`、`supported but untested` 或 `unsupported`
+- `frida-analykit doctor device-compat` 可以对一台或多台真机做最小注入式 Frida 版本兼容性采样，默认采样 `3` 轮并实时输出阶段进度；默认使用仓库内置测试包 `com.frida_analykit.test`
 
 先检查当前环境：
 
 ```sh
 frida-analykit doctor
+frida-analykit doctor device-compat --all-devices
 ```
 
 ## 普通用户：安装 Python CLI
@@ -294,21 +296,32 @@ Dex dump 的当前行为包括：
 运行前需要：
 
 - `FRIDA_ANALYKIT_ENABLE_DEVICE=1`
-- `FRIDA_ANALYKIT_DEVICE_APP=<package>`
+- 可选 `FRIDA_ANALYKIT_DEVICE_SKIP_APP_TESTS=1`
 - 可选 `ANDROID_SERIAL=<serial>`
 - 可选 `FRIDA_ANALYKIT_DEVICE_LOCAL_SERVER=<path>`
+- 默认测试包 `com.frida_analykit.test` 已安装到目标设备，或显式设置 `FRIDA_ANALYKIT_DEVICE_APP=<package>`
+
+真机用例默认会使用仓库内置的最小 Android 测试 APK `tests/android_test_app/`，包名固定为 `com.frida_analykit.test`。这部分不会在跑测试时自动构建或自动安装；若默认包未安装，会直接失败并提示安装命令。对应版本的 GitHub Release / prerelease 也会提供可直接安装的 `frida-analykit-device-test-app-vX.Y.Z[-rc.N].apk`，可直接下载后执行 `adb install -r`。该 APK 使用仓库内固定的测试签名，仅用于真机回归与兼容性验证，不用于生产发布。若只想快速验证不依赖 app 的链路，可对 `make device-*` 传入 `DEVICE_TEST_SKIP_APP=1`，或在直接运行 `pytest` 时设置 `FRIDA_ANALYKIT_DEVICE_SKIP_APP_TESTS=1`。
+
+普通真机测试默认会在同一台设备的整个 pytest session 内复用一个 `frida-server` runtime，降低旧设备在频繁 stop / reboot 后出现系统重启的概率。多台设备同时在线时，普通 `make device-test*` 需要显式提供 `ANDROID_SERIAL=<serial>`；如果要并行跑所有已连接设备，可使用 `make device-test-all`。`doctor device-compat` 在未显式提供 `--app` 且配置里未设置 `app` 时，也会直接使用这个默认测试包。
 
 ```sh
+make device-test-app-build
+make device-test-app-install ANDROID_SERIAL=<serial>
+make device-test-app-install-all
 make device-check
 make device-test-core
 make device-test-install
 make device-test-repl-handlers
 make device-test
+make device-test DEVICE_TEST_SKIP_APP=1
+make device-test-all
 ```
 
 发布与仓库结构的关键入口包括：
 
 - Python 包通过 GitHub Release 分发，npm runtime 通过 npmjs 分发。
+- 默认真机测试 APK 也会随对应 GitHub Release 一起发布，文件名为 `frida-analykit-device-test-app-vX.Y.Z[-rc.N].apk`。
 - Python 与 npm 共用同一个版本号，版本真源在 `release-version.toml`。
 - 支持范围真源在 `pyproject.toml` 中的 `frida>=...,<...`，受测 profile 真源在 `src/frida_analykit/resources/compat_profiles.json`。
 - 发版 runbook 在 `docs/release-process.md`，README 收束基线在 `PRE_README.MD`。

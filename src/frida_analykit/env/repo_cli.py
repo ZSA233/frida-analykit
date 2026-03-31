@@ -3,8 +3,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from .manager import DevEnvManager
-from .models import DevEnvError
+from .manager import EnvManager
+from .models import EnvError
 from .render import render_env_summary, render_remove_summary
 
 
@@ -17,13 +17,13 @@ def repo_cli_main(argv: list[str] | None = None, *, repo_root: Path | None = Non
     )
     parser.epilog = (
         "Examples:\n"
-        "  make dev-env\n"
-        "  make dev-env-list\n"
-        "  make dev-env-gen FRIDA_VERSION=16.5.9\n"
-        "  make dev-env-gen FRIDA_VERSION=16.5.9 NO_REPL=1\n"
-        "  make dev-env-gen FRIDA_VERSION=16.5.9 ENV_NAME=frida-16.5.9\n"
-        "  make dev-env-enter ENV_NAME=frida-16.5.9\n"
-        "  make dev-env-remove ENV_NAME=frida-16.5.9\n"
+        "  make env\n"
+        "  make env-list\n"
+        "  make env-create FRIDA_VERSION=16.5.9\n"
+        "  make env-create FRIDA_VERSION=16.5.9 NO_REPL=1\n"
+        "  make env-create FRIDA_VERSION=16.5.9 ENV_NAME=frida-16.5.9\n"
+        "  make env-enter ENV_NAME=frida-16.5.9\n"
+        "  make env-remove ENV_NAME=frida-16.5.9\n"
     )
     subparsers = parser.add_subparsers(dest="command")
 
@@ -48,7 +48,7 @@ def repo_cli_main(argv: list[str] | None = None, *, repo_root: Path | None = Non
         parser.print_help()
         return 0
 
-    manager = DevEnvManager.for_repo((repo_root or Path.cwd()).resolve())
+    manager = EnvManager.for_repo((repo_root or Path.cwd()).resolve())
     try:
         if args.command == "list":
             print(manager.render_list())
@@ -69,7 +69,7 @@ def repo_cli_main(argv: list[str] | None = None, *, repo_root: Path | None = Non
             env = manager.remove(args.name)
             print(render_remove_summary(env))
             return 0
-    except DevEnvError as exc:
+    except EnvError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     return 1

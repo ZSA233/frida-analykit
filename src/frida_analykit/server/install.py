@@ -16,14 +16,15 @@ from .constants import (
 )
 from .downloads import ServerDownloader
 from .helpers import (
+    _combined_output,
     _describe_local_asset,
     _extract_version,
     _extract_version_from_local_source,
     _iter_abi_candidates,
     _resolve_local_source,
     _summarize_probe_output,
-    ensure_remote_config,
     require_host_port,
+    resolve_remote_device_config,
 )
 from .models import DownloadProgressCallback, RemoteServerStatus, ServerInstallResult, ServerManagerError
 from .runtime import ServerRuntime
@@ -55,8 +56,16 @@ class ServerInstaller:
         )
         return resolved
 
+    def resolve_target_config(self, config: AppConfig, *, action: str) -> AppConfig:
+        return resolve_remote_device_config(
+            config,
+            adb_executable=self._runtime.adb_executable,
+            subprocess_run=self._runtime.subprocess_run,
+            action=action,
+        )
+
     def inspect_remote_server(self, config: AppConfig, *, probe_abi: bool = True) -> RemoteServerStatus:
-        ensure_remote_config(config, action="remote server inspection")
+        config = self.resolve_target_config(config, action="remote server inspection")
         selected_version = self.resolve_server_version(config)
         adb_target = self.resolve_adb_target(config)
         device_abi: str | None = None
@@ -118,7 +127,6 @@ class ServerInstaller:
         force_download: bool = False,
         download_progress: DownloadProgressCallback | None = None,
     ) -> ServerInstallResult:
-        ensure_remote_config(config, action="remote server installation")
         if local_server_path is not None and version_override is not None:
             raise ServerManagerError("`--local-server` cannot be combined with `--version`")
         if local_server_path is not None and force_download:
@@ -127,6 +135,7 @@ class ServerInstaller:
             raise ServerManagerError("`--force-download` requires an explicit `--version`")
 
         local_source = _resolve_local_source(local_server_path) if local_server_path is not None else None
+        config = self.resolve_target_config(config, action="remote server installation")
         local_source_abi_hint: str | None = None
         local_source_asset_arch_hint: str | None = None
         if local_source is not None:
@@ -201,7 +210,7 @@ class ServerInstaller:
         )
 
     def detect_device_abi(self, config: AppConfig) -> tuple[str, str]:
-        ensure_remote_config(config, action="device ABI detection")
+        config = self.resolve_target_config(config, action="device ABI detection")
         seen_outputs: list[str] = []
         property_commands = [
             f"getprop {prefix}.{suffix}"
@@ -217,6 +226,7 @@ class ServerInstaller:
         for command in commands:
             verbose_echo(f"probing device ABI with `{command}`")
             result = self._adb.shell(config, command, check=False)
+            self._raise_transport_error_if_needed(result, command=command, action="device ABI detection")
             output = result.stdout.strip()
             if not output:
                 continue
@@ -230,13 +240,14 @@ class ServerInstaller:
         raise ServerManagerError(f"unable to map device ABI to a Frida server asset ({details})")
 
     def resolve_adb_target(self, config: AppConfig) -> str | None:
-        ensure_remote_config(config, action="adb target resolution")
+        config = self.resolve_target_config(config, action="adb target resolution")
         result = self._adb.run_adb(
             config,
             ["get-serialno"],
             capture_output=True,
             check=False,
         )
+        self._raise_transport_error_if_needed(result, command="get-serialno", action="adb target resolution")
         if result.returncode != 0:
             return None
         serial = result.stdout.strip()
@@ -245,7 +256,7 @@ class ServerInstaller:
         return serial
 
     def ensure_remote_forward(self, config: AppConfig, *, action: str = "remote port forward") -> str:
-        ensure_remote_config(config, action=action)
+        config = self.resolve_target_config(config, action=action)
         port = require_host_port(config.server.host, action=action)
         self._adb.run_adb(
             config,
@@ -253,6 +264,25 @@ class ServerInstaller:
             check=True,
         )
         return port
+
+    @staticmethod
+    def _raise_transport_error_if_needed(
+        result,
+        *,
+        command: str,
+        action: str,
+    ) -> None:
+        if result.returncode == 0:
+            return
+        combined = _combined_output(result).strip()
+        lowered = combined.lower()
+        transport_markers = (
+            "more than one device/emulator",
+            "device not found",
+            "no devices/emulators found",
+        )
+        if any(marker in lowered for marker in transport_markers):
+            raise ServerManagerError(f"{action} failed while running `{command}`: {combined or 'adb transport error'}")
 
     def _validate_installed_server(
         self,

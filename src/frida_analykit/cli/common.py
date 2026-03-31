@@ -14,7 +14,7 @@ from frida.core import Session
 
 from ..compat import FridaCompat
 from ..config import AppConfig
-from ..dev_env import DevEnvManager
+from ..env import EnvManager
 from ..diagnostics import set_verbose
 from ..frontend import FrontendError, WatchProcess, build_agent_bundle, load_frontend_project, start_watch
 from ..repl import LazyJsHandleProxy, build_repl_namespace
@@ -274,8 +274,8 @@ def _resolve_runtime_device(config: AppConfig, compat: FridaCompat) -> RuntimeDe
     return cast(RuntimeDevice, compat.get_device(host))
 
 
-def _global_env_manager() -> DevEnvManager:
-    return DevEnvManager.for_global()
+def _global_env_manager() -> EnvManager:
+    return EnvManager.for_global()
 
 
 class _DownloadProgressReporter:

@@ -479,11 +479,25 @@ script:
 - 远端 server 版本
 - 远端 server 是否落在支持 profile 中
 
+`frida-analykit doctor device-compat` 会进一步对真机做最小兼容性探测：
+
+- 支持 `--serial` / `--all-devices`
+- 默认从 repo local + global managed env 中收集可用 Frida 版本
+- 默认按“最新版 -> 最旧版 -> 最大间隙中点”采样，默认 `3` 次
+- 如果显式传入 `--versions`，则按显式版本集完整执行，不再受默认采样轮数裁剪
+- 默认会实时打印设备 / 版本 / 阶段进度；`--verbose` 会额外打印默认测试包探测细节
+- 每个采样点只做最小链路：
+  - 校验或安装对应版本的 `frida-server`
+  - 启动远端 server
+  - 注入一个最小 agent，并执行一次 `rpc.exports.ping()`
+- 每台设备会先探测一次目标 app；优先级为 `--app` -> `config.app` -> 默认测试包 `com.frida_analykit.test`
+- 输出会按设备分组，标出 sampled versions、success / fail / unavailable、失败阶段和观察到的兼容边界
+
 ### 11. 受管 Frida 开发环境
 
 当前项目有两套环境管理入口：
 
-- 仓库本地开发环境：`make dev-env-*` 和 `scripts/dev_env.py`
+- 仓库本地开发环境：`make env-*` 和 `scripts/env.py`
 - 全局 CLI 环境：`frida-analykit env *`
 
 这两套入口的目标并不完全相同：
@@ -1075,9 +1089,30 @@ frida-analykit spawn --config config.yml
 运行前需要的环境变量主要包括：
 
 - `FRIDA_ANALYKIT_ENABLE_DEVICE=1`
-- `FRIDA_ANALYKIT_DEVICE_APP=<package>`
+- 可选 `FRIDA_ANALYKIT_DEVICE_SKIP_APP_TESTS=1`
 - 可选 `ANDROID_SERIAL=<serial>`
 - 可选 `FRIDA_ANALYKIT_DEVICE_LOCAL_SERVER=<path>`
+- 默认测试包 `com.frida_analykit.test` 已安装到设备，或显式设置 `FRIDA_ANALYKIT_DEVICE_APP=<package>`
+
+当前行为补充：
+
+- 默认仍会运行依赖 app 的真机用例
+- 如果未设置 `FRIDA_ANALYKIT_DEVICE_APP`，测试与 `doctor device-compat` 会直接使用默认测试包 `com.frida_analykit.test`
+- 默认测试包来自仓库内置最小 Android 工程 `tests/android_test_app/`
+- 真机测试与 `doctor` 都不会自动 build/install；若默认包缺失，会快速失败并提示先执行安装命令
+- 对应版本的 GitHub Release / prerelease 会额外发布 `frida-analykit-device-test-app-vX.Y.Z[-rc.N].apk`，用户可以直接下载后 `adb install -r`
+- 该 APK 使用仓库内固定测试签名，只用于 `com.frida_analykit.test` 真机回归，不用于生产发布
+- 显式设置 `FRIDA_ANALYKIT_DEVICE_APP` 或 `doctor device-compat --app` 时，只验证该包是否存在、能启动、可 attach，不再做系统候选扫描
+- 真机测试默认会在同一台设备的整个 pytest session 内复用同一个 `frida-server` runtime，不再让大多数用例按用例反复 stop / reboot
+- 如果只想快速验证不依赖 app 的链路，可设置 `FRIDA_ANALYKIT_DEVICE_SKIP_APP_TESTS=1`
+- 多台设备同时在线时，普通 `make device-test*` 需要显式设置 `ANDROID_SERIAL=<serial>`；若想一次并行跑所有已连接设备，可使用 `make device-test-all`
+- `Makefile` 还额外提供：
+  - `DEVICE_TEST_APP`
+  - `DEVICE_TEST_SKIP_APP`
+  - `DEVICE_TEST_SERIALS=serial1,serial2,...`
+  - `device-test-app-build`
+  - `device-test-app-install`
+  - `device-test-app-install-all`
 
 这说明当前项目已经不只是“理论上支持 Android 真机链路”，而是已经有针对核心链路的自动化真机验证。
 
@@ -1089,6 +1124,7 @@ frida-analykit spawn --config config.yml
 - 版本切换统一通过 `scripts/release_version.py` 和 `Makefile`
 - 不鼓励手改 `_version.py`、两个 `package.json`、`package-lock.json`
 - stable / RC 的 tag、Python 版本、npm 版本之间存在严格映射关系
+- release 资产现在固定包含 `sdist`、wheel、npm tarball 和默认真机测试 APK
 - release-preflight 会执行配置验证、release version 校验、promotion 校验、测试与 agent build
 
 当前 Makefile 关键命令包括：
@@ -1112,7 +1148,7 @@ frida-analykit spawn --config config.yml
 src/frida_analykit/                Python CLI、会话编排、server 管理、dev env、compat、RPC
 packages/frida-analykit-agent/     npm runtime 与 TS helper
 src/frida_analykit/resources/      compat profiles 与脚手架模板
-scripts/                           release/dev-env 相关脚本
+scripts/                           release/env 相关脚本
 tests/                             Python tests
 tests/device/                      Android device tests
 docs/                              release 相关文档

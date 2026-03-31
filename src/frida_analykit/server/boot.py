@@ -7,7 +7,7 @@ import time
 from ..config import AppConfig
 from ..diagnostics import verbose_echo
 from .adb import ServerAdbClient
-from .helpers import _extract_version, _tail_text, ensure_remote_config, optional_host_port, require_host_port
+from .helpers import _extract_version, _tail_text, optional_host_port, require_host_port
 from .install import ServerInstaller
 from .models import ServerManagerError, _BootExecutionResult
 from .runtime import PopenProcess, ServerRuntime
@@ -25,7 +25,7 @@ class ServerBootController:
         self._installer = installer
 
     def boot_remote_server(self, config: AppConfig, *, force_restart: bool = False) -> None:
-        ensure_remote_config(config, action="server boot")
+        config = self._installer.resolve_target_config(config, action="server boot")
         port = require_host_port(config.server.host, action="server boot")
         existing_pids = self.list_remote_server_pids(config)
         if existing_pids:
@@ -98,7 +98,7 @@ class ServerBootController:
             self._adb.remove_forward(config, port)
 
     def stop_remote_server(self, config: AppConfig) -> set[int]:
-        ensure_remote_config(config, action="server stop")
+        config = self._installer.resolve_target_config(config, action="server stop")
         pids = self.list_remote_server_pids(config)
         if pids:
             self._kill_remote_pids(config, pids)
@@ -108,7 +108,7 @@ class ServerBootController:
         return pids
 
     def list_remote_server_pids(self, config: AppConfig) -> set[int]:
-        ensure_remote_config(config, action="remote server pid lookup")
+        config = self._installer.resolve_target_config(config, action="remote server pid lookup")
         basename = config.server.servername.rsplit("/", 1)[-1]
         identifiers = (config.server.servername, basename)
 

@@ -6,13 +6,13 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from .models import DevEnvError, ManagedEnv
+from .models import EnvError, ManagedEnv
 from .paths import _binary_dir
-from .runtime import DevEnvRuntime
+from .runtime import EnvRuntime
 
 
-class DevEnvShellLauncher:
-    def __init__(self, runtime: DevEnvRuntime) -> None:
+class EnvShellLauncher:
+    def __init__(self, runtime: EnvRuntime) -> None:
         self._runtime = runtime
 
     def shell_environment(self, env: ManagedEnv, base_env: dict[str, str]) -> dict[str, str]:
@@ -31,7 +31,7 @@ class DevEnvShellLauncher:
         else:
             result = self._open_posix_shell(env)
         if result.returncode != 0:
-            raise DevEnvError(f"shell exited with status {result.returncode}")
+            raise EnvError(f"shell exited with status {result.returncode}")
 
     def _open_windows_shell(self, env: ManagedEnv) -> subprocess.CompletedProcess[str]:
         shell = os.environ.get("COMSPEC", "cmd.exe")

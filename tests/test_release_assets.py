@@ -394,6 +394,7 @@ def test_install_check_uses_single_release_artifacts_and_minimum_supported_frida
     dist_dir.mkdir()
     (dist_dir / "demo_tool-0.5.0.tar.gz").write_text("sdist", encoding="utf-8")
     (dist_dir / "demo_tool-0.5.0-py3-none-any.whl").write_text("wheel", encoding="utf-8")
+    (dist_dir / "frida-analykit-device-test-app-v0.5.0.apk").write_text("apk", encoding="utf-8")
     (repo_root / "zsa233-frida-analykit-agent-0.5.0.tgz").write_text("tgz", encoding="utf-8")
 
     commands: list[list[str]] = []
@@ -407,10 +408,71 @@ def test_install_check_uses_single_release_artifacts_and_minimum_supported_frida
     payload = release_assets.install_check(repo_root, tag="v0.5.0", dist_dir=dist_dir)
 
     assert payload["wheel_name"] == "demo_tool-0.5.0-py3-none-any.whl"
+    assert payload["device_test_apk"] == "frida-analykit-device-test-app-v0.5.0.apk"
     assert payload["support_range"] == ">=16.5.9, <18"
     assert any(command[-1] == "frida==16.5.9" for command in commands)
     assert any(command[-3:] == ["-m", "frida_analykit", "doctor"] for command in commands)
     assert any("--agent-package-spec" in command for command in commands)
+
+
+@pytest.mark.parametrize(
+    ("tag", "expected_name"),
+    [
+        ("v0.5.0", "frida-analykit-device-test-app-v0.5.0.apk"),
+        ("v0.5.0-rc.1", "frida-analykit-device-test-app-v0.5.0-rc.1.apk"),
+    ],
+)
+def test_expected_device_test_apk_name_uses_release_tag(tag: str, expected_name: str) -> None:
+    assert release_assets.expected_device_test_apk_name(tag) == expected_name
+
+
+def test_stage_device_test_apk_copies_and_renames_debug_apk(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = _make_release_repo(tmp_path)
+    dist_dir = repo_root / "dist"
+    dist_dir.mkdir()
+    source_apk = repo_root / "tests" / "android_test_app" / "app" / "build" / "outputs" / "apk" / "debug" / "app-debug.apk"
+    source_apk.parent.mkdir(parents=True)
+    source_apk.write_text("debug apk", encoding="utf-8")
+    stale_apk = dist_dir / "frida-analykit-device-test-app-v0.4.9.apk"
+    stale_apk.write_text("stale", encoding="utf-8")
+
+    monkeypatch.setattr(release_assets, "_build_device_test_app", lambda repo_root: source_apk)
+
+    staged_apk = release_assets.stage_device_test_apk(repo_root, tag="v0.5.0", dist_dir=dist_dir)
+
+    assert staged_apk == dist_dir / "frida-analykit-device-test-app-v0.5.0.apk"
+    assert staged_apk.read_text(encoding="utf-8") == "debug apk"
+    assert not stale_apk.exists()
+    assert source_apk.read_text(encoding="utf-8") == "debug apk"
+
+
+def test_install_check_rejects_missing_device_test_apk(tmp_path: Path) -> None:
+    repo_root = _make_release_repo(tmp_path)
+    dist_dir = repo_root / "dist"
+    dist_dir.mkdir()
+    (dist_dir / "demo_tool-0.5.0.tar.gz").write_text("sdist", encoding="utf-8")
+    (dist_dir / "demo_tool-0.5.0-py3-none-any.whl").write_text("wheel", encoding="utf-8")
+    (repo_root / "zsa233-frida-analykit-agent-0.5.0.tgz").write_text("tgz", encoding="utf-8")
+
+    with pytest.raises(release_assets.ReleaseConfigError, match="Missing device test APK"):
+        release_assets.install_check(repo_root, tag="v0.5.0", dist_dir=dist_dir)
+
+
+def test_install_check_rejects_ambiguous_device_test_apks(tmp_path: Path) -> None:
+    repo_root = _make_release_repo(tmp_path)
+    dist_dir = repo_root / "dist"
+    dist_dir.mkdir()
+    (dist_dir / "demo_tool-0.5.0.tar.gz").write_text("sdist", encoding="utf-8")
+    (dist_dir / "demo_tool-0.5.0-py3-none-any.whl").write_text("wheel", encoding="utf-8")
+    (dist_dir / "frida-analykit-device-test-app-v0.5.0.apk").write_text("apk", encoding="utf-8")
+    (dist_dir / "frida-analykit-device-test-app-v0.4.9.apk").write_text("apk", encoding="utf-8")
+    (repo_root / "zsa233-frida-analykit-agent-0.5.0.tgz").write_text("tgz", encoding="utf-8")
+
+    with pytest.raises(release_assets.ReleaseConfigError, match="Expected exactly one release device test APK"):
+        release_assets.install_check(repo_root, tag="v0.5.0", dist_dir=dist_dir)
 
 
 def test_release_build_outputs_single_wheel_with_range_dependency(tmp_path: Path) -> None:

@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from importlib import metadata as importlib_metadata
-from importlib.resources import files
 import re
 from typing import Any
 
 import frida
+
+from .development.profiles import load_profiles
 
 PACKAGE_NAME = "frida-analykit"
 
@@ -61,20 +61,15 @@ def _profile_support_range(profiles: list[CompatibilityProfile]) -> SupportRange
 
 
 def _load_profiles() -> list[CompatibilityProfile]:
-    raw = json.loads(
-        files("frida_analykit.resources")
-        .joinpath("compat_profiles.json")
-        .read_text(encoding="utf-8")
-    )
     profiles = []
-    for item in raw["profiles"]:
+    for item in load_profiles().values():
         profiles.append(
             CompatibilityProfile(
-                name=item["name"],
-                series=item["series"],
-                tested_version=Version.parse(item["tested_version"]),
-                min_inclusive=Version.parse(item["min_inclusive"]),
-                max_exclusive=Version.parse(item["max_exclusive"]),
+                name=item.name,
+                series=item.series,
+                tested_version=Version.parse(item.tested_version),
+                min_inclusive=Version.parse(item.min_inclusive),
+                max_exclusive=Version.parse(item.max_exclusive),
             )
         )
     return profiles

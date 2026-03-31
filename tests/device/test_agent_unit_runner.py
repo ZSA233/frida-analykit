@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 
 
 PROBE_MARKER = "FRIDA_ANALYKIT_AGENT_UNIT_PROBE="
+pytestmark = pytest.mark.device_app
 DEX_DUMP_CASE = "dump_all_dex_streams_to_python_handler"
 ELF_SNAPSHOT_CASE = "snapshot_streams_to_python_session_dir"
 ELF_PRESET_CASE = "enhanced_cast_exposes_getppid_preset"
@@ -136,29 +137,27 @@ def device_agent_unit_workspace(
     return workspace
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 def booted_device_agent_unit_workspace(
     device_helpers: 'DeviceHelpers',
     device_agent_unit_workspace,
-    device_session_guard,
+    device_app: str,
+    device_server_ready,
 ) -> Iterator[object]:
     workspace = device_agent_unit_workspace
     if workspace.log_path.exists():
         workspace.log_path.unlink()
-    process = device_helpers.start_boot_process(workspace.config_path, force_restart=True)
-    try:
-        yield workspace
-    finally:
-        device_helpers.stop_boot_process(process, workspace.config_path)
+    attach_pid, attach_error = device_helpers.find_attachable_app_pid(device_app, timeout=60)
+    assert attach_pid is not None, attach_error
+    yield workspace
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 def running_device_agent_unit_app_pid(
     device_helpers: 'DeviceHelpers',
     device_app: str,
     booted_device_agent_unit_workspace,
 ) -> int:
-    device_helpers.force_stop_app(device_app, timeout=30)
     attach_pid, attach_error = device_helpers.find_attachable_app_pid(device_app, timeout=30)
     assert attach_pid is not None, attach_error
     return attach_pid

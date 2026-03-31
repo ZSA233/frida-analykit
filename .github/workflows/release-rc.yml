@@ -53,6 +53,7 @@ jobs:
           path: |
             dist/*.tar.gz
             dist/*.whl
+            dist/*.apk
             *.tgz
           if-no-files-found: error
 
@@ -77,5 +78,6 @@ jobs:
           files: |
             release-bundle/dist/*.tar.gz
             release-bundle/dist/*.whl
+            release-bundle/dist/*.apk
             release-bundle/*.tgz
           fail_on_unmatched_files: true

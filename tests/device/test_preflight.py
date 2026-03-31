@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import pytest
+from frida_analykit.config import AppConfig
 
 
 @pytest.mark.device
+@pytest.mark.device_app
 def test_device_preflight(device_helpers, device_app, tmp_path) -> None:
     state = device_helpers.adb_run(["get-state"])
     assert state.returncode == 0, state.stderr
@@ -18,4 +20,6 @@ def test_device_preflight(device_helpers, device_app, tmp_path) -> None:
     workspace = device_helpers.create_workspace(tmp_path, app=device_app)
     assert workspace.agent_path.exists()
     assert workspace.config_path.exists()
+    config = AppConfig.from_yaml(workspace.config_path)
+    assert config.server.host == device_helpers.remote_host
     assert f"version: {device_helpers.frida_version}" in workspace.config_path.read_text(encoding="utf-8")

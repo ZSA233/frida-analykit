@@ -59,11 +59,13 @@ flowchart LR
 - Python dependency range: `frida>=16.5.9,<18`
 - Current tested profiles: `legacy-16` with `16.5.9`, and `current-17` with `17.8.2`
 - `frida-analykit doctor` classifies the current environment as `tested`, `supported but untested`, or `unsupported`
+- `frida-analykit doctor device-compat` can sample Frida-version compatibility on one or more Android devices through a minimal injection probe, with `3` rounds by default and live stage progress output; it uses the repo-managed test app `com.frida_analykit.test` by default
 
 Check the current environment first:
 
 ```sh
 frida-analykit doctor
+frida-analykit doctor device-compat --all-devices
 ```
 
 ## Regular Users: Install The Python CLI
@@ -294,21 +296,32 @@ The repository includes Android device tests that do not depend on any external 
 Before running them, you need:
 
 - `FRIDA_ANALYKIT_ENABLE_DEVICE=1`
-- `FRIDA_ANALYKIT_DEVICE_APP=<package>`
+- optional `FRIDA_ANALYKIT_DEVICE_SKIP_APP_TESTS=1`
 - optional `ANDROID_SERIAL=<serial>`
 - optional `FRIDA_ANALYKIT_DEVICE_LOCAL_SERVER=<path>`
+- the default test app `com.frida_analykit.test` installed on the target device, or an explicit `FRIDA_ANALYKIT_DEVICE_APP=<package>`
+
+App-backed device tests still run by default. They now use the repo-managed minimal Android app under `tests/android_test_app/`, with a fixed package id `com.frida_analykit.test`. Test runs do not auto-build or auto-install that APK; if the default package is missing, they fail fast and print the install command. The matching GitHub Release / prerelease also publishes an installable `frida-analykit-device-test-app-vX.Y.Z[-rc.N].apk`, so you can download it directly and run `adb install -r`. That APK uses a repo-managed test-only signing key and is not intended for production distribution. If you only want a quick regression pass for non-app flows, pass `DEVICE_TEST_SKIP_APP=1` to `make device-*` targets, or set `FRIDA_ANALYKIT_DEVICE_SKIP_APP_TESTS=1` when running `pytest` directly.
+
+Regular device tests now reuse one `frida-server` runtime for the whole pytest session on each device, which reduces reboot-heavy churn on older devices. When multiple devices are connected, regular `make device-test*` runs require an explicit `ANDROID_SERIAL=<serial>`; use `make device-test-all` when you want to fan out across every connected device in parallel. `doctor device-compat` also uses the same default test app unless `--app` or `config.app` is provided.
 
 ```sh
+make device-test-app-build
+make device-test-app-install ANDROID_SERIAL=<serial>
+make device-test-app-install-all
 make device-check
 make device-test-core
 make device-test-install
 make device-test-repl-handlers
 make device-test
+make device-test DEVICE_TEST_SKIP_APP=1
+make device-test-all
 ```
 
 The key entry points for release and repository layout are:
 
 - The Python package is distributed through GitHub Releases, and the npm runtime is distributed through npmjs.
+- The default device-test APK is also published with each matching GitHub Release as `frida-analykit-device-test-app-vX.Y.Z[-rc.N].apk`.
 - Python and npm share the same version number, and the version source of truth is `release-version.toml`.
 - The support-range source of truth is the direct `frida>=...,<...` dependency in `pyproject.toml`, and the tested-profile source of truth is `src/frida_analykit/resources/compat_profiles.json`.
 - The release runbook lives in `docs/release-process.md`, and the README closure baseline lives in `PRE_README.MD`.

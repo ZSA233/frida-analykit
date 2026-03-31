@@ -5,6 +5,7 @@
 - 1 个 Python 源码包 `sdist`
 - 1 个 Python wheel
 - 1 个 npm tarball
+- 1 个 Android 真机回归测试 APK `frida-analykit-device-test-app-vX.Y.Z[-rc.N].apk`
 
 ## 分支约定
 
@@ -79,11 +80,13 @@
    runtime 包名固定为 `@zsa233/frida-analykit-agent`。
 3. 保持 `.nvmrc` 指向仓库构建使用的 Node 版本。
    stable 发布任务会在 publish 阶段切换到 `Node 22.14.0`。
-4. 把支持范围的真源放在 `pyproject.toml` 的 `frida>=...,<...` 直接依赖里。
-5. 把受测 profile 的真源放在 `src/frida_analykit/resources/compat_profiles.json`。
-6. 把发布版本真源放在 `release-version.toml`。
+4. 本地执行 `make release-local` 前，准备好 `JDK 17` 和 Android SDK `platforms;android-35` / `build-tools;35.0.0`。
+   release bundle 现在会同时构建真机回归测试 APK。
+5. 把支持范围的真源放在 `pyproject.toml` 的 `frida>=...,<...` 直接依赖里。
+6. 把受测 profile 的真源放在 `src/frida_analykit/resources/compat_profiles.json`。
+7. 把发布版本真源放在 `release-version.toml`。
    该文件只驱动发布关键文件，不自动修改 README / docs 中的安装示例。
-7. 为 stable 自动发布配置 npm Trusted Publishing。
+8. 为 stable 自动发布配置 npm Trusted Publishing。
    只绑定到 `.github/workflows/release.yml`。
 
 ## 版本切换与本地校验
@@ -186,7 +189,7 @@ make release-install-check RELEASE_TAG=vX.Y.Z
 5. 如果 npm 上还没有该包，或者 npm 侧还不能完成 Trusted Publishing 绑定，就把这次 stable 作为一次手动 bootstrap：
 
 ```sh
-gh release create vX.Y.Z dist/*.tar.gz dist/*.whl *.tgz
+gh release create vX.Y.Z dist/*.tar.gz dist/*.whl dist/*.apk *.tgz
 npm publish ./zsa233-frida-analykit-agent-X.Y.Z.tgz --access public
 ```
 
@@ -243,7 +246,7 @@ gh workflow run "Release RC" --ref tmp/release-vX.Y.Z-rc.N -f tag=vX.Y.Z-rc.N
    - 执行 `make release-local`
    - 执行 `make release-install-check`
    - 创建 GitHub prerelease
-   - 上传 `dist/*.tar.gz`、`dist/*.whl` 和 `*.tgz`
+   - 上传 `dist/*.tar.gz`、`dist/*.whl`、`dist/*.apk` 和 `*.tgz`
 7. 若使用了临时 dry-run 分支，可在 RC tag 成功 push 后删除该临时分支。
 8. 如果 RC 需要修复，在同一发布分支继续提交，递增 `rc.N` 后重新执行流程。
 
@@ -344,10 +347,10 @@ git push origin vX.Y.Z
 推荐命令：
 
 ```sh
-make dev-env-gen FRIDA_VERSION=16.5.9 ENV_NAME=legacy-16
-make dev-env-gen FRIDA_VERSION=17.8.2 ENV_NAME=current-17
-make dev-env-enter ENV_NAME=legacy-16
-make dev-env-enter ENV_NAME=current-17
+make env-create FRIDA_VERSION=16.5.9 ENV_NAME=legacy-16
+make env-create FRIDA_VERSION=17.8.2 ENV_NAME=current-17
+make env-enter ENV_NAME=legacy-16
+make env-enter ENV_NAME=current-17
 ```
 
 也可以使用 CLI：
@@ -380,13 +383,13 @@ PYTHON_BIN=.frida-analykit/envs/legacy-16/bin/python make dev-smoke
 stable GitHub Release：
 
 ```sh
-gh release create vX.Y.Z dist/*.tar.gz dist/*.whl *.tgz
+gh release create vX.Y.Z dist/*.tar.gz dist/*.whl dist/*.apk *.tgz
 ```
 
 RC GitHub prerelease：
 
 ```sh
-gh release create vX.Y.Z-rc.N dist/*.tar.gz dist/*.whl *.tgz --prerelease
+gh release create vX.Y.Z-rc.N dist/*.tar.gz dist/*.whl dist/*.apk *.tgz --prerelease
 ```
 
 stable npm 发布：

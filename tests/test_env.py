@@ -9,14 +9,14 @@ from pathlib import Path
 import pytest
 
 from frida_analykit._version import __version__
-from frida_analykit.dev_env import (
-    DevEnvError,
-    DevEnvManager,
+from frida_analykit.development import load_profiles
+from frida_analykit.env import (
+    EnvError,
+    EnvManager,
     ManagedEnv,
     _env_root_for_python,
     _activate_path,
     _python_path,
-    load_profiles,
 )
 
 
@@ -31,8 +31,8 @@ def test_load_profiles_reads_compat_data(tmp_path: Path) -> None:
         """
         {
           "profiles": [
-            {"name": "legacy-16", "tested_version": "16.5.9"},
-            {"name": "current-17", "tested_version": "17.8.2"}
+            {"name": "legacy-16", "series": "16.x", "tested_version": "16.5.9", "min_inclusive": "16.5.0", "max_exclusive": "17.0.0"},
+            {"name": "current-17", "series": "17.x", "tested_version": "17.8.2", "min_inclusive": "17.0.0", "max_exclusive": "18.0.0"}
           ]
         }
         """,
@@ -53,7 +53,7 @@ def test_repo_create_invokes_uv_commands_in_order_and_updates_registry(
         """
         {
           "profiles": [
-            {"name": "legacy-16", "tested_version": "16.5.9"}
+            {"name": "legacy-16", "series": "16.x", "tested_version": "16.5.9", "min_inclusive": "16.5.0", "max_exclusive": "17.0.0"}
           ]
         }
         """,
@@ -64,7 +64,7 @@ def test_repo_create_invokes_uv_commands_in_order_and_updates_registry(
         calls.append((command, cwd, env))
         return subprocess.CompletedProcess(command, 0, "", "")
 
-    manager = DevEnvManager.for_repo(tmp_path, subprocess_run=_run)
+    manager = EnvManager.for_repo(tmp_path, subprocess_run=_run)
 
     env = manager.create(name="legacy-16", profile="legacy-16")
 
@@ -102,7 +102,7 @@ def test_repo_create_skips_repl_extra_when_requested(tmp_path: Path) -> None:
         calls.append((command, cwd, env))
         return subprocess.CompletedProcess(command, 0, "", "")
 
-    manager = DevEnvManager.for_repo(tmp_path, subprocess_run=_run)
+    manager = EnvManager.for_repo(tmp_path, subprocess_run=_run)
 
     manager.create(name="frida-16.5.9", frida_version="16.5.9", with_repl=False)
 
@@ -116,7 +116,7 @@ def test_global_create_installs_repl_only_by_default(tmp_path: Path) -> None:
         calls.append((command, cwd, env))
         return subprocess.CompletedProcess(command, 0, "", "")
 
-    manager = DevEnvManager(storage_root=tmp_path / "global-storage", repo_root=None, subprocess_run=_run)
+    manager = EnvManager(storage_root=tmp_path / "global-storage", repo_root=None, subprocess_run=_run)
 
     env = manager.create(name="frida-16.5.9", frida_version="16.5.9")
 
@@ -151,7 +151,7 @@ def test_global_create_can_skip_repl_extra(tmp_path: Path) -> None:
         calls.append((command, cwd, env))
         return subprocess.CompletedProcess(command, 0, "", "")
 
-    manager = DevEnvManager(storage_root=tmp_path / "global-storage", repo_root=None, subprocess_run=_run)
+    manager = EnvManager(storage_root=tmp_path / "global-storage", repo_root=None, subprocess_run=_run)
 
     manager.create(name="frida-16.5.9", frida_version="16.5.9", with_repl=False)
 
@@ -165,7 +165,7 @@ def test_create_streams_uv_progress_output(tmp_path: Path) -> None:
         calls.append((command, capture_output))
         return subprocess.CompletedProcess(command, 0, "", "")
 
-    manager = DevEnvManager.for_repo(tmp_path, subprocess_run=_run)
+    manager = EnvManager.for_repo(tmp_path, subprocess_run=_run)
 
     manager.create(name="frida-16.5.9", frida_version="16.5.9")
 
@@ -191,9 +191,9 @@ def test_create_reports_missing_uv_with_install_guidance(tmp_path: Path) -> None
     def _run(command, cwd=None, env=None, check=False, capture_output=False, text=False):
         raise FileNotFoundError(command[0])
 
-    manager = DevEnvManager.for_repo(tmp_path, subprocess_run=_run)
+    manager = EnvManager.for_repo(tmp_path, subprocess_run=_run)
 
-    with pytest.raises(DevEnvError, match="require `uv`"):
+    with pytest.raises(EnvError, match="require `uv`"):
         manager.create(name="frida-16.5.9", frida_version="16.5.9")
 
 
@@ -206,7 +206,7 @@ def test_list_envs_discovers_legacy_virtualenvs(
         """
         {
           "profiles": [
-            {"name": "legacy-16", "tested_version": "16.5.9"}
+            {"name": "legacy-16", "series": "16.x", "tested_version": "16.5.9", "min_inclusive": "16.5.0", "max_exclusive": "17.0.0"}
           ]
         }
         """,
@@ -215,7 +215,7 @@ def test_list_envs_discovers_legacy_virtualenvs(
     legacy_env.mkdir()
     (legacy_env / "pyvenv.cfg").write_text("home = /tmp\n", encoding="utf-8")
 
-    manager = DevEnvManager.for_repo(tmp_path)
+    manager = EnvManager.for_repo(tmp_path)
     monkeypatch.setattr(manager._registry_store, "detect_installed_frida_version", lambda _: "16.5.9")
 
     envs = manager.list_envs()
@@ -230,7 +230,7 @@ def test_list_envs_discovers_legacy_virtualenvs(
 
 
 def test_enter_uses_single_env_as_implicit_current(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    manager = DevEnvManager.for_repo(tmp_path)
+    manager = EnvManager.for_repo(tmp_path)
     env_dir = tmp_path / ".frida-analykit" / "envs" / "frida-16.5.9"
     env_dir.mkdir(parents=True)
     registry = {
@@ -278,9 +278,9 @@ def test_env_root_for_python_keeps_symlinked_virtualenv_python(tmp_path: Path) -
 
 
 def test_install_frida_requires_virtualenv(tmp_path: Path) -> None:
-    manager = DevEnvManager.for_global()
+    manager = EnvManager.for_global()
 
-    with pytest.raises(DevEnvError, match="not inside a virtual environment"):
+    with pytest.raises(EnvError, match="not inside a virtual environment"):
         manager.install_frida(tmp_path / "python", "16.5.9")
 
 
@@ -298,11 +298,11 @@ def test_list_envs_rejects_invalid_registry_shape(
     payload: str,
     message: str,
 ) -> None:
-    manager = DevEnvManager.for_repo(tmp_path)
+    manager = EnvManager.for_repo(tmp_path)
     manager.registry_path.parent.mkdir(parents=True, exist_ok=True)
     manager.registry_path.write_text(payload, encoding="utf-8")
 
-    with pytest.raises(DevEnvError, match=message):
+    with pytest.raises(EnvError, match=message):
         manager.list_envs()
 
 
@@ -310,7 +310,7 @@ def test_list_envs_repairs_partial_registry_entries(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    manager = DevEnvManager.for_repo(tmp_path)
+    manager = EnvManager.for_repo(tmp_path)
     env_dir = tmp_path / ".frida-analykit" / "envs" / "frida-16.5.9"
     env_dir.mkdir(parents=True)
     (env_dir / "pyvenv.cfg").write_text("home = /tmp\n", encoding="utf-8")
@@ -361,7 +361,7 @@ def test_render_list_does_not_rewrite_registry_when_payload_is_unchanged(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    manager = DevEnvManager.for_repo(tmp_path)
+    manager = EnvManager.for_repo(tmp_path)
     env_dir = tmp_path / ".frida-analykit" / "envs" / "frida-16.5.9"
     env_dir.mkdir(parents=True)
     registry = {
@@ -400,7 +400,7 @@ def test_render_list_refreshes_cached_frida_analykit_version(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    manager = DevEnvManager.for_repo(tmp_path)
+    manager = EnvManager.for_repo(tmp_path)
     env_dir = tmp_path / ".frida-analykit" / "envs" / "frida-16.5.9"
     env_dir.mkdir(parents=True)
     registry = {
@@ -436,7 +436,7 @@ def test_save_registry_keeps_previous_contents_when_replace_fails(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    manager = DevEnvManager.for_repo(tmp_path)
+    manager = EnvManager.for_repo(tmp_path)
     manager.registry_path.parent.mkdir(parents=True, exist_ok=True)
     old_text = json.dumps({"current": None, "envs": []}, indent=2, sort_keys=True) + "\n"
     manager.registry_path.write_text(old_text, encoding="utf-8")
@@ -444,9 +444,9 @@ def test_save_registry_keeps_previous_contents_when_replace_fails(
     def _fail_replace(source: Path, destination: Path) -> None:
         raise OSError("boom")
 
-    monkeypatch.setattr("frida_analykit.dev_env.registry.os.replace", _fail_replace)
+    monkeypatch.setattr("frida_analykit.env.registry.os.replace", _fail_replace)
 
-    with pytest.raises(DevEnvError, match="Failed to write registry"):
+    with pytest.raises(EnvError, match="Failed to write registry"):
         manager._registry_store.save_registry({"current": "frida-16.5.9", "envs": []})
 
     assert manager.registry_path.read_text(encoding="utf-8") == old_text
@@ -470,7 +470,7 @@ def test_install_frida_updates_managed_env_metadata(
         calls.append(command)
         return subprocess.CompletedProcess(command, 0, "", "")
 
-    manager = DevEnvManager.for_repo(tmp_path, subprocess_run=_run)
+    manager = EnvManager.for_repo(tmp_path, subprocess_run=_run)
     monkeypatch.setattr(manager._registry_store, "detect_installed_frida_analykit_version", lambda _: __version__)
     manager.registry_path.parent.mkdir(parents=True, exist_ok=True)
     manager.registry_path.write_text(
@@ -513,7 +513,7 @@ def test_install_frida_updates_managed_env_metadata(
 
 
 def test_create_refuses_to_recreate_symlinked_env_dir(tmp_path: Path) -> None:
-    manager = DevEnvManager.for_repo(tmp_path)
+    manager = EnvManager.for_repo(tmp_path)
     target_dir = tmp_path / "outside"
     target_dir.mkdir()
     env_dir = tmp_path / ".frida-analykit" / "envs" / "frida-16.5.9"
@@ -524,12 +524,12 @@ def test_create_refuses_to_recreate_symlinked_env_dir(tmp_path: Path) -> None:
     except (NotImplementedError, OSError):
         pytest.skip("symlink creation is unavailable in this environment")
 
-    with pytest.raises(DevEnvError, match="managed env path is a symlink"):
+    with pytest.raises(EnvError, match="managed env path is a symlink"):
         manager.create(name="frida-16.5.9", frida_version="16.5.9")
 
 
 def test_remove_deletes_current_managed_env_and_clears_current(tmp_path: Path) -> None:
-    manager = DevEnvManager.for_repo(tmp_path)
+    manager = EnvManager.for_repo(tmp_path)
     env_dir = tmp_path / ".frida-analykit" / "envs" / "frida-16.5.9"
     env_dir.mkdir(parents=True)
     manager.registry_path.parent.mkdir(parents=True, exist_ok=True)
@@ -563,7 +563,7 @@ def test_remove_deletes_current_managed_env_and_clears_current(tmp_path: Path) -
 
 
 def test_remove_legacy_env_requires_repo_local_path(tmp_path: Path) -> None:
-    manager = DevEnvManager.for_repo(tmp_path)
+    manager = EnvManager.for_repo(tmp_path)
     outside = tmp_path.parent / f"{tmp_path.name}-outside-env"
     outside.mkdir()
     manager.registry_path.parent.mkdir(parents=True, exist_ok=True)
@@ -587,7 +587,7 @@ def test_remove_legacy_env_requires_repo_local_path(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    with pytest.raises(DevEnvError, match="legacy path escapes repository root"):
+    with pytest.raises(EnvError, match="legacy path escapes repository root"):
         manager.remove(".venv-frida-16.5.9")
 
 
@@ -605,7 +605,7 @@ def test_open_shell_uses_zsh_wrapper_that_reactivates_after_user_rc(
     home.mkdir()
     original_zshrc = home / ".zshrc"
     original_zshrc.write_text("export PATH=/shim:$PATH\n", encoding="utf-8")
-    manager = DevEnvManager.for_repo(tmp_path)
+    manager = EnvManager.for_repo(tmp_path)
     calls: list[tuple[list[str], dict[str, str] | None, str, str]] = []
 
     monkeypatch.setenv("SHELL", "/bin/zsh")
@@ -664,7 +664,7 @@ def test_open_shell_prefers_explicit_zdotdir_for_zsh_startup_files(
     zdotdir.mkdir()
     original_zshrc = zdotdir / ".zshrc"
     original_zshrc.write_text("export PATH=/shim:$PATH\n", encoding="utf-8")
-    manager = DevEnvManager.for_repo(tmp_path)
+    manager = EnvManager.for_repo(tmp_path)
     calls: list[tuple[list[str], dict[str, str] | None, str, str]] = []
 
     monkeypatch.setenv("SHELL", "/bin/zsh")
@@ -711,7 +711,7 @@ def test_open_shell_fallback_exports_virtualenv_for_generic_shell(
     env_dir = tmp_path / ".frida-analykit" / "envs" / "frida-16.5.9"
     env_dir.mkdir(parents=True)
     (env_dir / "bin").mkdir(parents=True, exist_ok=True)
-    manager = DevEnvManager.for_repo(tmp_path)
+    manager = EnvManager.for_repo(tmp_path)
     calls: list[tuple[list[str], dict[str, str] | None]] = []
 
     monkeypatch.setenv("SHELL", "/bin/sh")
@@ -751,7 +751,7 @@ def test_open_shell_uses_cmd_activation_on_windows(
     activate_path = _activate_path(env_dir)
     activate_path.parent.mkdir(parents=True, exist_ok=True)
     activate_path.write_text("", encoding="utf-8")
-    manager = DevEnvManager.for_repo(tmp_path)
+    manager = EnvManager.for_repo(tmp_path)
     calls: list[tuple[list[str], dict[str, str] | None]] = []
 
     monkeypatch.setenv("COMSPEC", r"C:\Windows\System32\cmd.exe")

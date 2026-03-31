@@ -17,7 +17,20 @@ runs:
       with:
         node-version-file: .nvmrc
 
+    - uses: actions/setup-java@v4
+      with:
+        distribution: temurin
+        java-version: "17"
+
     - uses: astral-sh/setup-uv@v5
+
+    - uses: android-actions/setup-android@v3
+
+    - name: Install Android SDK packages
+      shell: bash
+      run: |
+        yes | sdkmanager --licenses >/dev/null
+        sdkmanager "platforms;android-35" "build-tools;35.0.0"
 
     - name: Preflight release checks
       shell: bash
