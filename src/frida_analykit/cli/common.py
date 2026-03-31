@@ -212,6 +212,75 @@ def _configure_verbose(verbose: bool) -> None:
     set_verbose(verbose)
 
 
+def _doctor_command_for_config(config: AppConfig, *parts: str) -> str:
+    base = ["frida-analykit", "doctor", *parts]
+    if config.source_path is not None:
+        base.extend(["--config", str(config.source_path)])
+    return " ".join(shlex.quote(item) for item in base)
+
+
+def _server_command_for_config(config: AppConfig, *parts: str) -> str:
+    base = ["frida-analykit", "server", *parts]
+    if config.source_path is not None:
+        base.extend(["--config", str(config.source_path)])
+    return " ".join(shlex.quote(item) for item in base)
+
+
+def _best_effort_remote_status(config: AppConfig):
+    try:
+        return FridaServerManager().inspect_remote_server(config, probe_host=True)
+    except ServerManagerError:
+        return None
+
+
+def _remote_protocol_click_exception(
+    *,
+    operation: str,
+    config: AppConfig,
+    detail: str,
+) -> click.ClickException | None:
+    status = _best_effort_remote_status(config)
+    if status is None:
+        return None
+
+    local_version = str(FridaCompat().installed_version)
+    target_version = getattr(status, "selected_version", None) or (config.server.version or local_version)
+    target_source = getattr(status, "selected_version_source", None) or (
+        "config.server.version" if config.server.version else "installed Frida"
+    )
+    remote_version = getattr(status, "installed_version", None) or "unknown"
+    resolved_device = (
+        getattr(status, "resolved_device", None)
+        or getattr(status, "adb_target", None)
+        or config.server.device
+        or "unknown"
+    )
+    detail_suffix = f" ({detail})" if detail else ""
+    doctor_command = _doctor_command_for_config(config)
+    fix_command = _doctor_command_for_config(config, "fix")
+    boot_command = _server_command_for_config(config, "boot")
+
+    if getattr(status, "version_matches_target", None) is False:
+        return click.ClickException(
+            f"{operation} failed because the remote frida-server at `{config.server.host}` is protocol-incompatible "
+            f"right now{detail_suffix}. Local Frida: `{local_version}`. Target server version: `{target_version}` "
+            f"(from {target_source}). Remote installed version: `{remote_version}` on device `{resolved_device}`. "
+            "This usually means the remote process was booted from a different frida-server version. "
+            f"Run `{doctor_command}` to inspect it, or `{fix_command}` to reinstall the remote binary. "
+            f"After reinstalling, rerun `{boot_command}` to restart the remote process."
+        )
+
+    if getattr(status, "protocol_compatible", None) is False or getattr(status, "host_reachable", None) is True:
+        return click.ClickException(
+            f"{operation} failed because the remote frida-server at `{config.server.host}` is protocol-incompatible "
+            f"right now{detail_suffix}. Target device: `{resolved_device}`. Target server version: "
+            f"`{target_version}` (from {target_source}). Remote installed version: `{remote_version}`. "
+            f"Run `{doctor_command}` to inspect the remote version/protocol state. If the binary already matches, "
+            f"rerun `{boot_command}` to restart the remote process."
+        )
+    return None
+
+
 def _runtime_click_exception(
     *,
     command: str,
@@ -224,22 +293,32 @@ def _runtime_click_exception(
 
     if isinstance(exc, (frida.TransportError, frida.ServerNotRunningError, frida.ProtocolError)):
         if config.server.is_remote:
-            boot_command = "frida-analykit server boot"
-            if config.source_path is not None:
-                boot_command += f" --config {shlex.quote(str(config.source_path))}"
+            boot_command = _server_command_for_config(config, "boot")
             detail_suffix = f" ({detail})" if detail else ""
             if isinstance(exc, frida.ProtocolError):
-                problem = f"the remote frida-server at `{config.server.host}` is not ready"
-                guidance = "Check that it is running and version-compatible."
+                diagnosed = _remote_protocol_click_exception(
+                    operation=operation,
+                    config=config,
+                    detail=detail,
+                )
+                if diagnosed is not None:
+                    return diagnosed
+                problem = f"the remote frida-server at `{config.server.host}` is protocol-incompatible right now"
+                guidance = (
+                    "Check that it is still running, version-compatible, and reachable through the current adb "
+                    "forward. Run `frida-analykit doctor` to inspect the remote version and protocol state."
+                )
             else:
-                problem = f"the remote Frida device `{config.server.host}` is not reachable"
-                guidance = "Check that the server is running and the forwarded port is reachable."
-            # Runtime commands only ensure adb port forwarding for remote targets.
-            # They intentionally do not start frida-server on the device.
+                problem = f"the forwarded Frida host `{config.server.host}` is not reachable right now"
+                guidance = (
+                    "Check that frida-server is still running on the device and that the adb forward for this host "
+                    "is still alive."
+                )
             return click.ClickException(
                 f"{operation} failed because {problem}{detail_suffix}. {guidance} "
                 f"`spawn` and `attach` do not boot `frida-server` automatically; "
-                f"run `{boot_command}` first and retry."
+                f"if you already ran `{boot_command}`, verify that the boot session is still alive, "
+                f"otherwise run it again and retry."
             )
         return click.ClickException(f"{operation} failed: {detail or exc.__class__.__name__}")
 

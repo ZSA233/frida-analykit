@@ -113,6 +113,22 @@ def resolve_remote_device_config(
     subprocess_run: Callable[..., subprocess.CompletedProcess[str]],
     action: str,
 ) -> AppConfig:
+    resolved, _ = resolve_remote_device_target(
+        config,
+        adb_executable=adb_executable,
+        subprocess_run=subprocess_run,
+        action=action,
+    )
+    return resolved
+
+
+def resolve_remote_device_target(
+    config: AppConfig,
+    *,
+    adb_executable: str,
+    subprocess_run: Callable[..., subprocess.CompletedProcess[str]],
+    action: str,
+) -> tuple[AppConfig, str]:
     ensure_remote_config(config, action=action)
     available = list_connected_adb_devices(
         adb_executable=adb_executable,
@@ -128,7 +144,7 @@ def resolve_remote_device_config(
                 f"{action} requested config.server.device `{explicit_device}`, "
                 f"but connected devices are: {', '.join(available) or 'none'}"
             )
-        return config
+        return config, "config.server.device"
 
     if env_device:
         if env_device not in available:
@@ -136,17 +152,23 @@ def resolve_remote_device_config(
                 f"{action} requested ANDROID_SERIAL `{env_device}`, "
                 f"but connected devices are: {', '.join(available) or 'none'}"
             )
-        return config.model_copy(
-            update={
-                "server": config.server.model_copy(update={"device": env_device}),
-            }
+        return (
+            config.model_copy(
+                update={
+                    "server": config.server.model_copy(update={"device": env_device}),
+                }
+            ),
+            "ANDROID_SERIAL",
         )
 
     if len(available) == 1:
-        return config.model_copy(
-            update={
-                "server": config.server.model_copy(update={"device": available[0]}),
-            }
+        return (
+            config.model_copy(
+                update={
+                    "server": config.server.model_copy(update={"device": available[0]}),
+                }
+            ),
+            "single connected adb device",
         )
 
     if not available:

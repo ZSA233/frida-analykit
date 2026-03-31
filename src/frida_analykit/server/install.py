@@ -3,6 +3,8 @@ from __future__ import annotations
 import shlex
 from pathlib import Path, PurePosixPath
 
+import frida
+
 from ..compat import Version
 from ..config import AppConfig
 from ..diagnostics import verbose_echo
@@ -25,6 +27,7 @@ from .helpers import (
     _summarize_probe_output,
     require_host_port,
     resolve_remote_device_config,
+    resolve_remote_device_target,
 )
 from .models import DownloadProgressCallback, RemoteServerStatus, ServerInstallResult, ServerManagerError
 from .runtime import ServerRuntime
@@ -47,14 +50,32 @@ class ServerInstaller:
         *,
         version_override: str | None = None,
     ) -> str:
+        resolved, _ = self.resolve_server_version_with_source(
+            config,
+            version_override=version_override,
+        )
+        return resolved
+
+    def resolve_server_version_with_source(
+        self,
+        config: AppConfig,
+        *,
+        version_override: str | None = None,
+    ) -> tuple[str, str]:
         resolved = version_override or config.server.version or str(self._runtime.compat.installed_version)
+        if version_override is not None:
+            source = "--version"
+        elif config.server.version:
+            source = "config.server.version"
+        else:
+            source = "installed Frida"
         verbose_echo(
             "resolved frida-server version "
             f"`{resolved}` (override={version_override or 'none'}, "
             f"config={config.server.version or 'none'}, "
             f"installed-frida={self._runtime.compat.installed_version})"
         )
-        return resolved
+        return resolved, source
 
     def resolve_target_config(self, config: AppConfig, *, action: str) -> AppConfig:
         return resolve_remote_device_config(
@@ -64,13 +85,40 @@ class ServerInstaller:
             action=action,
         )
 
-    def inspect_remote_server(self, config: AppConfig, *, probe_abi: bool = True) -> RemoteServerStatus:
-        config = self.resolve_target_config(config, action="remote server inspection")
-        selected_version = self.resolve_server_version(config)
+    def resolve_target_config_with_source(
+        self,
+        config: AppConfig,
+        *,
+        action: str,
+    ) -> tuple[AppConfig, str]:
+        return resolve_remote_device_target(
+            config,
+            adb_executable=self._runtime.adb_executable,
+            subprocess_run=self._runtime.subprocess_run,
+            action=action,
+        )
+
+    def inspect_remote_server(
+        self,
+        config: AppConfig,
+        *,
+        probe_abi: bool = True,
+        probe_host: bool = False,
+    ) -> RemoteServerStatus:
+        config, resolved_device_source = self.resolve_target_config_with_source(
+            config,
+            action="remote server inspection",
+        )
+        selected_version, selected_version_source = self.resolve_server_version_with_source(config)
         adb_target = self.resolve_adb_target(config)
+        resolved_device = config.server.device
         device_abi: str | None = None
         asset_arch: str | None = None
         abi_error: str | None = None
+        host_reachable: bool | None = None
+        host_error: str | None = None
+        protocol_compatible: bool | None = None
+        protocol_error: str | None = None
 
         if probe_abi:
             try:
@@ -97,25 +145,59 @@ class ServerInstaller:
 
         matched_profile = None
         supported: bool | None = None
+        version_matches_target: bool | None = None
         if installed_version is not None:
             profile = self._runtime.compat.matched_profile(Version.parse(installed_version))
             matched_profile = profile.name if profile else None
             supported = profile is not None
+            version_matches_target = installed_version == selected_version
+
+        if probe_host:
+            host_reachable, host_error, protocol_compatible, protocol_error = self._probe_remote_host(config)
 
         return RemoteServerStatus(
             selected_version=selected_version,
+            selected_version_source=selected_version_source,
             configured_version=config.server.version,
             server_path=remote_path,
             adb_target=adb_target,
+            resolved_device=resolved_device,
+            resolved_device_source=resolved_device_source,
             exists=exists,
             executable=executable,
             installed_version=installed_version,
+            version_matches_target=version_matches_target,
             supported=supported,
             matched_profile=matched_profile,
             device_abi=device_abi,
             asset_arch=asset_arch,
+            host_reachable=host_reachable,
+            host_error=host_error,
+            protocol_compatible=protocol_compatible,
+            protocol_error=protocol_error,
             error=abi_error,
         )
+
+    def _probe_remote_host(self, config: AppConfig) -> tuple[bool | None, str | None, bool | None, str | None]:
+        try:
+            self.ensure_remote_forward(config, action="remote host probe")
+            device = self._runtime.compat.get_device(config.server.host, device_id=config.server.device)
+            enumerate_processes = getattr(device, "enumerate_processes", None)
+            if callable(enumerate_processes):
+                enumerate_processes()
+            return True, None, True, None
+        except frida.ProtocolError as exc:
+            detail = str(exc).strip() or exc.__class__.__name__
+            return True, None, False, detail
+        except (frida.TransportError, frida.ServerNotRunningError) as exc:
+            detail = str(exc).strip() or exc.__class__.__name__
+            return False, detail, None, None
+        except Exception as exc:
+            detail = str(exc).strip() or exc.__class__.__name__
+            lowered = detail.lower()
+            if "connection closed" in lowered or "connection refused" in lowered or "timed out" in lowered:
+                return False, detail, None, None
+            return False, detail, None, None
 
     def install_remote_server(
         self,
@@ -261,6 +343,7 @@ class ServerInstaller:
         self._adb.run_adb(
             config,
             ["forward", f"tcp:{port}", f"tcp:{port}"],
+            capture_output=True,
             check=True,
         )
         return port

@@ -58,13 +58,15 @@ flowchart LR
 
 - Python dependency range: `frida>=16.5.9,<18`
 - Current tested profiles: `legacy-16` with `16.5.9`, and `current-17` with `17.8.2`
-- `frida-analykit doctor` classifies the current environment as `tested`, `supported but untested`, or `unsupported`
+- `frida-analykit doctor` prints a colorized action-oriented summary and highlights version mismatches, unreachable hosts, and protocol incompatibility directly; use `--verbose` for full detail
+- `frida-analykit doctor fix` repairs remote `frida-server` install / version findings, but does not boot the server automatically
 - `frida-analykit doctor device-compat` can sample Frida-version compatibility on one or more Android devices through a minimal injection probe, with `3` rounds by default and live stage progress output; it uses the repo-managed test app `com.frida_analykit.test` by default
 
 Check the current environment first:
 
 ```sh
 frida-analykit doctor
+frida-analykit doctor fix --config ./config.yml
 frida-analykit doctor device-compat --all-devices
 ```
 
@@ -95,12 +97,14 @@ The main workflow below assumes that you already have a runnable agent workspace
 
 1. Prepare the Python environment and target-device connection.
 2. Run `doctor` first to check the current Frida version, device connectivity, and `frida-server` status.
-3. Install and boot the remote `frida-server` when needed.
-4. Build `_agent.js`, then run `spawn` or `attach`.
-5. Add `--repl` when you need interactive debugging in async `ptpython`.
+3. If `doctor` reports remote install / version findings, run `doctor fix` first; runtime findings still need a manual `server boot`.
+4. Install and boot the remote `frida-server` when needed.
+5. Build `_agent.js`, then run `spawn` or `attach`.
+6. Add `--repl` when you need interactive debugging in async `ptpython`.
 
 ```sh
 frida-analykit doctor --config ./config.yml
+frida-analykit doctor fix --config ./config.yml
 frida-analykit server install --config ./config.yml
 frida-analykit server boot --config ./config.yml
 frida-analykit build --config ./config.yml
@@ -159,6 +163,7 @@ frida-analykit spawn --config ./config.yml
 frida-analykit attach --config ./config.yml --pid 12345
 frida-analykit attach --config ./config.yml --watch --repl
 frida-analykit doctor --config ./config.yml --verbose
+frida-analykit doctor fix --config ./config.yml
 frida-analykit server stop --config ./config.yml
 frida-analykit server install --config ./config.yml --version 17.8.2
 frida-analykit server install --config ./config.yml --local-server ./frida-server-17.8.2-android-arm64.xz
@@ -170,7 +175,10 @@ Keep these behaviors in mind:
 - `--build` / `--watch` reuse the workspace `npm run build` / `npm run watch`.
 - `attach --watch` / `spawn --watch` mean "wait for the first successful build, then inject" and do not hot-reload an existing session.
 - `spawn` / `attach` do not boot a remote `frida-server` automatically; for remote flows, run `server boot` first.
-- `server.host` supports `host:port`, `local`, and `usb`, while `server.device` pins the target device serial.
+- `doctor` shows only key findings and action hints by default; use `--verbose` for support ranges, profiles, raw config fields, and low-level probe details.
+- `doctor fix` only repairs remote `frida-server` install / version problems; if runtime findings remain afterwards, run `server boot` manually.
+- `server.host` supports `host:port`, `local`, and `usb`, while `server.device` pins the target device serial and takes precedence over `ANDROID_SERIAL`.
+- `server boot` only starts the binary that is already present on the device; it does not automatically install or switch to the current Python Frida version.
 - `server boot` does not kill an existing remote `frida-server` by default; use `--force-restart` when you need replacement.
 - `server stop` is an idempotent cleanup entry and still succeeds when no matching remote process exists.
 - `script.rpc.batch_max_bytes` is a global RPC batch limit, not a dex-only setting.

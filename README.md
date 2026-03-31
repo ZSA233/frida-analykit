@@ -58,13 +58,15 @@ flowchart LR
 
 - Python 依赖范围：`frida>=16.5.9,<18`
 - 当前受测 profile：`legacy-16` 的 `16.5.9` 与 `current-17` 的 `17.8.2`
-- `frida-analykit doctor` 会把当前环境标记为 `tested`、`supported but untested` 或 `unsupported`
+- `frida-analykit doctor` 会输出带颜色的精简诊断摘要，直接标出版本错配、host 不可达、协议不兼容等红项；`--verbose` 才展开完整细节
+- `frida-analykit doctor fix` 会修复远端 `frida-server` 的安装 / 版本类红项，但不会自动 `server boot`
 - `frida-analykit doctor device-compat` 可以对一台或多台真机做最小注入式 Frida 版本兼容性采样，默认采样 `3` 轮并实时输出阶段进度；默认使用仓库内置测试包 `com.frida_analykit.test`
 
 先检查当前环境：
 
 ```sh
 frida-analykit doctor
+frida-analykit doctor fix --config ./config.yml
 frida-analykit doctor device-compat --all-devices
 ```
 
@@ -95,12 +97,14 @@ frida-analykit env remove legacy-16
 
 1. 准备好 Python 环境与目标设备连接。
 2. 先用 `doctor` 检查当前 Frida 版本、设备连通性和 `frida-server` 状态。
-3. 如有需要，安装并启动远端 `frida-server`。
-4. 编译 `_agent.js`，然后执行 `spawn` 或 `attach`。
-5. 需要交互式调试时，追加 `--repl` 进入 async `ptpython`。
+3. 如果 `doctor` 标出远端 `frida-server` 的安装 / 版本红项，可先执行 `doctor fix`；运行态红项仍需手动 `server boot`。
+4. 如有需要，安装并启动远端 `frida-server`。
+5. 编译 `_agent.js`，然后执行 `spawn` 或 `attach`。
+6. 需要交互式调试时，追加 `--repl` 进入 async `ptpython`。
 
 ```sh
 frida-analykit doctor --config ./config.yml
+frida-analykit doctor fix --config ./config.yml
 frida-analykit server install --config ./config.yml
 frida-analykit server boot --config ./config.yml
 frida-analykit build --config ./config.yml
@@ -159,6 +163,7 @@ frida-analykit spawn --config ./config.yml
 frida-analykit attach --config ./config.yml --pid 12345
 frida-analykit attach --config ./config.yml --watch --repl
 frida-analykit doctor --config ./config.yml --verbose
+frida-analykit doctor fix --config ./config.yml
 frida-analykit server stop --config ./config.yml
 frida-analykit server install --config ./config.yml --version 17.8.2
 frida-analykit server install --config ./config.yml --local-server ./frida-server-17.8.2-android-arm64.xz
@@ -170,7 +175,10 @@ frida-analykit server install --config ./config.yml --local-server ./frida-serve
 - `--build` / `--watch` 会复用工作区里的 `npm run build` / `npm run watch`。
 - `attach --watch` / `spawn --watch` 的语义是“等待首个成功构建后再注入”，不会热重载已有 session。
 - `spawn` / `attach` 不会自动启动远端 `frida-server`；远端链路应先执行 `server boot`。
-- `server.host` 支持 `host:port`、`local`、`usb`，`server.device` 用于固定目标设备序列号。
+- `doctor` 默认只展示关键结论和行动提示；`--verbose` 才展开 support range、profile、原始 config 字段和低层探测细节。
+- `doctor fix` 只修远端 `frida-server` 的安装 / 版本问题；修完后若仍提示运行态红项，需要再手动执行 `server boot`。
+- `server.host` 支持 `host:port`、`local`、`usb`，`server.device` 用于固定目标设备序列号，且优先级高于 `ANDROID_SERIAL`。
+- `server boot` 只会启动设备上现有的远端 binary，不会自动安装或切换成当前 Python Frida 对应版本。
 - `server boot` 默认不会杀掉已有远端 `frida-server`；如需强制替换，使用 `--force-restart`。
 - `server stop` 是幂等清理入口，即使远端当前没有匹配进程也会返回成功。
 - `script.rpc.batch_max_bytes` 是通用 RPC batch 上限，不只作用于 dex dump。

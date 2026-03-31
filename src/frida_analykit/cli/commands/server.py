@@ -4,7 +4,8 @@ from pathlib import Path
 
 import click
 
-from ...server import FridaServerManager, ServerManagerError, boot_server, stop_server
+from ...server import FridaServerManager, ServerManagerError, stop_server
+from ...server.helpers import require_host_port
 from .. import common as cli_common
 from ..common import _DownloadProgressReporter, _verbose_option
 
@@ -12,6 +13,37 @@ from ..common import _DownloadProgressReporter, _verbose_option
 @click.group("server")
 def server_group() -> None:
     """Remote frida-server management."""
+
+
+def _render_server_boot_preamble(
+    *,
+    config_path: str,
+    host: str,
+    resolved_device: str | None,
+    resolved_device_source: str | None,
+    server_path: str,
+    selected_version: str,
+    selected_version_source: str | None,
+    installed_version: str | None,
+    version_matches_target: bool | None,
+    force_restart: bool,
+) -> None:
+    port = require_host_port(host, action="server boot")
+    click.secho("Server Boot", fg="cyan", bold=True)
+    click.echo(f"  Config: {config_path}")
+    click.echo(f"  Target device: {resolved_device or 'unknown'} ({resolved_device_source or 'unknown source'})")
+    click.echo(f"  Remote host: {host}")
+    click.echo(f"  Remote port: {port}")
+    click.echo(f"  Remote path: {server_path}")
+    click.echo(f"  Target version: {selected_version} ({selected_version_source or 'unknown source'})")
+    if installed_version is None:
+        click.secho("  Installed version: not detected", fg="yellow")
+    else:
+        installed_color = "green" if version_matches_target else "yellow"
+        click.secho(f"  Installed version: {installed_version}", fg=installed_color)
+    if force_restart:
+        click.secho("  Restart mode: force-restart", fg="yellow")
+    click.secho("  Status: booting remote frida-server and keeping the session attached...", fg="green")
 
 
 @server_group.command("boot")
@@ -24,8 +56,23 @@ def server_group() -> None:
 @_verbose_option()
 def server_boot(config_path: str, force_restart: bool, verbose: bool) -> None:
     cli_common._configure_verbose(verbose)
+    manager = FridaServerManager()
+    config = cli_common._load_config(config_path)
     try:
-        boot_server(cli_common._load_config(config_path), force_restart=force_restart)
+        status = manager.inspect_remote_server(config, probe_abi=False, probe_host=False)
+        _render_server_boot_preamble(
+            config_path=config_path,
+            host=config.server.host,
+            resolved_device=status.resolved_device,
+            resolved_device_source=status.resolved_device_source,
+            server_path=status.server_path,
+            selected_version=status.selected_version,
+            selected_version_source=status.selected_version_source,
+            installed_version=status.installed_version,
+            version_matches_target=status.version_matches_target,
+            force_restart=force_restart,
+        )
+        manager.boot_remote_server(config, force_restart=force_restart)
     except ServerManagerError as exc:
         raise click.ClickException(str(exc)) from exc
 

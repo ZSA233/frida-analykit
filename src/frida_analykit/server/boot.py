@@ -236,20 +236,7 @@ class ServerBootController:
 
     @staticmethod
     def _build_boot_command(server_path: str, port: str) -> str:
-        shell_body = (
-            "child=''; "
-            "cleanup() { "
-            "if [ -n \"$child\" ]; then "
-            "kill \"$child\" 2>/dev/null || true; "
-            "wait \"$child\" 2>/dev/null || true; "
-            "fi; "
-            "}; "
-            "trap cleanup HUP INT TERM EXIT; "
-            f"{shlex.quote(server_path)} -l 0.0.0.0:{port} & "
-            "child=$!; "
-            "wait \"$child\""
-        )
-        return f"sh -c {shlex.quote(shell_body)}"
+        return f"exec {shlex.quote(server_path)} -l 0.0.0.0:{port} 1>/dev/null"
 
     @staticmethod
     def _collect_process_output(process: PopenProcess) -> tuple[str | None, str | None]:

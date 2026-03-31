@@ -6,6 +6,7 @@ from typing import Callable
 
 from .runtime import PopenProcess
 
+
 class ServerManagerError(RuntimeError):
     pass
 
@@ -27,16 +28,24 @@ class DownloadedServer:
 @dataclass(frozen=True)
 class RemoteServerStatus:
     selected_version: str
+    selected_version_source: str | None
     configured_version: str | None
     server_path: str
     adb_target: str | None
+    resolved_device: str | None
+    resolved_device_source: str | None
     exists: bool
     executable: bool
     installed_version: str | None
+    version_matches_target: bool | None
     supported: bool | None
     matched_profile: str | None
     device_abi: str | None
     asset_arch: str | None
+    host_reachable: bool | None = None
+    host_error: str | None = None
+    protocol_compatible: bool | None = None
+    protocol_error: str | None = None
     error: str | None = None
 
 

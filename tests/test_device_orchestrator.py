@@ -118,3 +118,28 @@ def test_main_prefers_device_test_serials_env_over_android_serial(monkeypatch: p
     assert captured["serials"] == ("SERIAL123", "SERIAL456")
     assert captured["kwargs"]["device_test_skip_app"] == "1"
     assert captured["resolve_kwargs"]["requested_serials"] == ["SERIAL123", "SERIAL456"]
+    assert captured["resolve_kwargs"]["fallback_serial"] is None
+
+
+def test_main_ignores_android_serial_when_enumerating_all_devices(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("DEVICE_TEST_SERIALS", raising=False)
+    monkeypatch.setenv("ANDROID_SERIAL", "SERIAL123")
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        orchestrator,
+        "resolve_device_test_serials",
+        lambda **kwargs: (captured.setdefault("resolve_kwargs", kwargs), ("SERIAL123", "SERIAL456"))[1],
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "run_device_test_all",
+        lambda serials, **kwargs: captured.update(serials=serials, kwargs=kwargs) or 0,
+    )
+
+    result = orchestrator.main([])
+
+    assert result == 0
+    assert captured["serials"] == ("SERIAL123", "SERIAL456")
+    assert captured["resolve_kwargs"]["requested_serials"] == []
+    assert captured["resolve_kwargs"]["fallback_serial"] is None

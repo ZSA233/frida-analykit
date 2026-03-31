@@ -43,7 +43,7 @@ def build_device_test_command(
     device_test_app: str | None = None,
     device_test_skip_app: str | None = None,
 ) -> list[str]:
-    command = ["make", "-C", str(repo_root), make_target, f"ANDROID_SERIAL={serial}"]
+    command = ["make", "-C", repo_root.as_posix(), make_target, f"ANDROID_SERIAL={serial}"]
     if device_test_app:
         command.append(f"DEVICE_TEST_APP={device_test_app}")
     if device_test_skip_app:
@@ -151,7 +151,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         serials = resolve_device_test_serials(
             requested_serials=requested_serials,
-            fallback_serial=env.get("ANDROID_SERIAL"),
+            fallback_serial=None,
             env=env,
             cwd=args.repo_root,
         )
