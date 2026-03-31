@@ -77,7 +77,7 @@ The Python package is distributed through GitHub repositories / GitHub Releases 
 The recommended installation uses `uv`:
 
 ```sh
-uv tool install "git+https://github.com/ZSA233/frida-analykit@v2.0.6"
+uv tool install "git+https://github.com/ZSA233/frida-analykit@v2.0.7"
 ```
 
 If you need to maintain multiple Frida-version environments, you can use the built-in environment manager:
