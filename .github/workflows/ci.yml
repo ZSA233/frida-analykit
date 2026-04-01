@@ -84,9 +84,7 @@ jobs:
         run: uv pip install --python .venv/bin/python "frida==${{ steps.profile.outputs.version }}"
 
       - name: Run smoke test
-        env:
-          FRIDA_ANALYKIT_ENABLE_SMOKE: "1"
-        run: uv run pytest tests/test_smoke.py -q -m smoke
+        run: make compat
 
   node-scaffold:
     needs: release-contract
@@ -118,6 +116,4 @@ jobs:
         run: npm run agent:build
 
       - name: Run scaffold test
-        env:
-          FRIDA_ANALYKIT_ENABLE_NPM: "1"
-        run: uv run pytest tests/test_scaffold.py -q -m scaffold
+        run: make scaffold
