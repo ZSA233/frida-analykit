@@ -13,6 +13,7 @@ class _FakeRPCClient:
         self.value_calls: list[str] = []
         self.call_calls: list[tuple[str, tuple[object, ...]]] = []
         self.released: list[str] = []
+        self.async_released: list[str] = []
         self.prop_map: dict[str, dict[str, str]] = {}
         self.value_map: dict[str, object] = {}
         self.async_value_map: dict[str, object] = {}
@@ -25,6 +26,9 @@ class _FakeRPCClient:
         return RPCMsgEnumerateObjProps(
             props=[self.prop_map.get(item.render(), {}) for item in items],
         )
+
+    async def enumerate_props_async(self, refs: HandleRef | list[HandleRef]) -> RPCMsgEnumerateObjProps:
+        return self.enumerate_props(refs)
 
     def get_value(self, ref: HandleRef) -> object:
         self.value_calls.append(ref.render())
@@ -44,6 +48,9 @@ class _FakeRPCClient:
 
     def release_scope_ref(self, ref: HandleRef) -> None:
         self.released.append(ref.render())
+
+    async def release_scope_ref_async(self, ref: HandleRef) -> None:
+        self.async_released.append(ref.render())
 
 
 def test_handle_meta_suffixes_do_not_steal_real_value_or_type_properties() -> None:
@@ -105,6 +112,29 @@ def test_scope_child_keeps_root_slot_alive_for_chained_calls() -> None:
     assert client.released == ["scope[slot-1]"]
 
 
+def test_explicit_release_drops_owned_scope_slot_without_waiting_for_gc() -> None:
+    client = _FakeRPCClient()
+    root = JsHandle(HandleRef.scope("slot-1"), client=client, props={})
+
+    root.release()
+    root.release()
+
+    assert client.released == ["scope[slot-1]"]
+
+
+def test_releasing_scope_child_releases_its_owned_root_slot() -> None:
+    client = _FakeRPCClient()
+    client.prop_map = {
+        "scope[slot-1]": {"dispose": "function"},
+        "scope[slot-1]/dispose": {},
+    }
+    child = JsHandle(HandleRef.scope("slot-1"), client=client).dispose
+
+    child.release()
+
+    assert client.released == ["scope[slot-1]"]
+
+
 def test_interactive_handle_prefetches_sibling_props_in_one_batch() -> None:
     client = _FakeRPCClient(interactive=True)
     client.prop_map = {
@@ -128,6 +158,7 @@ def test_call_async_and_resolve_async_use_async_rpc_path() -> None:
     client = _FakeRPCClient()
     client.prop_map["Process"] = {"fetch": "function"}
     client.prop_map["Process/fetch"] = {}
+    client.prop_map["scope[slot-2]"] = {"then": "function"}
     client.async_value_map["scope[slot-2]"] = "done"
 
     proc = JsHandle.from_seed_path("Process", client=client)
@@ -137,3 +168,27 @@ def test_call_async_and_resolve_async_use_async_rpc_path() -> None:
     assert client.call_calls == [("Process", ("demo",))]
     assert result.type_ == "promise"
     assert asyncio.run(result.resolve_async()) == "done"
+
+
+def test_from_scope_result_async_hydrates_props_with_async_enumeration() -> None:
+    client = _FakeRPCClient()
+    client.prop_map["scope[slot-3]"] = {"dispose": "function"}
+
+    handle = asyncio.run(
+        JsHandle.from_scope_result_async(
+            RPCMsgScopeCall(id="slot-3", type="object", has_result=False),
+            client=client,
+        )
+    )
+
+    assert "dispose" in dir(handle)
+    assert client.enumerations == [HandleRef.scope("slot-3")]
+
+
+def test_release_async_uses_async_scope_release() -> None:
+    client = _FakeRPCClient()
+    root = JsHandle(HandleRef.scope("slot-4"), client=client, props={})
+
+    asyncio.run(root.release_async())
+
+    assert client.async_released == ["scope[slot-4]"]

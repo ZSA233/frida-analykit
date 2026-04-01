@@ -18,6 +18,7 @@
   - `DeviceServerRuntime`
   - `SessionWrapper` / `ScriptWrapper`
   - `RPCClient`
+  - `DebugSessionManager`
 - 组件边界应尽量清楚：
   - wrapper 负责对外易用接口和生命周期装配
   - runtime/context 负责显式持有依赖
@@ -49,6 +50,7 @@
   - `rpc`
   - `server`
   - `repl`
+  - `mcp`
   - `logging`
 - 域内复杂逻辑应继续在域内细分，而不是回流到包根或入口文件。
 - 例如 `rpc` 侧已经按 `client / protocol / message / resolver / registry / handler / exports` 拆开；后续新增能力也应沿这种域内分层继续扩展。
@@ -60,10 +62,14 @@
 - `device` 域内若职责继续增长，应优先拆成显式 owner 模块，例如 `defaults / models / selection / helpers / runtime / test_app`；不要再回流到单个大文件。
 - `development` 域内也应保持薄入口，优先拆成 `profiles / managed_envs / device_testing / device_compat` 这类显式 owner，而不是把交叉逻辑重新堆回包根。
 - 包根 `__init__`、CLI 根入口和对外 convenience 模块不应承担内部中转层职责。
+- `mcp` 域负责 stdio MCP server、长会话 manager、tool/resource schema 和会话资源回收；它不应复用会向 stdout 打 banner 或普通日志的 CLI 入口路径。
+- `mcp` 域的主线实现应优先使用 async manager / async tool handlers；如需兼容同步调用方，应通过薄 sync adapter 桥接，而不是把同步实现继续当作主线。
+- MCP 面向大模型的使用文档应作为打包资源进入 wheel，并通过 MCP resources 暴露；不要依赖仓库根目录下的 README / docs 文件在安装后仍可直接读取。
 - 如果某个文件已经同时承载配置解析、生命周期、错误处理、协议序列化、日志落盘等多种责任，应主动拆分。
 - 测试目录也遵循相同思路：
   - `tests/core/` 存放 config / compat / frontend / scaffold / smoke 这类核心域单测
   - `tests/cli/`、`tests/server/`、`tests/env/`、`tests/release/`、`tests/agent/`、`tests/development/` 按业务 owner 继续细分常规单测
+  - `tests/mcp/` 聚焦 MCP tool/resource surface、stdio 集成和长会话状态机
   - `tests/device_unit/` 存放非真机的 device 域单测，继续覆盖 helpers / runtime / workspace / orchestrator / test-app
   - `tests/rpc/` 聚焦 RPC / REPL / session 行为
   - `tests/device/` 聚焦真机和 Python+agent 组合验证
@@ -72,6 +78,7 @@
 
 - Python 对外接口倾向显式对象和显式参数，不依赖隐藏全局状态。
 - 公共 wrapper 应尽量保留底层 Frida 语义；如果需要做 payload 归一化、句柄协议转换或兼容性预检，应收在内部 client 层，而不是污染公共 exports 面。
+- stdio MCP 入口是协议通道，不允许混入 session banner、普通 `print(...)` 日志或其它用户向 stdout 输出；这类可读信息应改走 MCP resource/tool 返回值或文件日志。
 - 错误信息应尽量具备操作性，直接指出失败阶段、冲突条件和建议动作，而不是只抛底层异常。
 - 对于非显而易见的兼容性修复、协议限制或时序约束，应在代码附近加简短注释，说明“为什么必须这样做”。
 - 修改公开接口、配置对象或协议字段时，要优先维护向调用方可解释的边界，而不是为了内部实现省事去泄漏内部结构。

@@ -10,6 +10,7 @@
 ## Project Positioning
 
 - Python CLI: manages the `frida-server` lifecycle, device connectivity, build orchestration, attach/spawn flows, REPL, logs, and binary payload persistence.
+- The Python install also provides a standalone command, `frida-analykit-mcp`, which exposes the current Frida debugging flow as a stdio MCP server.
 - npm runtime: published as `@zsa233/frida-analykit-agent`, providing RPC, helper, JNI, ELF, SSL, Dex dump, and selected native bindings.
 - The main v2 workflow is: "you maintain an independent TypeScript agent workspace, and the CLI handles build, injection, and result archiving."
 
@@ -80,6 +81,8 @@ The recommended installation uses `uv`:
 uv tool install "git+https://github.com/ZSA233/frida-analykit@stable"
 ```
 
+The same installation provides both `frida-analykit` and `frida-analykit-mcp`.
+
 If you need to maintain multiple Frida-version environments, you can use the built-in environment manager:
 
 ```sh
@@ -111,6 +114,14 @@ frida-analykit build --config ./config.yml
 frida-analykit spawn --config ./config.yml
 frida-analykit attach --config ./config.yml --build --repl
 ```
+
+If you want to hand the current device flow to an MCP client / LLM, run this in another terminal on the host:
+
+```sh
+frida-analykit-mcp --idle-timeout 1200
+```
+
+After connecting, read `frida://docs/mcp/index` and `frida://docs/mcp/workflow` first, then decide which `session_open`, `eval_js`, and snippet-management steps are needed.
 
 ## Common Config And Commands
 
@@ -169,6 +180,14 @@ frida-analykit server install --config ./config.yml --version 17.8.2
 frida-analykit server install --config ./config.yml --local-server ./frida-server-17.8.2-android-arm64.xz
 ```
 
+If you want to hand the current device session to an MCP client, you can also start the standalone stdio server directly:
+
+```sh
+frida-analykit-mcp --idle-timeout 1200
+```
+
+After connecting, read `frida://docs/mcp/index` and `frida://docs/mcp/workflow` first, then decide which `session_open`, `eval_js`, and snippet-management steps are needed.
+
 Keep these behaviors in mind:
 
 - `spawn` requires `config.app`; `attach` can take an explicit `--pid`.
@@ -183,6 +202,10 @@ Keep these behaviors in mind:
 - `server stop` is an idempotent cleanup entry and still succeeds when no matching remote process exists.
 - `script.rpc.batch_max_bytes` is a global RPC batch limit, not a dex-only setting.
 - `script.dextools.output_dir` is the default Python-side output directory for dex dumps.
+- `frida-analykit-mcp` currently supports stdio transport only and keeps exactly one active debug session at a time by default.
+- `frida-analykit-mcp` automatically reclaims the current session after `1200` idle seconds by default, and `--idle-timeout` can override that.
+- MCP also exposes four queryable Markdown resources, `frida://docs/mcp/index`, `frida://docs/mcp/workflow`, `frida://docs/mcp/tools`, and `frida://docs/mcp/recovery`, which are useful to let a model read before opening a session.
+- MCP injects the current `config.jsfile` and requires `_agent.js` to already import `@zsa233/frida-analykit-agent/rpc`; it does not take over TS workspace build/watch for you.
 
 ## Agent Capability Overview
 

@@ -32,10 +32,20 @@ class _FakeAsyncExports:
         self.runtime_info = runtime_info
         self.runtime_info_calls = 0
         self.scope_eval_calls = 0
+        self.enumerate_calls = 0
+        self.scope_del_calls: list[object] = []
 
     async def rpc_runtime_info(self) -> object | None:
         self.runtime_info_calls += 1
         return self.runtime_info
+
+    async def enumerate_obj_props(self, *args, **kwargs):
+        del args, kwargs
+        self.enumerate_calls += 1
+        return {
+            "type": RPCMsgType.ENUMERATE_OBJ_PROPS.value,
+            "data": {"props": [{"arch": "string"}]},
+        }
 
     async def scope_eval_async(self, *args, **kwargs):
         del args, kwargs
@@ -49,6 +59,9 @@ class _FakeAsyncExports:
                 "has_result": True,
             },
         }
+
+    async def scope_del(self, ref: object, scope_id: object) -> None:
+        self.scope_del_calls.append((ref, scope_id))
 
 
 class _FakeScript:
@@ -118,3 +131,36 @@ def test_runtime_info_is_cached_after_first_successful_check() -> None:
     assert isinstance(second, RPCMsgEnumerateObjProps)
     assert client._rpc_exports_sync._exports.runtime_info_calls == 1
     assert client._rpc_exports_sync._exports.enumerate_calls == 2
+
+
+def test_enumerate_props_async_uses_async_exports_path() -> None:
+    runtime_info = {
+        "protocol_version": RPC_PROTOCOL_VERSION,
+        "features": ["handle_ref", "async_scope"],
+    }
+    client = RPCClient(
+        _FakeScript(["rpcRuntimeInfo", "enumerateObjProps"], runtime_info=runtime_info),
+        scope_id="scope-1",
+    )
+
+    result = asyncio.run(client.enumerate_props_async(HandleRef.from_seed_path("Process")))
+
+    assert isinstance(result, RPCMsgEnumerateObjProps)
+    assert client._rpc_exports_async._exports.runtime_info_calls == 1
+    assert client._rpc_exports_async._exports.enumerate_calls == 1
+
+
+def test_release_scope_ref_async_uses_async_exports_path() -> None:
+    runtime_info = {
+        "protocol_version": RPC_PROTOCOL_VERSION,
+        "features": ["handle_ref", "async_scope"],
+    }
+    client = RPCClient(
+        _FakeScript(["rpcRuntimeInfo", "scopeDel"], runtime_info=runtime_info),
+        scope_id="scope-1",
+    )
+
+    ref = HandleRef.scope("slot-9")
+    asyncio.run(client.release_scope_ref_async(ref))
+
+    assert client._rpc_exports_async._exports.scope_del_calls == [(ref.to_rpc_arg(), "scope-1")]

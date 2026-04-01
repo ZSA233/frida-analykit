@@ -10,6 +10,7 @@
 ## 项目定位
 
 - Python CLI：负责 `frida-server` 生命周期、设备连接、构建编排、attach/spawn、REPL、日志与二进制数据落盘。
+- Python 安装还会同时提供独立命令 `frida-analykit-mcp`，用于把当前 Frida 调试链路暴露成 stdio MCP server。
 - npm runtime：发布为 `@zsa233/frida-analykit-agent`，提供 RPC、helper、JNI、ELF、SSL、Dex dump 和部分 native binding。
 - v2 的主线模式是“用户维护独立 TypeScript agent 工作区，CLI 负责构建、注入和结果归档”。
 
@@ -80,6 +81,8 @@ Python 包通过 GitHub 仓库 / GitHub Release 分发，不发布到 PyPI。
 uv tool install "git+https://github.com/ZSA233/frida-analykit@stable"
 ```
 
+同一安装会同时提供 `frida-analykit` 与 `frida-analykit-mcp` 两个命令入口。
+
 如果你需要维护多套 Frida 版本环境，可以使用内置环境管理：
 
 ```sh
@@ -111,6 +114,14 @@ frida-analykit build --config ./config.yml
 frida-analykit spawn --config ./config.yml
 frida-analykit attach --config ./config.yml --build --repl
 ```
+
+如果你要把当前设备链路交给 MCP client / 大模型，可在宿主机上另开一个终端运行：
+
+```sh
+frida-analykit-mcp --idle-timeout 1200
+```
+
+连接后可先读取 `frida://docs/mcp/index` 与 `frida://docs/mcp/workflow`，再决定具体的 `session_open`、`eval_js` 与 snippet 管理步骤。
 
 ## 常用配置与命令
 
@@ -169,6 +180,14 @@ frida-analykit server install --config ./config.yml --version 17.8.2
 frida-analykit server install --config ./config.yml --local-server ./frida-server-17.8.2-android-arm64.xz
 ```
 
+如果你要把当前设备会话交给 MCP client，也可以直接启动独立 stdio server：
+
+```sh
+frida-analykit-mcp --idle-timeout 1200
+```
+
+连接后可先读取 `frida://docs/mcp/index` 与 `frida://docs/mcp/workflow`，再决定具体的 `session_open`、`eval_js` 与 snippet 管理步骤。
+
 使用时需要特别记住：
 
 - `spawn` 要求 `config.app` 必填；`attach` 可显式传 `--pid`。
@@ -183,6 +202,10 @@ frida-analykit server install --config ./config.yml --local-server ./frida-serve
 - `server stop` 是幂等清理入口，即使远端当前没有匹配进程也会返回成功。
 - `script.rpc.batch_max_bytes` 是通用 RPC batch 上限，不只作用于 dex dump。
 - `script.dextools.output_dir` 是 Python 侧接收 dex dump 的默认目录。
+- `frida-analykit-mcp` 当前只支持 stdio transport，默认只维护一个活动调试会话。
+- `frida-analykit-mcp` 默认会在 `1200` 秒空闲后自动回收当前会话，可通过 `--idle-timeout` 覆盖。
+- MCP 还会暴露 `frida://docs/mcp/index`、`frida://docs/mcp/workflow`、`frida://docs/mcp/tools`、`frida://docs/mcp/recovery` 四个可查询 Markdown 资源，适合先给大模型读一遍再开会话。
+- MCP 使用当前 `config.jsfile` 做注入，且要求 `_agent.js` 已导入 `@zsa233/frida-analykit-agent/rpc`；它不会替你接管 TS workspace 的 build/watch。
 
 ## Agent 能力概览
 

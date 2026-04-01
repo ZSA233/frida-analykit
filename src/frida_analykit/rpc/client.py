@@ -111,10 +111,25 @@ class RPCClient:
             RPCMsgEnumerateObjProps,
         )
 
+    async def enumerate_props_async(self, refs: HandleRef | Sequence[HandleRef]) -> RPCMsgEnumerateObjProps:
+        payload = refs.to_rpc_arg() if isinstance(refs, HandleRef) else [item.to_rpc_arg() for item in refs]
+        return self._expect_model(
+            await self._rpc_exports_async.enumerate_obj_props(payload, self.scope_id),
+            RPCMsgEnumerateObjProps,
+        )
+
     def release_scope_ref(self, ref: HandleRef) -> None:
         if not ref.owns_scope_slot:
             return
         self._rpc_exports_sync.scope_del(ref.to_rpc_arg(), self.scope_id)
+
+    async def release_scope_ref_async(self, ref: HandleRef) -> None:
+        if not ref.owns_scope_slot:
+            return
+        await self._rpc_exports_async.scope_del(ref.to_rpc_arg(), self.scope_id)
+
+    def clear_scope_sync(self) -> None:
+        self._rpc_exports_sync.scope_clear(self.scope_id)
 
     async def clear_scope(self) -> None:
         await self._rpc_exports_async.scope_clear(self.scope_id)

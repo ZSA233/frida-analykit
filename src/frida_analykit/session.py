@@ -190,13 +190,20 @@ class ScriptWrapper:
     def post(self, message: RPCMessage, data: bytes | None = None) -> None:
         self._script.post(message.to_mapping(), data)
 
-    def set_logger(self, loggers: LoggerBundle | None = None) -> None:
+    def set_logger(
+        self,
+        loggers: LoggerBundle | None = None,
+        *,
+        extra_handler: Callable[[str, str], None] | None = None,
+    ) -> None:
         active_loggers = loggers or self._runtime.loggers or build_loggers(AgentConfig())
         self._runtime.loggers = active_loggers
 
         def handler(level: str, text: str) -> None:
             stream = active_loggers.stdout if level == "info" else active_loggers.stderr
             print(text, file=stream)
+            if extra_handler is not None:
+                extra_handler(level, text)
 
         self.set_log_handler(handler)
 
@@ -207,7 +214,19 @@ class ScriptWrapper:
         return JsHandle.from_scope_result(self._runtime.rpc.eval(source), client=self._runtime.rpc)
 
     async def eval_async(self, source: str) -> JsHandle:
-        return JsHandle.from_scope_result(await self._runtime.rpc.eval_async(source), client=self._runtime.rpc)
+        return await JsHandle.from_scope_result_async(await self._runtime.rpc.eval_async(source), client=self._runtime.rpc)
+
+    def ensure_runtime_compatible(self) -> None:
+        self._runtime.rpc.ensure_runtime_compatible()
+
+    async def ensure_runtime_compatible_async(self) -> None:
+        await self._runtime.rpc.ensure_runtime_compatible_async()
+
+    def clear_scope(self) -> None:
+        self._runtime.rpc.clear_scope_sync()
+
+    async def clear_scope_async(self) -> None:
+        await self._runtime.rpc.clear_scope()
 
 
 class SessionWrapper:

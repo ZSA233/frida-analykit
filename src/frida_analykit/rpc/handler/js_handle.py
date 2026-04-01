@@ -45,6 +45,7 @@ class JsHandle:
         self._value = value
         self._lock = Lock()
         self._scope_owner = scope_owner
+        self._finalizer: weakref.finalize | None = None
 
         if props is not None:
             self._props = props
@@ -54,7 +55,10 @@ class JsHandle:
             self._props = {name: Unset(prop_type) for name, prop_type in mapping.items()}
 
         if ref.owns_scope_slot:
-            weakref.finalize(self, functools.partial(_safe_scope_del, self._client.release_scope_ref, ref))
+            self._finalizer = weakref.finalize(
+                self,
+                functools.partial(_safe_scope_del, self._client.release_scope_ref, ref),
+            )
 
     @classmethod
     def from_seed_path(cls, path: str, *, client: RPCClient) -> "JsHandle":
@@ -74,6 +78,24 @@ class JsHandle:
             typ=result.type,
             value=value,
         )
+
+    @classmethod
+    async def from_scope_result_async(
+        cls,
+        result: RPCMsgScopeCall | RPCMsgScopeEval,
+        *,
+        client: RPCClient,
+    ) -> "JsHandle":
+        value: Any = result.result if result.has_result else Unset(result.type)
+        handle = cls(
+            HandleRef.scope(result.id),
+            client=client,
+            typ=result.type,
+            value=value,
+            props={},
+        )
+        await handle._refresh_props_async()
+        return handle
 
     def __repr__(self) -> str:
         return f"<JsHandle: [{self._typ}] {self}>"
@@ -95,7 +117,7 @@ class JsHandle:
         return JsHandle.from_scope_result(self._client.call(self._ref, args), client=self._client)
 
     async def call_async(self, *args: Any) -> "JsHandle":
-        return JsHandle.from_scope_result(await self._client.call_async(self._ref, args), client=self._client)
+        return await JsHandle.from_scope_result_async(await self._client.call_async(self._ref, args), client=self._client)
 
     @property
     def value_(self) -> Any:
@@ -112,8 +134,35 @@ class JsHandle:
             self._value = await self._client.get_value_async(self._ref)
         return self._value
 
+    async def resolve_path_async(self, path: str | None) -> "JsHandle":
+        target = self
+        if not path:
+            return target
+        for segment in path.split("."):
+            clean = segment.strip()
+            if not clean:
+                continue
+            target = await target._get_child_async(clean)
+        return target
+
     def to_handle_ref(self) -> HandleRef:
         return self._ref
+
+    def release(self) -> None:
+        if self._finalizer is not None and self._finalizer.alive:
+            self._finalizer()
+            return
+        if self._scope_owner is not None:
+            self._scope_owner.release()
+
+    async def release_async(self) -> None:
+        if self._finalizer is not None and self._finalizer.alive:
+            detached = self._finalizer.detach()
+            if detached is not None:
+                await self._client.release_scope_ref_async(self._ref)
+            return
+        if self._scope_owner is not None:
+            await self._scope_owner.release_async()
 
     def __getattr__(self, name: str) -> Any:
         if name.startswith("__"):
@@ -172,6 +221,64 @@ class JsHandle:
             batch = self._client.enumerate_props([handle._ref for handle in pending_handles])
             for handle, mapping in zip(pending_handles, batch.props):
                 handle._props.update({name: Unset(prop_type) for name, prop_type in mapping.items()})
+
+    async def _get_child_async(self, key: str) -> "JsHandle":
+        current = self._props.get(key)
+        if current is None:
+            current = JsHandle(
+                self._ref.child(key),
+                client=self._client,
+                typ="unknown",
+                props={},
+                scope_owner=self._scope_owner_token(),
+            )
+            self._props[key] = current
+            await current._refresh_props_async()
+            return current
+        if isinstance(current, Unset):
+            if self._client.interactive:
+                await self._materialize_pending_children_async()
+                resolved = self._props[key]
+                if isinstance(resolved, JsHandle):
+                    return resolved
+            current = JsHandle(
+                self._ref.child(key),
+                client=self._client,
+                typ=current.name,
+                props={},
+                scope_owner=self._scope_owner_token(),
+            )
+            self._props[key] = current
+            await current._refresh_props_async()
+        assert isinstance(current, JsHandle)
+        return current
+
+    async def _materialize_pending_children_async(self) -> None:
+        pending_handles: list[JsHandle] = []
+        with self._lock:
+            owner = self._scope_owner_token()
+            for key, value in list(self._props.items()):
+                if not isinstance(value, Unset):
+                    continue
+                handle = JsHandle(
+                    self._ref.child(key),
+                    client=self._client,
+                    typ=value.name,
+                    props={},
+                    scope_owner=owner,
+                )
+                self._props[key] = handle
+                pending_handles.append(handle)
+        if not pending_handles:
+            return
+        batch = await self._client.enumerate_props_async([handle._ref for handle in pending_handles])
+        for handle, mapping in zip(pending_handles, batch.props):
+            handle._props.update({name: Unset(prop_type) for name, prop_type in mapping.items()})
+
+    async def _refresh_props_async(self) -> None:
+        batch = await self._client.enumerate_props_async(self._ref)
+        mapping = batch.props[0] if batch.props else {}
+        self._props.update({name: Unset(prop_type) for name, prop_type in mapping.items()})
 
     def _scope_owner_token(self) -> "JsHandle | None":
         # Scope children must retain the owning root handle; otherwise a chained

@@ -6,6 +6,7 @@ from pathlib import Path
 from frida_analykit._version import __version__
 from frida_analykit.config import AppConfig
 from frida_analykit.logging import LoggerBundle
+from frida_analykit.rpc.protocol import RPCRuntimeInfo
 from frida_analykit.session import SessionWrapper, render_session_banner, try_inject_environ
 
 
@@ -28,11 +29,21 @@ def _config(
 
 
 class _FakeSyncExports:
+    def __init__(self) -> None:
+        self.scope_clear_calls: list[tuple[object, ...]] = []
+
     def plain_payload(self) -> dict[str, str]:
         return {"type": "demo"}
 
     def scope_del(self, *args, **kwargs) -> None:
         del args, kwargs
+
+    def scope_clear(self, *args, **kwargs) -> None:
+        self.scope_clear_calls.append(args)
+        del kwargs
+
+    def rpc_runtime_info(self) -> dict[str, object]:
+        return RPCRuntimeInfo(protocol_version=2, features=["handle_ref", "async_scope"]).model_dump(mode="json")
 
 
 class _FakeAsyncExports:
@@ -57,10 +68,10 @@ class _FakeScript:
         self.log_handler = handler
 
     def list_exports_sync(self) -> list[str]:
-        return ["plainPayload"]
+        return ["plainPayload", "scopeClear", "rpcRuntimeInfo"]
 
     async def list_exports_async(self) -> list[str]:
-        return ["plainPayload"]
+        return ["plainPayload", "scopeClear", "rpcRuntimeInfo"]
 
 
 class _FakeSession:
@@ -201,3 +212,37 @@ def test_session_wrapper_injects_default_batch_limit(tmp_path: Path) -> None:
 
     assert fake_session.last_source is not None
     assert '"BatchMaxBytes": 2048' in fake_session.last_source
+
+
+def test_script_wrapper_clear_scope_uses_public_sync_cleanup_path(tmp_path: Path) -> None:
+    fake_session = _FakeSession()
+    session = SessionWrapper(fake_session, config=_config(tmp_path))
+    script = session.create_script("16 /index.js\n✄\n")
+
+    script.clear_scope()
+
+    assert fake_session.script.exports_sync.scope_clear_calls == [(script.scope_id,)]
+
+
+def test_script_wrapper_set_logger_can_tee_into_external_handler(monkeypatch, tmp_path: Path) -> None:
+    shared = io.StringIO()
+    bundle = LoggerBundle(stdout=shared, stderr=shared)
+    seen: list[tuple[str, str]] = []
+
+    monkeypatch.setattr("frida_analykit.session.build_loggers", lambda agent: bundle)
+
+    session = SessionWrapper(_FakeSession(), config=_config(tmp_path))
+    script = session.create_script("16 /index.js\n✄\n")
+
+    script.set_logger(extra_handler=lambda level, text: seen.append((level, text)))
+    session._session.script.log_handler("info", "hook-ready")
+
+    assert "hook-ready" in shared.getvalue()
+    assert seen == [("info", "hook-ready")]
+
+
+def test_script_wrapper_can_probe_runtime_compatibility_through_public_api(tmp_path: Path) -> None:
+    session = SessionWrapper(_FakeSession(), config=_config(tmp_path))
+    script = session.create_script("16 /index.js\n✄\n")
+
+    script.ensure_runtime_compatible()

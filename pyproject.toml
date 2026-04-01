@@ -16,6 +16,7 @@ dependencies = [
   "click>=8.1.8,<9",
   "colorama>=0.4.6,<0.5",
   "frida>=16.5.9,<18",
+  "mcp>=1.26.0,<2",
   "pexpect>=4.9.0,<5",
   "pydantic>=2.10.6,<3",
   "ruamel.yaml>=0.18.10,<0.19"
@@ -29,6 +30,7 @@ repl = [
 
 [project.scripts]
 frida-analykit = "frida_analykit.cli:main"
+frida-analykit-mcp = "frida_analykit.mcp.cli:main"
 
 [tool.hatch.version]
 path = "src/frida_analykit/_version.py"
