@@ -6,6 +6,7 @@ import lzma
 import shlex
 import subprocess
 from pathlib import Path
+from urllib.error import URLError
 
 import frida
 import pytest
@@ -342,3 +343,83 @@ def test_download_server_binary_reports_progress(tmp_path: Path) -> None:
     assert downloaded.binary_path.read_bytes() == payload
     assert progress[0] == (0, len(compressed))
     assert progress[-1] == (len(compressed), len(compressed))
+
+
+def test_download_server_binary_retries_transient_release_metadata_error(tmp_path: Path) -> None:
+    payload = b"fake frida-server binary"
+    compressed = lzma.compress(payload)
+    metadata_calls = {"count": 0}
+
+    def fake_urlopen(request):
+        url = request.full_url if hasattr(request, "full_url") else str(request)
+        if url.endswith("/releases/tags/17.8.1"):
+            metadata_calls["count"] += 1
+            if metadata_calls["count"] == 1:
+                raise URLError(OSError("temporary tls eof"))
+            body = json.dumps(
+                {
+                    "assets": [
+                        {
+                            "name": "frida-server-17.8.1-android-arm64.xz",
+                            "browser_download_url": "https://downloads.example.test/frida-server.xz",
+                        }
+                    ]
+                }
+            ).encode("utf-8")
+            return _Response(body)
+        if url == "https://downloads.example.test/frida-server.xz":
+            return _Response(compressed, headers={"Content-Length": str(len(compressed))})
+        raise AssertionError(f"unexpected download url: {url}")
+
+    manager = FridaServerManager(
+        compat=FridaCompat(_FakeFrida()),
+        urlopen_func=fake_urlopen,
+        cache_dir=tmp_path / "cache",
+    )
+
+    downloaded = manager.download_server_binary(
+        "17.8.1",
+        device_abi="arm64-v8a",
+        asset_arch="android-arm64",
+        force=True,
+    )
+
+    assert downloaded.binary_path.read_bytes() == payload
+    assert metadata_calls["count"] == 2
+
+
+def test_download_server_binary_uses_cached_release_metadata_on_later_runs(tmp_path: Path) -> None:
+    payload = b"fake frida-server binary"
+    compressed = lzma.compress(payload)
+    metadata_calls = {"count": 0}
+
+    def fake_urlopen(request):
+        url = request.full_url if hasattr(request, "full_url") else str(request)
+        if url.endswith("/releases/tags/17.8.1"):
+            metadata_calls["count"] += 1
+            body = json.dumps(
+                {
+                    "assets": [
+                        {
+                            "name": "frida-server-17.8.1-android-arm64.xz",
+                            "browser_download_url": "https://downloads.example.test/frida-server.xz",
+                        }
+                    ]
+                }
+            ).encode("utf-8")
+            return _Response(body)
+        if url == "https://downloads.example.test/frida-server.xz":
+            return _Response(compressed, headers={"Content-Length": str(len(compressed))})
+        raise AssertionError(f"unexpected download url: {url}")
+
+    manager = FridaServerManager(
+        compat=FridaCompat(_FakeFrida()),
+        urlopen_func=fake_urlopen,
+        cache_dir=tmp_path / "cache",
+    )
+
+    first = manager.download_server_binary("17.8.1", device_abi="arm64-v8a", asset_arch="android-arm64")
+    second = manager.download_server_binary("17.8.1", device_abi="arm64-v8a", asset_arch="android-arm64")
+
+    assert first.binary_path == second.binary_path
+    assert metadata_calls["count"] == 1

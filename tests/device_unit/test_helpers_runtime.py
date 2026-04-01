@@ -265,6 +265,78 @@ def test_device_helpers_start_boot_process_accepts_clean_boot_exit_once_remote_i
     assert process is fake_process
 
 
+def test_device_helpers_start_boot_process_retries_after_requested_device_temporarily_disappears(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = REPO_ROOT
+    helpers = DeviceHelpers(
+        repo_root=repo_root,
+        env={},
+        serial="SERIAL123",
+        python_executable=Path("/usr/bin/python3"),
+        frida_version="16.6.6",
+    )
+    config_path = repo_root / "tests" / "fixtures" / "dummy-config.yml"
+
+    class ExitedProcess:
+        stdout = None
+        stderr = None
+
+        def poll(self):
+            return 1
+
+        def communicate(self, timeout=None):
+            return (
+                "boot-stdout",
+                "Error: remote server pid lookup requested config.server.device `SERIAL123`, "
+                "but connected devices are: SERIAL456",
+            )
+
+    class RunningProcess:
+        stdout = None
+        stderr = None
+
+        def poll(self):
+            return None
+
+    exited_process = ExitedProcess()
+    running_process = RunningProcess()
+    processes = iter([exited_process, running_process])
+    recovery_calls: list[tuple[int, str | None]] = []
+
+    monkeypatch.setattr(
+        DeviceHelpers.start_boot_process.__globals__["subprocess"],
+        "Popen",
+        lambda *args, **kwargs: next(processes),
+    )
+    monkeypatch.setattr(
+        helpers,
+        "_wait_for_remote_boot_stable",
+        lambda process, allow_exited_process=False, grace_timeout=0.0: None if process is running_process else RuntimeError("not ready"),
+    )
+    monkeypatch.setattr(
+        helpers,
+        "wait_for_device_ready",
+        lambda timeout=120, package=None: recovery_calls.append((timeout, package)),
+    )
+
+    clock = {"value": 0.0}
+
+    def fake_monotonic() -> float:
+        clock["value"] += 0.5
+        return clock["value"]
+
+    monkeypatch.setattr(DeviceHelpers.start_boot_process.__globals__["time"], "monotonic", fake_monotonic)
+    monkeypatch.setattr(DeviceHelpers.start_boot_process.__globals__["time"], "sleep", lambda _: None)
+
+    process = helpers.start_boot_process(config_path, force_restart=True, timeout=10)
+
+    assert process is running_process
+    assert len(recovery_calls) == 1
+    assert 1 <= recovery_calls[0][0] <= 20
+    assert recovery_calls[0][1] is None
+
+
 def test_device_helpers_start_boot_process_stops_before_collecting_timeout_output(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -301,8 +373,13 @@ def test_device_helpers_start_boot_process_stops_before_collecting_timeout_outpu
     monkeypatch.setattr(DeviceHelpers.start_boot_process.__globals__["subprocess"], "Popen", lambda *args, **kwargs: fake_process)
     monkeypatch.setattr(helpers, "_probe_remote_ready", lambda host="127.0.0.1:27042": RuntimeError("not ready"))
     monkeypatch.setattr(helpers, "stop_boot_process", lambda process, config_path: stop_calls.append(config_path))
-    monotonic_values = iter([0.0, 0.0, 0.0, 11.0, 11.0])
-    monkeypatch.setattr(DeviceHelpers.start_boot_process.__globals__["time"], "monotonic", lambda: next(monotonic_values))
+    clock = {"calls": 0}
+
+    def fake_monotonic() -> float:
+        clock["calls"] += 1
+        return 0.0 if clock["calls"] <= 3 else 11.0
+
+    monkeypatch.setattr(DeviceHelpers.start_boot_process.__globals__["time"], "monotonic", fake_monotonic)
     monkeypatch.setattr(DeviceHelpers.start_boot_process.__globals__["time"], "sleep", lambda _: None)
 
     with pytest.raises(RuntimeError, match="timed out waiting for `frida-analykit server boot`"):
@@ -384,6 +461,55 @@ def test_device_helpers_find_attachable_app_pid_retries_launch_until_pid_is_visi
     assert error is None
     assert launch_calls == ["com.demo", "com.demo"]
     assert probe_calls == [5678]
+
+
+def test_device_helpers_find_attachable_app_pid_can_recover_transient_remote_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = REPO_ROOT
+    helpers = DeviceHelpers(
+        repo_root=repo_root,
+        env={},
+        serial="SERIAL123",
+        python_executable=Path("/usr/bin/python3"),
+        frida_version="16.6.6",
+    )
+
+    pid_sequence = iter([4321, 4321])
+    probe_results = iter(
+        [
+            "frida.ServerNotRunningError: unable to connect to remote frida-server",
+            None,
+        ]
+    )
+    recovery_events: list[tuple[str, int | str | None]] = []
+    clock = {"value": 0.0}
+
+    def fake_monotonic() -> float:
+        clock["value"] += 0.5
+        return clock["value"]
+
+    monkeypatch.setattr(helpers, "pidof_app", lambda package, timeout=30: next(pid_sequence))
+    monkeypatch.setattr(helpers, "_probe_attachable_pid", lambda pid, host="127.0.0.1:27042", timeout=10: next(probe_results))
+    monkeypatch.setattr(
+        helpers,
+        "wait_for_device_ready",
+        lambda timeout=120, package=None: recovery_events.append(("wait", timeout)),
+    )
+    monkeypatch.setattr(DeviceHelpers.find_attachable_app_pid.__globals__["time"], "monotonic", fake_monotonic)
+    monkeypatch.setattr(DeviceHelpers.find_attachable_app_pid.__globals__["time"], "sleep", lambda _: None)
+
+    pid, error = helpers.find_attachable_app_pid(
+        "com.demo",
+        timeout=10,
+        recover_remote=lambda: recovery_events.append(("recover", "ok")),
+    )
+
+    assert pid == 4321
+    assert error is None
+    assert recovery_events[0][0] == "wait"
+    assert 1 <= int(recovery_events[0][1]) <= 20
+    assert recovery_events[1:] == [("recover", "ok")]
 
 
 def test_device_helpers_probe_remote_ready_uses_real_remote_rpc(monkeypatch: pytest.MonkeyPatch) -> None:

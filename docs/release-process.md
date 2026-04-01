@@ -150,6 +150,44 @@ make release-local RELEASE_TAG=vX.Y.Z[-rc.N]
 make release-install-check RELEASE_TAG=vX.Y.Z[-rc.N]
 ```
 
+## 真机回归门槛
+
+如果当前 release 触达以下任一范围，在 push tag 或继续 RC/stable 发布前，必须补真机回归：
+
+- `src/frida_analykit/device/`
+- `src/frida_analykit/server/`
+- `src/frida_analykit/development/device_*`
+- `tests/device/`
+- `spawn` / `attach` / `server boot` / `server install` / `doctor device-compat`
+
+推荐门槛如下：
+
+1. 先执行至少一轮完整真机回归：
+
+```sh
+make device-test-all
+```
+
+2. 如果这轮通过，再补一轮稳定性确认。
+3. 如果任一轮失败，不要立刻改代码，先按 [docs/device-regression.md](device-regression.md) 分类：
+   - 设备波动
+   - 主机侧测试/工具链问题
+   - 真实代码回归
+4. 只有在完成分类后，才决定是否进入修复。
+5. 如果失败属于设备波动，允许在设备恢复后补一次定向复跑；定向复跑通过后，才可继续后续发布步骤。
+6. 如果失败属于 host-side 或真实代码问题，必须先修复，再重新执行完整真机回归。
+
+固定原则：
+
+- 不能因为第一次真机红项就无脑增加全局 timeout 或重试次数。
+- 真机恢复逻辑只允许做窄化补偿，例如设备短暂掉线、远端 server 瞬时不可达、host-side 明确的并发竞争。
+- 发布操作者应保留至少这些证据：
+  - 失败设备 serial
+  - 失败阶段/测试名
+  - stdout/stderr
+  - `adb devices -l`
+  - 复跑是否通过
+
 ## 远端 CI 校验
 
 在进入 release dry-run、push release tag 或继续 RC/stable 后续步骤之前，必须先确认当前 release ref 的 GitHub Actions `CI` 工作流已经通过。

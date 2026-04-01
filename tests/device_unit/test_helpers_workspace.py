@@ -67,7 +67,8 @@ def test_device_helpers_pack_local_package_uses_workspace_local_npm_cache(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = REPO_ROOT
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
     helpers = DeviceHelpers(
         repo_root=repo_root,
         env={"BASE_ENV": "1"},
@@ -80,6 +81,7 @@ def test_device_helpers_pack_local_package_uses_workspace_local_npm_cache(
     expected_tarball = tmp_path / "device-tests.tgz"
     expected_tarball.write_text("stub", encoding="utf-8")
     captured: dict[str, object] = {}
+    lock_events: list[tuple[str, Path]] = []
 
     def fake_run(*args, **kwargs):
         captured["args"] = args
@@ -90,9 +92,21 @@ def test_device_helpers_pack_local_package_uses_workspace_local_npm_cache(
             stderr="",
         )
 
+    class FakeLock:
+        def __init__(self, path: Path) -> None:
+            self.path = path
+            lock_events.append(("init", path))
+
+        def acquire(self) -> None:
+            lock_events.append(("acquire", self.path))
+
+        def release(self) -> None:
+            lock_events.append(("release", self.path))
+
     pack_globals = DeviceHelpers.pack_local_package.__globals__
     monkeypatch.setitem(pack_globals, "shutil", SimpleNamespace(which=lambda name: "/usr/bin/npm"))
     monkeypatch.setitem(pack_globals, "subprocess", SimpleNamespace(run=fake_run))
+    monkeypatch.setitem(pack_globals, "DeviceTestLock", FakeLock)
 
     tarball = helpers.pack_local_package(tmp_path, package_dir)
 
@@ -100,8 +114,13 @@ def test_device_helpers_pack_local_package_uses_workspace_local_npm_cache(
     assert captured["args"] == (["npm", "pack", str(package_dir)],)
     env = captured["kwargs"]["env"]
     assert env["BASE_ENV"] == "1"
-    assert env["npm_config_cache"] == str(tmp_path / ".npm-cache")
+    assert env["npm_config_cache"] == str(repo_root / ".pytest_cache" / "frida-analykit-npm-cache")
     assert Path(env["npm_config_cache"]).is_dir()
+    assert lock_events == [
+        ("init", repo_root / ".pytest_cache" / "frida-analykit-workspace-build.lock"),
+        ("acquire", repo_root / ".pytest_cache" / "frida-analykit-workspace-build.lock"),
+        ("release", repo_root / ".pytest_cache" / "frida-analykit-workspace-build.lock"),
+    ]
 
 
 def test_device_helpers_build_workspace_uses_shared_repo_npm_cache_and_lock(

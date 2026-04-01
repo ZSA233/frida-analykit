@@ -5,11 +5,20 @@ import pytest
 
 @pytest.mark.device
 @pytest.mark.device_app
-def test_injection_writes_device_marker(device_helpers, booted_device_workspace, device_app) -> None:
+def test_injection_writes_device_marker(
+    device_helpers,
+    booted_device_workspace,
+    device_app,
+    device_server_ready,
+) -> None:
     workspace = booted_device_workspace
     attempts: list[str] = []
 
-    attach_pid, attach_probe_error = device_helpers.find_attachable_app_pid(device_app, timeout=30)
+    attach_pid, attach_probe_error = device_helpers.find_attachable_app_pid(
+        device_app,
+        timeout=30,
+        recover_remote=lambda: device_server_ready.ensure_running(workspace.config_path, timeout=60),
+    )
     if attach_pid is not None:
         attach_result = device_helpers.run_cli(
             ["attach", "--config", str(workspace.config_path), "--pid", str(attach_pid), "--detach-on-load"],
