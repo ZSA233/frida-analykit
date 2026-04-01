@@ -31,6 +31,7 @@ release-preflight:
 	@if [ -z "$(RELEASE_TAG)" ]; then echo "RELEASE_TAG is required" >&2; exit 1; fi
 	uv run python scripts/release_version.py check-sync --tag "$(RELEASE_TAG)"
 	uv run python scripts/release_assets.py validate-config
+	uv run python scripts/release_assets.py validate-stable-entrypoints
 	uv run python scripts/release_assets.py validate-release-version --tag "$(RELEASE_TAG)"
 	$(if $(strip $(RC_TAG)),uv run python scripts/release_assets.py validate-promotion --tag "$(RELEASE_TAG)" --rc-tag "$(RC_TAG)")
 	npm ci

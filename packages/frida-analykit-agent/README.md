@@ -1,6 +1,6 @@
 # @zsa233/frida-analykit-agent
 
-🌍 语言: 中文 | [English](https://github.com/ZSA233/frida-analykit/blob/main/packages/frida-analykit-agent/README_EN.md)
+🌍 语言: 中文 | [English](https://github.com/ZSA233/frida-analykit/blob/stable/packages/frida-analykit-agent/README_EN.md)
 
 `@zsa233/frida-analykit-agent` 是给自定义 TypeScript Frida agent 使用的 runtime 包，通常由 `frida-analykit gen dev` 生成的工作区消费，也可以手动用于任意 `frida-compile` 项目。
 

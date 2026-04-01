@@ -222,6 +222,8 @@
 - 两组 README 都完成后，必须先做一次双语镜像二次校对
 - 文档收束完成后，才进入 `docs/release-process.md` 中定义的 release-version、preflight、RC、stable、publish 流程。
 - 如果四份 README 中任意一份仍缺段、缺表、缺示例、缺限制说明，或者中英结构不一致，则不允许进入正式发版流程。
+- 用户向稳定安装入口默认固定为 `git+https://github.com/ZSA233/frida-analykit@stable`；除非用户明确要求历史 tag 级安装说明，否则不要在 README 中把安装示例写成某个具体 `vX.Y.Z`。
+- `packages/frida-analykit-agent/README*.md` 与包 `homepage` 这类用户向 GitHub 文档链接默认固定指向 `blob/stable/...`，不要继续指向 `blob/main`。
 - 在触发 release dry-run、push release tag 或继续 RC/stable 后续步骤之前，必须确认当前 release ref 的 GitHub Actions `CI` 工作流已经通过；
 - 手动触发 `CI` workflow_dispatch，例如执行 `make release-ci CI_REF=release/vX.Y.Z` 并等待其完成。
 - 只要当前 release ref 的 `CI` 仍有红项，就必须先停止发版并定位问题；不要在 CI 未通过的情况下继续 dry-run、打 tag 或 publish。
@@ -232,6 +234,7 @@
 - 默认不要为了 dry-run 随意推远端临时分支。stable dry-run 直接使用当前 `release/vX.Y.Z`；RC dry-run 如确有必要，只允许使用当前目标版本对应的 `tmp/release-vX.Y.Z-rc.N`。任何与当前目标版本无关的临时远端分支，都必须先征得用户明确同意。
 - 如果本次改动触达 `device` / `server` / `development.device_*` / `tests/device` 或其他真机主链路，发版前必须执行真机回归门槛，并按 [docs/device-regression.md](docs/device-regression.md) 做失败分类；不允许看到一次真机红项就直接进入“代码已坏、立刻修补”的结论。
 - 真机回归中如果失败更像设备波动，必须先等待设备恢复并做定向复跑，再决定是否需要改代码；如果失败更像 host-side 并发、依赖、下载、打包问题，应先修测试链路，不要把它伪装成设备问题。
+- stable 正式发布完成后，远端 `stable` 分支必须同步到该 stable tag 对应提交；这是发布完成条件的一部分，不是人工可选收尾项。
 - 发版过程中如果发现严重 bug，不要立刻边发版边修；应立即停止当前发版流程，明确告诉用户问题出在哪里、影响范围是什么、发布风险是否高。
 - “严重 bug” 包括但不限于：
 - 会导致产物无法安装或无法运行

@@ -6,6 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from tests.release.constants import EXAMPLE_RELEASE_REF
 from tests.support.paths import SCRIPTS_ROOT
 
 import pytest
@@ -50,9 +51,9 @@ def test_trigger_ci_workflow_dispatches_ci_on_requested_ref(
 
     monkeypatch.setattr(release_ci_script, "_run_checked", fake_run_checked)
 
-    release_ci_script.trigger_ci_workflow(repo_root, "release/v2.0.8")
+    release_ci_script.trigger_ci_workflow(repo_root, EXAMPLE_RELEASE_REF)
 
-    assert calls == [["gh", "workflow", "run", "CI", "--ref", "release/v2.0.8"]]
+    assert calls == [["gh", "workflow", "run", "CI", "--ref", EXAMPLE_RELEASE_REF]]
 
 
 def test_find_matching_dispatched_run_prefers_same_sha() -> None:
@@ -132,7 +133,7 @@ def test_wait_for_ci_run_polls_until_matching_dispatch_exists(
 
     run = release_ci_script.wait_for_ci_run(
         repo_root,
-        ref="release/v2.0.8",
+        ref=EXAMPLE_RELEASE_REF,
         head_sha="abc123",
         timeout_seconds=10,
         poll_interval_seconds=0,
@@ -179,7 +180,7 @@ def test_wait_for_ci_run_ignores_stale_dispatch_run_with_same_sha(
 
     run = release_ci_script.wait_for_ci_run(
         repo_root,
-        ref="release/v2.0.8",
+        ref=EXAMPLE_RELEASE_REF,
         head_sha="abc123",
         min_database_id=400,
         timeout_seconds=10,
@@ -237,11 +238,11 @@ def test_main_uses_pre_dispatch_run_id_floor_for_wait(
     monkeypatch.setattr(release_ci_script, "wait_for_ci_run", fake_wait)
     monkeypatch.setattr(release_ci_script, "watch_ci_run", fake_watch)
 
-    assert release_ci_script.main(["--ref", "release/v2.0.8"]) == 0
-    assert seen["trigger"] == (repo_root, "release/v2.0.8")
+    assert release_ci_script.main(["--ref", EXAMPLE_RELEASE_REF]) == 0
+    assert seen["trigger"] == (repo_root, EXAMPLE_RELEASE_REF)
     assert seen["wait"] == {
         "repo_root": repo_root,
-        "ref": "release/v2.0.8",
+        "ref": EXAMPLE_RELEASE_REF,
         "head_sha": "abc123",
         "min_database_id": 500,
         "timeout_seconds": 90,

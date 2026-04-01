@@ -62,13 +62,60 @@ jobs:
             *.tgz
           if-no-files-found: error
 
-  publish:
+  publish_release:
     if: ${{ github.event_name == 'push' }}
     needs: build
     runs-on: ubuntu-latest
     environment: production
     permissions:
       contents: write
+    steps:
+      - name: Download release bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: release-bundle-${{ github.ref_name }}
+          path: release-bundle
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            release-bundle/dist/*.tar.gz
+            release-bundle/dist/*.whl
+            release-bundle/dist/*.apk
+            release-bundle/*.tgz
+          fail_on_unmatched_files: true
+
+  sync_stable:
+    if: ${{ github.event_name == 'push' }}
+    needs: publish_release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Sync stable branch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          uv run python scripts/release_assets.py sync-stable-ref --tag "${{ github.ref_name }}"
+
+  publish_npm:
+    if: ${{ github.event_name == 'push' }}
+    needs: sync_stable
+    runs-on: ubuntu-latest
+    permissions:
       id-token: write
     steps:
       - uses: actions/setup-node@v4
@@ -91,17 +138,6 @@ jobs:
         with:
           name: release-bundle-${{ github.ref_name }}
           path: release-bundle
-
-      - name: Publish GitHub release
-        uses: softprops/action-gh-release@v2
-        with:
-          generate_release_notes: true
-          files: |
-            release-bundle/dist/*.tar.gz
-            release-bundle/dist/*.whl
-            release-bundle/dist/*.apk
-            release-bundle/*.tgz
-          fail_on_unmatched_files: true
 
       - name: Publish npm runtime to npmjs
         shell: bash

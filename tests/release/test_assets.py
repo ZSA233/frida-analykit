@@ -63,7 +63,26 @@ def _make_release_repo(tmp_path: Path) -> Path:
         ]
         """,
     )
-    _write_file(repo_root / "README.md", "# demo\n")
+    _write_file(
+        repo_root / "README.md",
+        f"""
+        # demo
+
+        ```sh
+        uv tool install "{release_assets.STABLE_INSTALL_SPEC}"
+        ```
+        """,
+    )
+    _write_file(
+        repo_root / "README_EN.md",
+        f"""
+        # demo
+
+        ```sh
+        uv tool install "{release_assets.STABLE_INSTALL_SPEC}"
+        ```
+        """,
+    )
     _write_file(
         repo_root / "release-version.toml",
         """
@@ -113,8 +132,21 @@ def _make_release_repo(tmp_path: Path) -> Path:
         """
         {
           "name": "@zsa233/frida-analykit-agent",
-          "version": "0.5.0"
+          "version": "0.5.0",
+          "homepage": "https://github.com/ZSA233/frida-analykit/blob/stable/packages/frida-analykit-agent/README.md"
         }
+        """,
+    )
+    _write_file(
+        repo_root / "packages/frida-analykit-agent/README.md",
+        """
+        🌍 语言: 中文 | [English](https://github.com/ZSA233/frida-analykit/blob/stable/packages/frida-analykit-agent/README_EN.md)
+        """,
+    )
+    _write_file(
+        repo_root / "packages/frida-analykit-agent/README_EN.md",
+        """
+        🌍 Language: [中文](https://github.com/ZSA233/frida-analykit/blob/stable/packages/frida-analykit-agent/README.md) | English
         """,
     )
     _write_file(repo_root / "src/demo_tool/__init__.py", "")
@@ -171,6 +203,53 @@ def _git_init(repo_root: Path) -> None:
         text=True,
     )
     subprocess.run(["git", "tag", "v0.5.0"], cwd=repo_root, check=True, capture_output=True, text=True)
+
+
+def _git(repo_root: Path, *args: str) -> str:
+    result = subprocess.run(
+        ["git", *args],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip()
+
+
+def _git_init_bare_remote(remote_root: Path) -> None:
+    subprocess.run(
+        ["git", "init", "--bare", str(remote_root)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def _add_origin(repo_root: Path, remote_root: Path) -> None:
+    subprocess.run(
+        ["git", "remote", "add", "origin", str(remote_root)],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def _git_config_identity(repo_root: Path) -> None:
+    subprocess.run(
+        ["git", "config", "user.email", "zsa233@example.com"],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "zsa233"],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
 
 
 def test_validate_release_contract_reports_support_range_and_profiles(tmp_path: Path) -> None:
@@ -282,6 +361,43 @@ def test_validate_release_contract_rejects_profile_outside_declared_range(tmp_pa
         release_assets.validate_release_contract(repo_root)
 
 
+def test_validate_stable_entrypoints_accepts_stable_install_and_links(tmp_path: Path) -> None:
+    repo_root = _make_release_repo(tmp_path)
+    _write_file(
+        repo_root / "docs/release-process.md",
+        """
+        Install examples here may still mention v0.5.0 and should not affect stable entry validation.
+        """,
+    )
+
+    payload = release_assets.validate_stable_entrypoints(repo_root)
+
+    assert payload["stable_install_spec"] == release_assets.STABLE_INSTALL_SPEC
+    assert payload["package_homepage"] == release_assets.PACKAGE_STABLE_README_URL
+
+
+def test_validate_stable_entrypoints_rejects_version_pinned_root_readme_install(tmp_path: Path) -> None:
+    repo_root = _make_release_repo(tmp_path)
+    (repo_root / "README.md").write_text(
+        '# demo\n\n```sh\nuv tool install "git+https://github.com/ZSA233/frida-analykit@v0.5.0"\n```\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(release_assets.ReleaseConfigError, match="must not pin user-facing installs"):
+        release_assets.validate_stable_entrypoints(repo_root)
+
+
+def test_validate_stable_entrypoints_rejects_main_blob_links(tmp_path: Path) -> None:
+    repo_root = _make_release_repo(tmp_path)
+    (repo_root / "packages/frida-analykit-agent/README.md").write_text(
+        "English: https://github.com/ZSA233/frida-analykit/blob/main/packages/frida-analykit-agent/README_EN.md\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(release_assets.ReleaseConfigError, match="must not link to blob/main"):
+        release_assets.validate_stable_entrypoints(repo_root)
+
+
 def test_validate_release_version_accepts_rc_mapping(tmp_path: Path) -> None:
     repo_root = _make_release_repo(tmp_path)
     (repo_root / "src/demo_tool/_version.py").write_text('__version__ = "0.5.0rc1"\n', encoding="utf-8")
@@ -385,6 +501,197 @@ def test_validate_promotion_rejects_functional_changes_after_rc(tmp_path: Path) 
 
     with pytest.raises(release_assets.ReleaseConfigError, match="Stable promotion only allows version metadata changes"):
         release_assets.validate_promotion(repo_root, tag="v0.5.0", rc_tag="v0.5.0-rc.1")
+
+
+def test_sync_stable_ref_rejects_rc_tags(tmp_path: Path) -> None:
+    repo_root = _make_release_repo(tmp_path)
+
+    with pytest.raises(release_assets.ReleaseConfigError, match="Stable ref sync only applies to stable tags"):
+        release_assets.sync_stable_ref(repo_root, tag="v0.5.0-rc.1")
+
+
+def test_resolve_remote_branch_sha_rejects_ambiguous_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = _make_release_repo(tmp_path)
+
+    def fake_run_git(repo_root: Path, args: list[str]) -> str:
+        if args[:4] == ["ls-remote", "--heads", "--refs", "origin"]:
+            return (
+                "abc123abc123abc123abc123abc123abc123abc1\trefs/heads/stable\n"
+                "def456def456def456def456def456def456def4\trefs/heads/stable\n"
+            )
+        raise AssertionError(args)
+
+    monkeypatch.setattr(release_assets, "_run_git", fake_run_git)
+
+    with pytest.raises(release_assets.ReleaseConfigError, match="Expected at most one remote ref"):
+        release_assets._resolve_remote_branch_sha(repo_root, remote="origin", branch="stable")
+
+
+def test_resolve_remote_branch_sha_rejects_malformed_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = _make_release_repo(tmp_path)
+
+    def fake_run_git(repo_root: Path, args: list[str]) -> str:
+        if args[:4] == ["ls-remote", "--heads", "--refs", "origin"]:
+            return "not-a-sha refs/heads/stable"
+        raise AssertionError(args)
+
+    monkeypatch.setattr(release_assets, "_run_git", fake_run_git)
+
+    with pytest.raises(release_assets.ReleaseConfigError, match="Unexpected remote SHA"):
+        release_assets._resolve_remote_branch_sha(repo_root, remote="origin", branch="stable")
+
+
+def test_resolve_remote_branch_sha_rejects_unexpected_line_shape(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = _make_release_repo(tmp_path)
+
+    def fake_run_git(repo_root: Path, args: list[str]) -> str:
+        if args[:4] == ["ls-remote", "--heads", "--refs", "origin"]:
+            return "abc123abc123abc123abc123abc123abc123abc1"
+        raise AssertionError(args)
+
+    monkeypatch.setattr(release_assets, "_run_git", fake_run_git)
+
+    with pytest.raises(release_assets.ReleaseConfigError, match="Unexpected ls-remote output"):
+        release_assets._resolve_remote_branch_sha(repo_root, remote="origin", branch="stable")
+
+
+def test_sync_stable_ref_creates_missing_branch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo_root = _make_release_repo(tmp_path)
+    calls: list[list[str]] = []
+
+    def fake_run_git(repo_root: Path, args: list[str]) -> str:
+        calls.append(args)
+        if args[:3] == ["rev-list", "-n", "1"]:
+            return "abc123"
+        if args[:4] == ["ls-remote", "--heads", "--refs", "origin"]:
+            return ""
+        if args[:2] == ["push", "origin"]:
+            return ""
+        raise AssertionError(args)
+
+    monkeypatch.setattr(release_assets, "_run_git", fake_run_git)
+
+    payload = release_assets.sync_stable_ref(repo_root, tag="v0.5.0")
+
+    assert payload == {
+        "tag_name": "v0.5.0",
+        "branch": "stable",
+        "target_commit": "abc123",
+        "created": True,
+    }
+    assert calls == [
+        ["rev-list", "-n", "1", "v0.5.0"],
+        ["ls-remote", "--heads", "--refs", "origin", "refs/heads/stable"],
+        ["push", "origin", "abc123:refs/heads/stable"],
+    ]
+
+
+def test_sync_stable_ref_force_updates_existing_branch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = _make_release_repo(tmp_path)
+    calls: list[list[str]] = []
+
+    remote_sha = "def456def456def456def456def456def456def4"
+
+    def fake_run_git(repo_root: Path, args: list[str]) -> str:
+        calls.append(args)
+        if args[:3] == ["rev-list", "-n", "1"]:
+            return "abc123abc123abc123abc123abc123abc123abc1"
+        if args[:4] == ["ls-remote", "--heads", "--refs", "origin"]:
+            return f"{remote_sha}\trefs/heads/stable"
+        if args[:2] == ["push", f"--force-with-lease=refs/heads/stable:{remote_sha}"]:
+            return ""
+        raise AssertionError(args)
+
+    monkeypatch.setattr(release_assets, "_run_git", fake_run_git)
+
+    payload = release_assets.sync_stable_ref(repo_root, tag="v0.5.0", branch="stable")
+
+    assert payload == {
+        "tag_name": "v0.5.0",
+        "branch": "stable",
+        "target_commit": "abc123abc123abc123abc123abc123abc123abc1",
+        "created": False,
+    }
+    assert calls == [
+        ["rev-list", "-n", "1", "v0.5.0"],
+        ["ls-remote", "--heads", "--refs", "origin", "refs/heads/stable"],
+        [
+            "push",
+            f"--force-with-lease=refs/heads/stable:{remote_sha}",
+            "origin",
+            "abc123abc123abc123abc123abc123abc123abc1:refs/heads/stable",
+        ],
+    ]
+
+
+def test_sync_stable_ref_integration_creates_and_updates_remote_branch(tmp_path: Path) -> None:
+    repo_root = _make_release_repo(tmp_path)
+    _git_init(repo_root)
+    remote_root = tmp_path / "origin.git"
+    _git_init_bare_remote(remote_root)
+    _add_origin(repo_root, remote_root)
+
+    first_payload = release_assets.sync_stable_ref(repo_root, tag="v0.5.0")
+    first_sha = _git(repo_root, "rev-parse", "v0.5.0")
+    assert first_payload["created"] is True
+    assert _git(repo_root, "ls-remote", str(remote_root), "refs/heads/stable").split()[0] == first_sha
+
+    (repo_root / "README.md").write_text("# updated\n", encoding="utf-8")
+    _git(repo_root, "add", "README.md")
+    _git(repo_root, "commit", "-m", "update stable target")
+    _git(repo_root, "tag", "v0.5.1")
+
+    second_payload = release_assets.sync_stable_ref(repo_root, tag="v0.5.1")
+    second_sha = _git(repo_root, "rev-parse", "v0.5.1")
+    assert second_payload["created"] is False
+    assert _git(repo_root, "ls-remote", str(remote_root), "refs/heads/stable").split()[0] == second_sha
+
+
+def test_push_branch_ref_rejects_stale_explicit_lease(tmp_path: Path) -> None:
+    repo_root = _make_release_repo(tmp_path)
+    _git_init(repo_root)
+    remote_root = tmp_path / "origin.git"
+    _git_init_bare_remote(remote_root)
+    _add_origin(repo_root, remote_root)
+
+    release_assets.sync_stable_ref(repo_root, tag="v0.5.0")
+    old_remote_sha = release_assets._resolve_remote_branch_sha(repo_root, remote="origin", branch="stable")
+    assert old_remote_sha is not None
+
+    other_clone = tmp_path / "other"
+    subprocess.run(
+        ["git", "clone", "--branch", "stable", str(remote_root), str(other_clone)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    _git_config_identity(other_clone)
+    (other_clone / "README.md").write_text("# remote advanced\n", encoding="utf-8")
+    _git(other_clone, "add", "README.md")
+    _git(other_clone, "commit", "-m", "advance stable remotely")
+    _git(other_clone, "push", "origin", "HEAD:refs/heads/stable")
+
+    target_commit = _git(repo_root, "rev-parse", "v0.5.0")
+    with pytest.raises(release_assets.ReleaseConfigError, match="stale info|fetch first|lease"):
+        release_assets._push_branch_ref(
+            repo_root,
+            remote="origin",
+            branch="stable",
+            target_commit=target_commit,
+            expected_remote_sha=old_remote_sha,
+        )
 
 
 def test_install_check_uses_single_release_artifacts_and_minimum_supported_frida(

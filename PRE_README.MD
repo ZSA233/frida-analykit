@@ -31,17 +31,8 @@ README 收束时，应同时遵循下面这些约束：
 
 ### 分支与版本状态
 
-- 当前工作分支：`release/v2.0.8`
 - 当前版本真源：`release-version.toml`
-- 当前目标发布版本：`2.0.8`
-- 当前目标发布通道：`stable`
 - Python 包版本、根 `package.json` 版本和 npm runtime 包 `@zsa233/frida-analykit-agent` 版本，统一由 `release-version.toml` 在 RC / stable 切换时派生，不再手改。
-
-需要特别记录的一点：
-
-- 当前分支名与版本真源都已经收束到 `v2.0.8` 这一条发布线。
-- RC 阶段会临时派生成 `2.0.8rcN / 2.0.8-rc.N / v2.0.8-rc.N`，stable 提升后再回到 `2.0.8 / 2.0.8 / v2.0.8`。
-- 后续如果继续准备下一次 release，应先更新这里的版本快照，再继续 README 和发版文档收束。
 
 ## 项目定义
 
@@ -982,13 +973,13 @@ script:
 - 不发布到 PyPI
 - 通过 GitHub 仓库 / GitHub Release 分发
 
-README 当前主线示例应展示通过 git tag 安装，例如：
+README 当前主线示例应展示通过 `stable` 稳定入口安装，例如：
 
 ```sh
-uv tool install "git+https://github.com/ZSA233/frida-analykit@v2.0.5"
+uv tool install "git+https://github.com/ZSA233/frida-analykit@stable"
 ```
 
-这轮 release 收束目标是把根 README / README_EN 的安装示例统一到 `v2.0.5`。
+这里的 `stable` 分支固定指向“最新 stable GitHub Release 对应代码”，不再要求每次发版都把 README 安装示例改写成某个具体 `vX.Y.Z`。
 
 ### npm runtime
 
@@ -1183,49 +1174,13 @@ docs/                              release 相关文档
 | repo 相对导入 `./frida-analykit/script/...` | npm 包 `@zsa233/frida-analykit-agent` |
 | `requirements.txt` | `pyproject.toml` + `uv.lock` |
 
-### v2 版本演进摘要
-
-以下摘要来自当前 git tag 与提交历史，可作为未来 README 收束时的版本演化参考。
-
-`v2.0.0`
-
-- v2 的破坏性重构起点
-- 切换为 Python CLI + npm agent monorepo
-- 引入新的 release 基建
-- 引入远端 `frida-server` 管理能力
-- 引入受管 Frida 开发环境
-- 确立新的 README / release-process / 双产物结构
-
-`v2.0.1`
-
-- 修复 AOSP 下 `doctor` 与 server 安装兼容性问题
-- 修复 npm runtime 打包时缺失 JS 产物的问题
-- 修复 smoke / CI 相关问题
-
-`v2.0.2`
-
-- 增加 CLI 顶层 `--version`
-- 修复远端 runtime boot flow
-- 修复 env version reporting
-
-当前 HEAD（未正式切换版本真源）
-
-- 包含 npmjs 发布工作流修复
-- 包含 `AGENTS.MD` 与 AI agent 约束文档初稿
-- 说明仓库已经进入下一轮 release 准备 / 持续演进阶段
-
-上面最后一点是基于当前分支与提交状态的推断：
-
-- 当前分支名为 `release/v2.0.5`
-- 但版本真源仍是 `2.0.4`
-
 ## 当前文档差异与下次 README 收束提醒
 
 这些内容不一定都应该直接进入对外 `README.md`，但必须在收束时被重新检查：
 
-- `README.md` 当前安装示例应与目标发布版本 `2.0.5` 保持一致。
+- `README.md` / `README_EN.md` 的稳定安装示例应固定使用 `git+https://github.com/ZSA233/frida-analykit@stable`。
 - `README.md` 已覆盖主线能力，但对 `watch` 独立命令、RPC/REPL 深层能力、repo-local env 与 global env 的区别仍可继续优化。
-- 当前仓库 HEAD 处于 `release/v2.0.5` 分支，但版本真源尚未切换，这会影响后续 release 文案该写成“当前 stable”还是“下一版准备中”。
+- `packages/frida-analykit-agent/README*.md` 与包 `homepage` 这类用户向 GitHub 文档链接应固定指向 `blob/stable/...`，不要跟随 `main` 漂移。
 - `README.md` 面向对外说明时，应保持主线清晰；但在收束时不要遗漏：
   - v2 的双产物定位
   - TS 工作区是主线开发模式
