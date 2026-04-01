@@ -4,6 +4,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from tests.support.paths import REPO_ROOT
+
 import pytest
 from click.testing import CliRunner
 
@@ -29,7 +31,7 @@ def test_scaffold_can_use_local_packed_runtime(tmp_path: Path) -> None:
     if shutil.which("npm") is None:
         pytest.skip("npm is required for scaffold checks")
 
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     npm_env = dict(os.environ)
     npm_cache_dir = tmp_path / ".npm-cache"
     npm_cache_dir.mkdir(parents=True, exist_ok=True)

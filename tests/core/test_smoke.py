@@ -4,6 +4,8 @@ import sys
 import textwrap
 from pathlib import Path
 
+from tests.support.paths import REPO_ROOT
+
 import pytest
 
 
@@ -85,7 +87,7 @@ def test_attach_smoke_with_local_device(tmp_path: Path) -> None:
     if os.environ.get("FRIDA_ANALYKIT_ENABLE_SMOKE") != "1":
         pytest.skip("set FRIDA_ANALYKIT_ENABLE_SMOKE=1 to run smoke checks")
 
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     src_root = repo_root / "src"
     env = os.environ.copy()
     env["PYTHONPATH"] = str(src_root)

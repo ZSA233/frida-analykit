@@ -19,9 +19,10 @@ from .defaults import (
     DEFAULT_REMOTE_SERVERNAME,
     DEVICE_READY_POLL_INTERVAL,
     DEVICE_READY_TIMEOUT,
+    TRANSIENT_DEVICE_FAILURE_MARKERS,
 )
 from .models import AppProbeResult, DeviceAppResolutionError, DeviceWorkspace
-from .selection import derive_remote_host, safe_device_serial_token
+from .selection import DeviceTestLock, derive_remote_host, safe_device_serial_token
 
 
 class DeviceHelpers:
@@ -52,6 +53,26 @@ class DeviceHelpers:
     def lock_path(self) -> Path:
         token = safe_device_serial_token(self.resolved_serial or "default")
         return self.repo_root / ".pytest_cache" / f"frida-analykit-device-{token}.lock"
+
+    @property
+    def workspace_build_lock_path(self) -> Path:
+        return self.repo_root / ".pytest_cache" / "frida-analykit-workspace-build.lock"
+
+    @property
+    def workspace_npm_cache_dir(self) -> Path:
+        return self.repo_root / ".pytest_cache" / "frida-analykit-npm-cache"
+
+    def _prepare_host_npm_env(self) -> dict[str, str]:
+        env = dict(self.env)
+        npm_cache_dir = self.workspace_npm_cache_dir
+        npm_cache_dir.mkdir(parents=True, exist_ok=True)
+        env["npm_config_cache"] = str(npm_cache_dir)
+        return env
+
+    def _acquire_host_npm_lock(self) -> DeviceTestLock:
+        lock = DeviceTestLock(self.workspace_build_lock_path)
+        lock.acquire()
+        return lock
 
     def _write_workspace_config(
         self,
@@ -475,13 +496,28 @@ class DeviceHelpers:
         *,
         host: str | None = None,
         timeout: int = 30,
+        recover_remote: Callable[[], None] | None = None,
     ) -> tuple[int | None, str | None]:
         remote_host = host or self.remote_host
+        recovery_attempts = 0
+        max_recovery_attempts = 1
         existing_pid = self.pidof_app(package, timeout=5)
         if existing_pid is not None:
             attach_error = self._probe_attachable_pid(existing_pid, host=remote_host, timeout=10)
             if attach_error is None:
                 return existing_pid, None
+            if (
+                recover_remote is not None
+                and recovery_attempts < max_recovery_attempts
+                and self._should_retry_attach_after_remote_recovery(attach_error)
+            ):
+                recovery_attempts += 1
+                recovery_timeout = min(max(int(timeout), 1), 20)
+                try:
+                    self.wait_for_device_ready(timeout=recovery_timeout, package=package)
+                    recover_remote()
+                except Exception:
+                    pass
 
         deadline = time.monotonic() + timeout
         last_error: str | None = None
@@ -501,8 +537,30 @@ class DeviceHelpers:
             if attach_error is None:
                 return pid, None
             last_error = attach_error
+            if (
+                recover_remote is not None
+                and recovery_attempts < max_recovery_attempts
+                and self._should_retry_attach_after_remote_recovery(attach_error)
+            ):
+                recovery_attempts += 1
+                recovery_timeout = min(max(int(deadline - time.monotonic()), 1), 20)
+                if recovery_timeout > 0:
+                    try:
+                        self.wait_for_device_ready(timeout=recovery_timeout, package=package)
+                        recover_remote()
+                    except Exception as exc:
+                        last_error = str(exc)
+                    else:
+                        next_launch_time = time.monotonic()
+                        continue
             time.sleep(1)
         return None, last_error or "attach probe timed out"
+
+    def _should_retry_attach_after_remote_recovery(self, detail: str) -> bool:
+        lowered = detail.strip().lower()
+        if not lowered:
+            return False
+        return any(marker in lowered for marker in TRANSIENT_DEVICE_FAILURE_MARKERS)
 
     def create_workspace(
         self,
@@ -546,20 +604,20 @@ class DeviceHelpers:
         if shutil.which("npm") is None:
             raise RuntimeError("npm is required to pack the local npm package")
 
-        env = dict(self.env)
-        npm_cache_dir = tmp_path / ".npm-cache"
-        npm_cache_dir.mkdir(parents=True, exist_ok=True)
-        env["npm_config_cache"] = str(npm_cache_dir)
-
-        result = subprocess.run(
-            ["npm", "pack", str(package_dir)],
-            cwd=tmp_path,
-            env=env,
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=timeout,
-        )
+        env = self._prepare_host_npm_env()
+        pack_lock = self._acquire_host_npm_lock()
+        try:
+            result = subprocess.run(
+                ["npm", "pack", str(package_dir)],
+                cwd=tmp_path,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=timeout,
+            )
+        finally:
+            pack_lock.release()
         if result.returncode != 0:
             raise RuntimeError(
                 f"failed to pack local npm package `{package_dir}`\n"
@@ -632,13 +690,17 @@ class DeviceHelpers:
         ]
         if install:
             args.append("--install")
-        npm_cache_dir = workspace.root / ".npm-cache"
+        npm_cache_dir = self.workspace_npm_cache_dir
         npm_cache_dir.mkdir(parents=True, exist_ok=True)
-        result = self.run_cli_with_env(
-            args,
-            timeout=timeout,
-            extra_env={"npm_config_cache": str(npm_cache_dir)},
-        )
+        build_lock = self._acquire_host_npm_lock()
+        try:
+            result = self.run_cli_with_env(
+                args,
+                timeout=timeout,
+                extra_env={"npm_config_cache": str(npm_cache_dir)},
+            )
+        finally:
+            build_lock.release()
         if result.returncode != 0:
             raise RuntimeError(
                 "failed to build the device test workspace\n"
@@ -738,53 +800,94 @@ class DeviceHelpers:
         command = [str(self.python_executable), "-m", "frida_analykit", "server", "boot", "--config", str(config_path)]
         if force_restart:
             command.append("--force-restart")
-        process = subprocess.Popen(
-            command,
-            cwd=self.repo_root,
-            env=self.env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
         deadline = time.monotonic() + timeout
         last_error: Exception | None = None
+        recovery_attempts = 0
+        max_recovery_attempts = 2
         while time.monotonic() < deadline:
-            returncode = process.poll()
-            if returncode is not None:
-                stdout, stderr = process.communicate(timeout=5)
-                if returncode == 0:
-                    # Older devices sometimes detach the local boot command
-                    # before the forwarded endpoint settles. Accept a clean
-                    # exit when the remote server becomes reachable shortly
-                    # afterwards.
-                    last_error = self._wait_for_remote_boot_stable(
-                        process,
-                        allow_exited_process=True,
-                        grace_timeout=5.0,
+            process = subprocess.Popen(
+                command,
+                cwd=self.repo_root,
+                env=self.env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            restart_requested = False
+            while time.monotonic() < deadline:
+                returncode = process.poll()
+                if returncode is not None:
+                    stdout, stderr = process.communicate(timeout=5)
+                    if returncode == 0:
+                        # Older devices sometimes detach the local boot command
+                        # before the forwarded endpoint settles. Accept a clean
+                        # exit when the remote server becomes reachable shortly
+                        # afterwards.
+                        last_error = self._wait_for_remote_boot_stable(
+                            process,
+                            allow_exited_process=True,
+                            grace_timeout=5.0,
+                        )
+                        if last_error is None:
+                            return process
+                    detail = (
+                        "server boot exited before the remote endpoint became ready\n"
+                        f"stdout:\n{stdout}\n"
+                        f"stderr:\n{stderr}"
                     )
-                    if last_error is None:
-                        return process
-                raise RuntimeError(
-                    "server boot exited before the remote endpoint became ready\n"
-                    f"stdout:\n{stdout}\n"
-                    f"stderr:\n{stderr}"
-                )
-            last_error = self._wait_for_remote_boot_stable(process)
-            if last_error is None:
-                return process
-            time.sleep(1)
-        self.stop_boot_process(process, config_path)
+                    if (
+                        recovery_attempts < max_recovery_attempts
+                        and self._should_retry_boot_after_device_reconnect(detail)
+                        and self._wait_for_boot_device_recovery(deadline)
+                    ):
+                        last_error = RuntimeError(detail)
+                        recovery_attempts += 1
+                        restart_requested = True
+                        break
+                    raise RuntimeError(detail)
+                last_error = self._wait_for_remote_boot_stable(process)
+                if last_error is None:
+                    return process
+                time.sleep(1)
+            if restart_requested:
+                continue
+            if process.poll() is None:
+                self.stop_boot_process(process, config_path)
+            try:
+                stdout, stderr = process.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                stdout, stderr = process.communicate(timeout=5)
+            raise RuntimeError(
+                "timed out waiting for `frida-analykit server boot` to expose the remote device\n"
+                f"last connection error: {last_error}\n"
+                f"stdout:\n{stdout}\n"
+                f"stderr:\n{stderr}"
+            )
+        raise RuntimeError(f"timed out waiting for `{self.resolved_serial or 'Android device'}` to recover for server boot")
+
+    def _should_retry_boot_after_device_reconnect(self, detail: str) -> bool:
+        lowered = detail.lower()
+        serial = (self.resolved_serial or "").lower()
+        if not lowered:
+            return False
+        if "requires a connected android device" in lowered and "`adb devices -l` found none" in lowered:
+            return True
+        if serial and f"`{serial}`" in lowered and "connected devices are:" in lowered:
+            return "requested config.server.device" in lowered or "requested android_serial" in lowered
+        return False
+
+    def _wait_for_boot_device_recovery(self, deadline: float) -> bool:
+        remaining = deadline - time.monotonic()
+        if remaining <= 1:
+            return False
+        recovery_timeout = min(max(int(remaining), 1), 20)
         try:
-            stdout, stderr = process.communicate(timeout=5)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            stdout, stderr = process.communicate(timeout=5)
-        raise RuntimeError(
-            "timed out waiting for `frida-analykit server boot` to expose the remote device\n"
-            f"last connection error: {last_error}\n"
-            f"stdout:\n{stdout}\n"
-            f"stderr:\n{stderr}"
-        )
+            self.wait_for_device_ready(timeout=recovery_timeout)
+        except Exception:
+            return False
+        time.sleep(1)
+        return True
 
     def _wait_for_remote_boot_stable(
         self,

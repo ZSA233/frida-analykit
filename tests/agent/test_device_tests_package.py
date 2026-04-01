@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from tests.support.paths import REPO_ROOT
+
 
 def test_agent_device_tests_package_build_uses_dedicated_build_config() -> None:
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     package_json = json.loads(
         (repo_root / "packages/frida-analykit-agent-device-tests/package.json").read_text(encoding="utf-8")
     )

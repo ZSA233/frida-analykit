@@ -147,7 +147,11 @@ def booted_device_agent_unit_workspace(
     workspace = device_agent_unit_workspace
     if workspace.log_path.exists():
         workspace.log_path.unlink()
-    attach_pid, attach_error = device_helpers.find_attachable_app_pid(device_app, timeout=60)
+    attach_pid, attach_error = device_helpers.find_attachable_app_pid(
+        device_app,
+        timeout=60,
+        recover_remote=lambda: device_server_ready.ensure_running(workspace.config_path, timeout=60),
+    )
     assert attach_pid is not None, attach_error
     yield workspace
 
@@ -157,8 +161,14 @@ def running_device_agent_unit_app_pid(
     device_helpers: 'DeviceHelpers',
     device_app: str,
     booted_device_agent_unit_workspace,
+    device_server_ready,
 ) -> int:
-    attach_pid, attach_error = device_helpers.find_attachable_app_pid(device_app, timeout=30)
+    workspace = booted_device_agent_unit_workspace
+    attach_pid, attach_error = device_helpers.find_attachable_app_pid(
+        device_app,
+        timeout=30,
+        recover_remote=lambda: device_server_ready.ensure_running(workspace.config_path, timeout=60),
+    )
     assert attach_pid is not None, attach_error
     return attach_pid
 

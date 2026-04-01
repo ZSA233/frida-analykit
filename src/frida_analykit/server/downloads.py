@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import lzma
+import os
 import shutil
+import time
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request
@@ -87,6 +89,10 @@ class ServerDownloader:
         )
 
     def _load_release_metadata(self, version: str) -> dict[str, object]:
+        cached_release = self._read_cached_release_metadata(version)
+        if cached_release is not None:
+            return cached_release
+
         errors: list[str] = []
         for tag in (version, f"v{version}"):
             url = f"https://api.github.com/repos/frida/frida/releases/tags/{tag}"
@@ -98,17 +104,49 @@ class ServerDownloader:
                     "User-Agent": "frida-analykit",
                 },
             )
-            try:
-                with self._runtime.urlopen_func(request) as response:
-                    return json.loads(response.read().decode("utf-8"))
-            except HTTPError as exc:
-                if exc.code == 404:
-                    errors.append(f"{tag}: 404")
-                    continue
-                raise ServerManagerError(f"failed to load Frida release metadata for {version}: HTTP {exc.code}") from exc
-            except URLError as exc:
-                raise ServerManagerError(f"failed to load Frida release metadata for {version}: {exc.reason}") from exc
+            for attempt, delay in enumerate((0.0, 1.0, 2.0), start=1):
+                if delay:
+                    time.sleep(delay)
+                try:
+                    with self._runtime.urlopen_func(request) as response:
+                        release = json.loads(response.read().decode("utf-8"))
+                        self._write_release_metadata_cache(version, release)
+                        return release
+                except HTTPError as exc:
+                    if exc.code == 404:
+                        errors.append(f"{tag}: 404")
+                        break
+                    raise ServerManagerError(f"failed to load Frida release metadata for {version}: HTTP {exc.code}") from exc
+                except URLError as exc:
+                    if attempt < 3:
+                        verbose_echo(
+                            f"temporary error loading Frida release metadata for `{version}`: {exc.reason}; retrying"
+                        )
+                        continue
+                    cached_release = self._read_cached_release_metadata(version)
+                    if cached_release is not None:
+                        return cached_release
+                    raise ServerManagerError(f"failed to load Frida release metadata for {version}: {exc.reason}") from exc
         raise ServerManagerError(f"unable to find a Frida release tagged {version}. Tried: {', '.join(errors)}")
+
+    def _release_metadata_cache_path(self, version: str) -> Path:
+        return self._runtime.cache_dir / version / "release.json"
+
+    def _read_cached_release_metadata(self, version: str) -> dict[str, object] | None:
+        path = self._release_metadata_cache_path(version)
+        if not path.is_file():
+            return None
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+
+    def _write_release_metadata_cache(self, version: str, release: dict[str, object]) -> None:
+        path = self._release_metadata_cache_path(version)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+        temp_path.write_text(json.dumps(release, indent=2) + "\n", encoding="utf-8")
+        temp_path.replace(path)
 
     def _download_to_path(
         self,

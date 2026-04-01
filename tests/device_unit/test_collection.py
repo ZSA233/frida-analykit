@@ -5,11 +5,13 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+from tests.support.paths import device_conftest_path
+
 import pytest
 
 
 def _load_device_conftest_module():
-    conftest_path = Path(__file__).resolve().parent / "device" / "conftest.py"
+    conftest_path = device_conftest_path()
     spec = importlib.util.spec_from_file_location("frida_analykit_device_conftest_collection", conftest_path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)

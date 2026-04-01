@@ -150,6 +150,87 @@ make release-local RELEASE_TAG=vX.Y.Z[-rc.N]
 make release-install-check RELEASE_TAG=vX.Y.Z[-rc.N]
 ```
 
+## 真机回归门槛
+
+如果当前 release 触达以下任一范围，在 push tag 或继续 RC/stable 发布前，必须补真机回归：
+
+- `src/frida_analykit/device/`
+- `src/frida_analykit/server/`
+- `src/frida_analykit/development/device_*`
+- `tests/device/`
+- `spawn` / `attach` / `server boot` / `server install` / `doctor device-compat`
+
+推荐门槛如下：
+
+1. 先执行至少一轮完整真机回归：
+
+```sh
+make device-test-all
+```
+
+2. 如果这轮通过，再补一轮稳定性确认。
+3. 如果任一轮失败，不要立刻改代码，先按 [docs/device-regression.md](device-regression.md) 分类：
+   - 设备波动
+   - 主机侧测试/工具链问题
+   - 真实代码回归
+4. 只有在完成分类后，才决定是否进入修复。
+5. 如果失败属于设备波动，允许在设备恢复后补一次定向复跑；定向复跑通过后，才可继续后续发布步骤。
+6. 如果失败属于 host-side 或真实代码问题，必须先修复，再重新执行完整真机回归。
+
+固定原则：
+
+- 不能因为第一次真机红项就无脑增加全局 timeout 或重试次数。
+- 真机恢复逻辑只允许做窄化补偿，例如设备短暂掉线、远端 server 瞬时不可达、host-side 明确的并发竞争。
+- 发布操作者应保留至少这些证据：
+  - 失败设备 serial
+  - 失败阶段/测试名
+  - stdout/stderr
+  - `adb devices -l`
+  - 复跑是否通过
+
+## 远端 CI 校验
+
+在进入 release dry-run、push release tag 或继续 RC/stable 后续步骤之前，必须先确认当前 release ref 的 GitHub Actions `CI` 工作流已经通过。
+
+当前仓库的 `CI` workflow 具备两种入口：
+
+- push 到 `main` 或 `release/*` 时自动触发
+- 手动 `workflow_dispatch` 触发
+
+推荐规则：
+
+1. 先把当前 release 分支 push 到远端，例如 `release/vX.Y.Z`。
+2. 优先复用这次 push 自动触发的 `CI` 结果。
+3. 如果需要重新验证、补跑或更方便地集中监控，可以手动触发一次 CI：
+
+```sh
+make release-ci CI_REF=release/vX.Y.Z
+```
+
+这个 helper 会：
+
+- 对指定 ref 触发 `CI` 的 `workflow_dispatch`
+- 自动定位这次 dispatch 对应的 run
+- 直接进入 `gh run watch ... --exit-status`
+
+发版继续之前，至少要确认这些作业全部通过：
+
+- `release-contract`
+- `python-tests (ubuntu-latest)`
+- `python-tests (macos-latest)`
+- `python-tests (windows-latest)`
+- `compat-smoke`
+- `node-scaffold`
+
+其中 `python-tests (windows-latest)` 是当前最容易暴露路径、shell、换行和平台差异回归的作业；如果它失败，不要继续发版。
+
+CI 未通过时的固定处理原则：
+
+- 立即停止当前 release 流程
+- 优先定位并修复 CI 红项，尤其是 Windows 专属失败
+- 修复后重新 push release 分支，或重新执行 `make release-ci`
+- 只有 CI 全绿后，才允许继续 dry-run、打 tag 或 publish
+
 推荐在每次准备 push tag 之前做一次显式确认：
 
 ```sh
@@ -184,6 +265,7 @@ make release-install-check RELEASE_TAG=vX.Y.Z
 
 2. 通过 `workflow_dispatch` 触发 `.github/workflows/release.yml`，传入 `vX.Y.Z` 做远程 dry-run。
    dry-run 只执行 build，并上传 `release-bundle-vX.Y.Z` artifact。
+   进入这一步之前，必须先确认当前 `release/vX.Y.Z` 的 `CI` 已经通过。
 3. 如果 npm Trusted Publishing 已经可用，则直接按“后续 stable 流程”执行。
 4. 如果 npm 上还没有该包，或者 npm 侧还不能完成 Trusted Publishing 绑定，就把这次 stable 作为一次手动 bootstrap：
 
@@ -239,6 +321,7 @@ gh workflow run "Release RC" --ref tmp/release-vX.Y.Z-rc.N -f tag=vX.Y.Z-rc.N
 
    dry-run 只执行 build，并上传 `release-bundle-vX.Y.Z-rc.N` artifact。
    不要为了方便随意推与当前目标版本无关的其他 `tmp/` 分支；如果确有必要，必须先向用户说明并得到明确同意。
+   进入这一步之前，必须先确认当前 `release/vX.Y.Z` 的 `CI` 已经通过；如果 RC fix 后又有新提交，也应重新确认最新 release ref 的 CI 状态。
 5. dry-run 通过后，再 push `vX.Y.Z-rc.N`。
 6. push RC tag 后，`Release RC` 工作流会：
    - 复用 `.github/actions/release-bundle/action.yml`

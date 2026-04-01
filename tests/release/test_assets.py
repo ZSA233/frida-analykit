@@ -8,10 +8,12 @@ import textwrap
 import zipfile
 from pathlib import Path
 
+from tests.support.paths import SCRIPTS_ROOT
+
 import pytest
 
 
-MODULE_PATH = Path(__file__).resolve().parents[1] / "scripts" / "release_assets.py"
+MODULE_PATH = SCRIPTS_ROOT / "release_assets.py"
 SPEC = importlib.util.spec_from_file_location("release_assets", MODULE_PATH)
 release_assets = importlib.util.module_from_spec(SPEC)
 assert SPEC and SPEC.loader

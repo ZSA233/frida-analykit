@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from tests.support.paths import REPO_ROOT
+
 
 def test_agent_package_exports_prebuilt_runtime() -> None:
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     root_entry = (repo_root / "packages/frida-analykit-agent/src/index.ts").read_text(encoding="utf-8")
     package_json = json.loads(
         (repo_root / "packages/frida-analykit-agent/package.json").read_text(encoding="utf-8")
@@ -48,7 +50,7 @@ def test_agent_package_exports_prebuilt_runtime() -> None:
 
 
 def test_agent_package_build_uses_dedicated_build_config() -> None:
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     package_json = json.loads(
         (repo_root / "packages/frida-analykit-agent/package.json").read_text(encoding="utf-8")
     )

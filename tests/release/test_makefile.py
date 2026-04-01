@@ -5,10 +5,11 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from tests.support.paths import REPO_ROOT
+
 import pytest
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
 MAKE_BIN = shutil.which("make") or "/Applications/Xcode.app/Contents/Developer/usr/bin/make"
 _MAKE_ENV_KEYS_TO_CLEAR = (
     "MAKEFLAGS",
@@ -16,6 +17,7 @@ _MAKE_ENV_KEYS_TO_CLEAR = (
     "MFLAGS",
     "MAKEOVERRIDES",
     "GNUMAKEFLAGS",
+    "CI_REF",
     "BASE_VERSION",
     "RC",
     "CHECK",
@@ -63,6 +65,21 @@ def test_make_release_preflight_uses_fail_fast_verbose_pytest() -> None:
 
     assert result.returncode == 0, result.stderr
     assert 'pytest -x -vv -m "not smoke and not scaffold and not device"' in result.stdout
+
+
+@pytest.mark.skipif(not Path(MAKE_BIN).exists(), reason="make is not available")
+def test_make_release_ci_dispatch() -> None:
+    result = subprocess.run(
+        [MAKE_BIN, "-n", "release-ci", "CI_REF=release/v2.0.8"],
+        cwd=REPO_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+        env=_make_test_env(),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert 'scripts/release_ci.py --ref "release/v2.0.8"' in result.stdout
 
 
 @pytest.mark.skipif(not Path(MAKE_BIN).exists(), reason="make is not available")
