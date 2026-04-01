@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+
+from tests.support.paths import REPO_ROOT
 from types import SimpleNamespace
 
 import pytest
@@ -72,7 +74,7 @@ def test_format_device_compat_summary_renders_grouped_output() -> None:
 
 
 def test_run_device_compat_scan_reports_install_hint_for_missing_explicit_env(monkeypatch) -> None:
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     config = build_device_doctor_config(repo_root, app=None)
     resolve_calls: list[str] = []
 
@@ -117,7 +119,7 @@ def test_run_device_compat_scan_reports_install_hint_for_missing_explicit_env(mo
 
 
 def test_run_device_compat_scan_can_auto_create_missing_requested_env(monkeypatch) -> None:
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     config = build_device_doctor_config(repo_root, app=None)
     created_versions: list[str] = []
     seen_list_calls = {"count": 0}
@@ -181,7 +183,7 @@ def test_run_device_compat_scan_can_auto_create_missing_requested_env(monkeypatc
 
 
 def test_run_device_compat_scan_uses_default_test_app_when_no_app_is_configured(monkeypatch) -> None:
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     config = build_device_doctor_config(repo_root, app=None)
     resolve_calls: list[dict[str, object]] = []
 
@@ -235,7 +237,7 @@ def test_run_device_compat_scan_uses_default_test_app_when_no_app_is_configured(
 
 
 def test_run_device_compat_scan_prefers_config_app_before_default_test_app(monkeypatch) -> None:
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     config = build_device_doctor_config(repo_root, app="com.demo.config")
     resolve_calls: list[dict[str, object]] = []
 
@@ -290,7 +292,7 @@ def test_run_device_compat_scan_prefers_config_app_before_default_test_app(monke
 
 
 def test_run_device_compat_scan_reports_progress_in_order(monkeypatch) -> None:
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     config = build_device_doctor_config(repo_root, app=None)
     events: list[tuple[str, object]] = []
 
@@ -392,7 +394,7 @@ def test_run_device_compat_scan_reports_progress_in_order(monkeypatch) -> None:
 
 
 def test_run_device_compat_scan_keeps_explicit_versions_without_iteration_cropping(monkeypatch) -> None:
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     config = build_device_doctor_config(repo_root, app=None)
 
     class FakeHelper:
@@ -445,7 +447,7 @@ def test_run_device_compat_scan_keeps_explicit_versions_without_iteration_croppi
 
 
 def test_run_device_compat_scan_reuses_selected_device_app_across_versions(monkeypatch) -> None:
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     config = build_device_doctor_config(repo_root, app=None)
     device_level_calls: list[tuple[bool, str]] = []
     seen_preferred_apps: list[tuple[str, str | None]] = []
@@ -503,7 +505,7 @@ def test_run_device_compat_scan_reuses_selected_device_app_across_versions(monke
 
 
 def test_run_device_compat_scan_reports_spawn_failures(monkeypatch) -> None:
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     config = build_device_doctor_config(repo_root, app=None)
 
     class FakeHelper:

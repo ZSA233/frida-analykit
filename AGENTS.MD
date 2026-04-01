@@ -211,6 +211,9 @@
 - 两组 README 都完成后，必须先做一次双语镜像二次校对
 - 文档收束完成后，才进入 `docs/release-process.md` 中定义的 release-version、preflight、RC、stable、publish 流程。
 - 如果四份 README 中任意一份仍缺段、缺表、缺示例、缺限制说明，或者中英结构不一致，则不允许进入正式发版流程。
+- 在触发 release dry-run、push release tag 或继续 RC/stable 后续步骤之前，必须确认当前 release ref 的 GitHub Actions `CI` 工作流已经通过；
+- 手动触发 `CI` workflow_dispatch，例如执行 `make release-ci CI_REF=release/vX.Y.Z` 并等待其完成。
+- 只要当前 release ref 的 `CI` 仍有红项，就必须先停止发版并定位问题；不要在 CI 未通过的情况下继续 dry-run、打 tag 或 publish。
 - 发版时 `git commit`、`git tag`、`workflow_dispatch`、`push tag` 必须串行执行，不要并行；尤其不要把 `git commit` 和 `git tag` 并行跑，否则 tag 可能落在错误提交上。
 - 默认发版流程应直接走 stable；只有用户明确要求“先 RC，再 stable”时，才进入 RC 提升路线。
 - 如果本次明确走 RC 流程，则 RC 发布完成后必须停下来，向用户汇报 RC tag、workflow 状态和待验证事项；在用户明确表示继续 stable 之前，不允许继续执行 stable 版本切换、stable dry-run、stable tag 或正式发布。

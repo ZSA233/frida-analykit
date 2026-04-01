@@ -4,6 +4,8 @@ import os
 from collections.abc import Iterator
 from pathlib import Path
 
+from tests.support.paths import REPO_ROOT
+
 import pytest
 
 from frida_analykit.development import DeviceTestContext
@@ -56,7 +58,7 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
 @pytest.fixture(scope="session")
 def device_context() -> DeviceTestContext:
     _require_device_enabled()
-    repo_root = Path(__file__).resolve().parents[2]
+    repo_root = REPO_ROOT
     try:
         context = DeviceTestContext.from_environment(repo_root, os.environ)
     except DeviceSelectionError as exc:

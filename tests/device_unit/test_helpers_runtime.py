@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+
+from tests.support.paths import REPO_ROOT
 from types import SimpleNamespace
 
 import pytest
@@ -82,7 +84,7 @@ def test_derive_remote_host_uses_serial_specific_port_and_linear_probe_on_confli
 
 
 def test_list_managed_frida_envs_prefers_repo_local_versions(monkeypatch: pytest.MonkeyPatch) -> None:
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
 
     class FakeEnv:
         def __init__(self, name: str, version: str, path: str) -> None:
@@ -151,7 +153,7 @@ def test_should_retry_device_operation_checks_remote_probe_for_non_transient_fai
 
 
 def test_device_helpers_pidof_remote_server_falls_back_to_server_basename() -> None:
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     helpers = DeviceHelpers(
         repo_root=repo_root,
         env={},
@@ -185,7 +187,7 @@ def test_device_helpers_pidof_remote_server_falls_back_to_server_basename() -> N
 def test_device_helpers_start_boot_process_retries_when_remote_pid_is_not_visible_yet(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     helpers = DeviceHelpers(
         repo_root=repo_root,
         env={},
@@ -228,7 +230,7 @@ def test_device_helpers_start_boot_process_retries_when_remote_pid_is_not_visibl
 def test_device_helpers_start_boot_process_accepts_clean_boot_exit_once_remote_is_ready(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     helpers = DeviceHelpers(
         repo_root=repo_root,
         env={},
@@ -266,7 +268,7 @@ def test_device_helpers_start_boot_process_accepts_clean_boot_exit_once_remote_i
 def test_device_helpers_start_boot_process_stops_before_collecting_timeout_output(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     helpers = DeviceHelpers(
         repo_root=repo_root,
         env={},
@@ -312,7 +314,7 @@ def test_device_helpers_start_boot_process_stops_before_collecting_timeout_outpu
 def test_device_helpers_find_attachable_app_pid_keeps_polling_after_nonzero_launch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     helpers = DeviceHelpers(
         repo_root=repo_root,
         env={},
@@ -344,7 +346,7 @@ def test_device_helpers_find_attachable_app_pid_keeps_polling_after_nonzero_laun
 def test_device_helpers_find_attachable_app_pid_retries_launch_until_pid_is_visible(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     helpers = DeviceHelpers(
         repo_root=repo_root,
         env={},
@@ -385,7 +387,7 @@ def test_device_helpers_find_attachable_app_pid_retries_launch_until_pid_is_visi
 
 
 def test_device_helpers_probe_remote_ready_uses_real_remote_rpc(monkeypatch: pytest.MonkeyPatch) -> None:
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     helpers = DeviceHelpers(
         repo_root=repo_root,
         env={},
@@ -410,7 +412,7 @@ def test_device_helpers_probe_remote_ready_uses_real_remote_rpc(monkeypatch: pyt
 
 
 def test_device_helpers_wait_for_device_ready_retries_until_boot_completed(monkeypatch: pytest.MonkeyPatch) -> None:
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     helpers = DeviceHelpers(
         repo_root=repo_root,
         env={},

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+
+from tests.support.paths import REPO_ROOT
 from types import SimpleNamespace
 
 import pytest
@@ -11,7 +13,7 @@ from frida_analykit.device import DEFAULT_DEVICE_TEST_APP_ID, DeviceHelpers
 
 
 def test_device_helpers_workspace_accepts_extra_dependencies(tmp_path: Path) -> None:
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     helpers = DeviceHelpers(
         repo_root=repo_root,
         env={},
@@ -45,7 +47,7 @@ def test_device_helpers_workspace_accepts_extra_dependencies(tmp_path: Path) -> 
 
 
 def test_device_helpers_create_workspace_creates_missing_parent_dirs(tmp_path: Path) -> None:
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     helpers = DeviceHelpers(
         repo_root=repo_root,
         env={},
@@ -65,7 +67,7 @@ def test_device_helpers_pack_local_package_uses_workspace_local_npm_cache(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     helpers = DeviceHelpers(
         repo_root=repo_root,
         env={"BASE_ENV": "1"},
@@ -102,11 +104,12 @@ def test_device_helpers_pack_local_package_uses_workspace_local_npm_cache(
     assert Path(env["npm_config_cache"]).is_dir()
 
 
-def test_device_helpers_build_workspace_uses_workspace_local_npm_cache(
+def test_device_helpers_build_workspace_uses_shared_repo_npm_cache_and_lock(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
     helpers = DeviceHelpers(
         repo_root=repo_root,
         env={"BASE_ENV": "1"},
@@ -117,6 +120,7 @@ def test_device_helpers_build_workspace_uses_workspace_local_npm_cache(
     workspace = helpers.create_workspace(tmp_path, app=None)
     workspace.agent_path.write_text("// built\n", encoding="utf-8")
     captured: dict[str, object] = {}
+    lock_events: list[tuple[str, Path]] = []
 
     def fake_run_cli_with_env(args, *, timeout=120, extra_env=None):
         captured["args"] = args
@@ -124,7 +128,19 @@ def test_device_helpers_build_workspace_uses_workspace_local_npm_cache(
         captured["extra_env"] = extra_env
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
+    class FakeLock:
+        def __init__(self, path: Path) -> None:
+            self.path = path
+            lock_events.append(("init", path))
+
+        def acquire(self) -> None:
+            lock_events.append(("acquire", self.path))
+
+        def release(self) -> None:
+            lock_events.append(("release", self.path))
+
     monkeypatch.setattr(helpers, "run_cli_with_env", fake_run_cli_with_env)
+    monkeypatch.setitem(DeviceHelpers.build_workspace.__globals__, "DeviceTestLock", FakeLock)
 
     helpers.build_workspace(workspace, install=True, timeout=45)
 
@@ -137,12 +153,17 @@ def test_device_helpers_build_workspace_uses_workspace_local_npm_cache(
         "--install",
     ]
     assert captured["timeout"] == 45
-    assert captured["extra_env"] == {"npm_config_cache": str(workspace.root / ".npm-cache")}
-    assert (workspace.root / ".npm-cache").is_dir()
+    assert captured["extra_env"] == {"npm_config_cache": str(repo_root / ".pytest_cache" / "frida-analykit-npm-cache")}
+    assert (repo_root / ".pytest_cache" / "frida-analykit-npm-cache").is_dir()
+    assert lock_events == [
+        ("init", repo_root / ".pytest_cache" / "frida-analykit-workspace-build.lock"),
+        ("acquire", repo_root / ".pytest_cache" / "frida-analykit-workspace-build.lock"),
+        ("release", repo_root / ".pytest_cache" / "frida-analykit-workspace-build.lock"),
+    ]
 
 
 def test_device_helpers_workspace_config_keeps_server_device_nested(tmp_path: Path) -> None:
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     helpers = DeviceHelpers(
         repo_root=repo_root,
         env={},
@@ -164,7 +185,7 @@ def test_device_helpers_ensure_matching_server_skips_install_when_version_matche
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     helpers = DeviceHelpers(
         repo_root=repo_root,
         env={},
@@ -200,7 +221,7 @@ def test_device_helpers_ensure_matching_server_installs_when_version_mismatches(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     helpers = DeviceHelpers(
         repo_root=repo_root,
         env={},
@@ -241,7 +262,7 @@ def test_device_helpers_ensure_matching_server_installs_when_version_mismatches(
 
 
 def test_device_helpers_ts_workspace_config_keeps_server_device_nested(tmp_path: Path) -> None:
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     helpers = DeviceHelpers(
         repo_root=repo_root,
         env={},
@@ -264,7 +285,7 @@ def test_device_helpers_ts_workspace_config_keeps_server_device_nested(tmp_path:
 
 
 def test_device_helpers_launch_app_prefers_launcher_component_start() -> None:
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     helpers = DeviceHelpers(
         repo_root=repo_root,
         env={},
@@ -301,7 +322,7 @@ def test_device_helpers_launch_app_prefers_launcher_component_start() -> None:
 
 
 def test_device_helpers_launch_app_falls_back_to_monkey_when_component_start_fails() -> None:
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     helpers = DeviceHelpers(
         repo_root=repo_root,
         env={},
@@ -342,7 +363,7 @@ def test_device_helpers_launch_app_falls_back_to_monkey_when_component_start_fai
 
 
 def test_device_helpers_package_exists_uses_cached_package_list() -> None:
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     helpers = DeviceHelpers(
         repo_root=repo_root,
         env={},
@@ -367,7 +388,7 @@ def test_device_helpers_package_exists_uses_cached_package_list() -> None:
 def test_device_helpers_list_installed_packages_retries_after_transient_adb_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     helpers = DeviceHelpers(
         repo_root=repo_root,
         env={},
@@ -399,7 +420,7 @@ def test_device_helpers_list_installed_packages_retries_after_transient_adb_fail
 
 
 def test_device_helpers_package_exists_falls_back_to_pm_path_when_bulk_list_fails() -> None:
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     helpers = DeviceHelpers(
         repo_root=repo_root,
         env={},
@@ -434,7 +455,7 @@ def test_device_helpers_package_exists_falls_back_to_pm_path_when_bulk_list_fail
 
 
 def test_device_helpers_resolve_device_app_prefers_explicit_app() -> None:
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     helpers = DeviceHelpers(
         repo_root=repo_root,
         env={},
@@ -453,7 +474,7 @@ def test_device_helpers_resolve_device_app_prefers_explicit_app() -> None:
 
 
 def test_device_helpers_resolve_device_app_fails_for_missing_explicit_app() -> None:
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     helpers = DeviceHelpers(
         repo_root=repo_root,
         env={},
@@ -470,7 +491,7 @@ def test_device_helpers_resolve_device_app_fails_for_missing_explicit_app() -> N
 
 
 def test_device_helpers_resolve_device_app_uses_default_test_app_when_not_configured() -> None:
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     helpers = DeviceHelpers(
         repo_root=repo_root,
         env={},
@@ -494,7 +515,7 @@ def test_device_helpers_resolve_device_app_uses_default_test_app_when_not_config
 def test_device_helpers_resolve_device_app_retries_transient_launch_failures(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     helpers = DeviceHelpers(
         repo_root=repo_root,
         env={},
@@ -535,7 +556,7 @@ def test_device_helpers_resolve_device_app_retries_transient_launch_failures(
 
 
 def test_device_helpers_resolve_device_app_fails_fast_when_default_test_app_is_missing() -> None:
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     helpers = DeviceHelpers(
         repo_root=repo_root,
         env={},
@@ -552,7 +573,7 @@ def test_device_helpers_resolve_device_app_fails_fast_when_default_test_app_is_m
 
 
 def test_device_helpers_resolve_device_app_fails_for_default_attach_failure() -> None:
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     helpers = DeviceHelpers(
         repo_root=repo_root,
         env={},
@@ -572,7 +593,7 @@ def test_device_helpers_resolve_device_app_fails_for_default_attach_failure() ->
 def test_device_helpers_resolve_device_app_retries_transient_attach_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     helpers = DeviceHelpers(
         repo_root=repo_root,
         env={},
@@ -598,7 +619,7 @@ def test_device_helpers_resolve_device_app_retries_transient_attach_failure(
 
 
 def test_device_helpers_resolve_device_app_fails_for_explicit_attach_failure() -> None:
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     helpers = DeviceHelpers(
         repo_root=repo_root,
         env={},
@@ -618,7 +639,7 @@ def test_device_helpers_resolve_device_app_fails_for_explicit_attach_failure() -
 def test_device_helpers_probe_launchable_device_app_accepts_nonzero_launch_with_live_pid(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     helpers = DeviceHelpers(
         repo_root=repo_root,
         env={},

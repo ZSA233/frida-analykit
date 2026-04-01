@@ -4,6 +4,8 @@ import io
 import json
 import os
 from pathlib import Path
+
+from tests.support.paths import REPO_ROOT
 from types import SimpleNamespace
 
 import pytest
@@ -22,7 +24,7 @@ from frida_analykit.device import (
 
 
 def test_default_device_test_app_project_uses_expected_package_id() -> None:
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     project_dir = get_device_test_app_project_dir(repo_root)
     keystore_path = project_dir / "keystore" / "device-test-debug.keystore"
     build_gradle = (project_dir / "app" / "build.gradle").read_text(encoding="utf-8")
@@ -85,7 +87,7 @@ def test_prepare_tool_env_overrides_invalid_java_home_with_resolved_fallback(
     )
 
     assert prepared["JAVA_HOME"] == "/resolved/java"
-    assert prepared["PATH"].split(os.pathsep)[0] == "/resolved/java/bin"
+    assert prepared["PATH"].split(os.pathsep)[0] == str(Path("/resolved/java") / "bin")
 
 
 def test_prepare_tool_env_keeps_valid_java_home(

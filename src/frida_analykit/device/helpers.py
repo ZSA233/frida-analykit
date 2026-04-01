@@ -21,7 +21,7 @@ from .defaults import (
     DEVICE_READY_TIMEOUT,
 )
 from .models import AppProbeResult, DeviceAppResolutionError, DeviceWorkspace
-from .selection import derive_remote_host, safe_device_serial_token
+from .selection import DeviceTestLock, derive_remote_host, safe_device_serial_token
 
 
 class DeviceHelpers:
@@ -52,6 +52,14 @@ class DeviceHelpers:
     def lock_path(self) -> Path:
         token = safe_device_serial_token(self.resolved_serial or "default")
         return self.repo_root / ".pytest_cache" / f"frida-analykit-device-{token}.lock"
+
+    @property
+    def workspace_build_lock_path(self) -> Path:
+        return self.repo_root / ".pytest_cache" / "frida-analykit-workspace-build.lock"
+
+    @property
+    def workspace_npm_cache_dir(self) -> Path:
+        return self.repo_root / ".pytest_cache" / "frida-analykit-npm-cache"
 
     def _write_workspace_config(
         self,
@@ -632,13 +640,18 @@ class DeviceHelpers:
         ]
         if install:
             args.append("--install")
-        npm_cache_dir = workspace.root / ".npm-cache"
+        npm_cache_dir = self.workspace_npm_cache_dir
         npm_cache_dir.mkdir(parents=True, exist_ok=True)
-        result = self.run_cli_with_env(
-            args,
-            timeout=timeout,
-            extra_env={"npm_config_cache": str(npm_cache_dir)},
-        )
+        build_lock = DeviceTestLock(self.workspace_build_lock_path)
+        build_lock.acquire()
+        try:
+            result = self.run_cli_with_env(
+                args,
+                timeout=timeout,
+                extra_env={"npm_config_cache": str(npm_cache_dir)},
+            )
+        finally:
+            build_lock.release()
         if result.returncode != 0:
             raise RuntimeError(
                 "failed to build the device test workspace\n"

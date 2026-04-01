@@ -62,7 +62,9 @@
 - 包根 `__init__`、CLI 根入口和对外 convenience 模块不应承担内部中转层职责。
 - 如果某个文件已经同时承载配置解析、生命周期、错误处理、协议序列化、日志落盘等多种责任，应主动拆分。
 - 测试目录也遵循相同思路：
-  - `tests/` 存放常规单测与集成单测
+  - `tests/core/` 存放 config / compat / frontend / scaffold / smoke 这类核心域单测
+  - `tests/cli/`、`tests/server/`、`tests/env/`、`tests/release/`、`tests/agent/`、`tests/development/` 按业务 owner 继续细分常规单测
+  - `tests/device_unit/` 存放非真机的 device 域单测，继续覆盖 helpers / runtime / workspace / orchestrator / test-app
   - `tests/rpc/` 聚焦 RPC / REPL / session 行为
   - `tests/device/` 聚焦真机和 Python+agent 组合验证
 
@@ -78,9 +80,10 @@
 
 - Python 侧测试主线使用 `pytest`，倾向行为驱动的断言，而不是堆大量实现细节快照。
 - 测试中优先使用轻量 in-file fake、stub 和 helper factory，让单个测试文件能独立表达自己的场景。
+- 需要共享 repo root、脚本路径或真机 `conftest` 路径时，应优先放进 `tests/support/` 这类轻量测试支持模块，而不是在各测试文件里重复硬编码 `__file__` 层级。
 - `monkeypatch` 应命中真实拥有者模块或真实归属对象，不要依赖偶然可达的中转面。
 - 单测应尽量只验证一个清晰行为面；RPC、REPL、server、config、CLI、device 场景不要混成一个巨型测试文件。
-- 真机测试与普通单测保持隔离；需要验证 Python 与 agent 的组合行为时，应继续放在 `tests/device/` 这类独立层级中。
+- 真机测试与普通单测保持隔离；需要验证 Python 与 agent 的组合行为时，应继续放在 `tests/device/` 这类独立层级中，普通 device 单测则归到 `tests/device_unit/`。
 - 如果重构影响 adb 目标解析、config 继承或 CLI 到 server/device 的接线，必须补三类回归测试：
   - 单设备自动解析
   - 多设备歧义报错

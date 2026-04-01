@@ -1,7 +1,8 @@
-.PHONY: sync test compat scaffold build npm-pack release-check release-preflight release-local release-install-check release-version-show release-version-rc release-version-stable env env-list env-create env-enter env-remove dev-smoke device-check device-test-core device-test-install device-test-repl-handlers device-test-attach-marker device-test device-test-all device-test-app-build device-test-app-install device-test-app-install-all
+.PHONY: sync test compat scaffold build npm-pack release-check release-preflight release-ci release-local release-install-check release-version-show release-version-rc release-version-stable env env-list env-create env-enter env-remove dev-smoke device-check device-test-core device-test-install device-test-repl-handlers device-test-attach-marker device-test device-test-all device-test-app-build device-test-app-install device-test-app-install-all
 
 RELEASE_TAG ?=
 RC_TAG ?=
+CI_REF ?=
 DIST_DIR ?= dist
 PYTHON_BIN ?= .venv/bin/python
 DEVICE_TEST_ENV = env FRIDA_ANALYKIT_ENABLE_DEVICE=1$(if $(strip $(DEVICE_TEST_APP)), FRIDA_ANALYKIT_DEVICE_APP=$(DEVICE_TEST_APP))$(if $(strip $(DEVICE_TEST_SKIP_APP)), FRIDA_ANALYKIT_DEVICE_SKIP_APP_TESTS=$(DEVICE_TEST_SKIP_APP))
@@ -35,6 +36,9 @@ release-preflight:
 	npm ci
 	uv run pytest -x -vv -m "not smoke and not scaffold and not device"
 	npm run agent:build
+
+release-ci:
+	uv run python scripts/release_ci.py $(if $(CI_REF),--ref "$(CI_REF)")
 
 release-local:
 	@if [ -z "$(RELEASE_TAG)" ]; then echo "RELEASE_TAG is required" >&2; exit 1; fi
@@ -94,7 +98,7 @@ env-remove:
 	uv run python scripts/env.py remove --name "$(ENV_NAME)"
 
 dev-smoke:
-	FRIDA_ANALYKIT_ENABLE_SMOKE=1 "$(PYTHON_BIN)" -m pytest tests/test_smoke.py -m smoke
+	FRIDA_ANALYKIT_ENABLE_SMOKE=1 "$(PYTHON_BIN)" -m pytest tests/core/test_smoke.py -m smoke
 
 device-check:
 	$(DEVICE_TEST_ENV) "$(PYTHON_BIN)" -m pytest tests/device/test_preflight.py -m device -v

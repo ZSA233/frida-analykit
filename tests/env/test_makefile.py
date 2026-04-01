@@ -4,10 +4,11 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from tests.support.paths import REPO_ROOT
+
 import pytest
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
 MAKE_BIN = shutil.which("make") or "/Applications/Xcode.app/Contents/Developer/usr/bin/make"
 
 
