@@ -1,14 +1,15 @@
 {
   "name": "@zsa233/frida-analykit-agent",
-  "version": "2.0.9",
+  "version": "2.1.1",
   "description": "Frida agent runtime for frida-analykit",
+  "license": "MIT",
   "keywords": [
     "frida",
     "reverse-engineering",
     "instrumentation",
     "typescript"
   ],
-  "homepage": "https://github.com/ZSA233/frida-analykit/blob/main/packages/frida-analykit-agent/README.md",
+  "homepage": "https://github.com/ZSA233/frida-analykit/blob/stable/packages/frida-analykit-agent/README.md",
   "bugs": {
     "url": "https://github.com/ZSA233/frida-analykit/issues"
   },

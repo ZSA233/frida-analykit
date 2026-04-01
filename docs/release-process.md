@@ -16,8 +16,10 @@
 1. 日常开发在线上版本分支推进，例如 `dev/v2`。
 2. 准备某个具体版本发布时，从当前冻结代码线切出或继续使用 `release/vX.Y.Z`。
 3. RC 和 stable 的版本切换、校验、打 tag 都在 `release/vX.Y.Z` 上完成。
-4. stable 发布完成后，把 `release/vX.Y.Z` 合并回 `main`。
-5. 如果仍有长期开发线，例如 `dev/v2`，再把 `main` 的发布结果回灌回去。
+4. 远端 `stable` 分支固定指向“最新 stable GitHub Release 对应代码”，不承载日常开发提交。
+5. stable 发布完成后，必须把远端 `stable` 更新到该 stable tag 对应提交。
+6. stable 发布完成后，把 `release/vX.Y.Z` 合并回 `main`。
+7. 如果仍有长期开发线，例如 `dev/v2`，再把 `main` 的发布结果回灌回去。
 
 ## 发版请求前置条件
 
@@ -85,7 +87,8 @@
 5. 把支持范围的真源放在 `pyproject.toml` 的 `frida>=...,<...` 直接依赖里。
 6. 把受测 profile 的真源放在 `src/frida_analykit/resources/compat_profiles.json`。
 7. 把发布版本真源放在 `release-version.toml`。
-   该文件只驱动发布关键文件，不自动修改 README / docs 中的安装示例。
+   该文件只驱动发布关键文件，不自动把 README / docs 的稳定安装示例切换成某个具体 tag。
+   用户向稳定安装入口固定使用 `git+https://github.com/ZSA233/frida-analykit@stable`。
 8. 为 stable 自动发布配置 npm Trusted Publishing。
    只绑定到 `.github/workflows/release.yml`。
 
@@ -136,6 +139,7 @@ make release-version-stable BASE_VERSION=X.Y.Z CHECK=1 [RC_TAG=vX.Y.Z-rc.N]
 
 - `scripts/release_version.py check-sync`
 - `scripts/release_assets.py validate-config`
+- `scripts/release_assets.py validate-stable-entrypoints`
 - `scripts/release_assets.py validate-release-version`
 - stable 时额外执行 `scripts/release_assets.py validate-promotion`
 - `npm ci`
@@ -277,8 +281,9 @@ npm publish ./zsa233-frida-analykit-agent-X.Y.Z.tgz --access public
 5. 首发成功后，到 npm 包设置里把 trusted publisher 绑定到 `.github/workflows/release.yml`。
 6. 从下一个 stable 开始，直接走自动化 stable 发布流程。
 
-自动 stable 发布的 `publish` job 需要使用支持 Trusted Publishing 的较新 npm CLI。
-仓库 workflow 会在发布前升级 npm；如果看到带 provenance 的 `npm publish` 仍返回误导性的 `E404`，先检查 job 实际使用的 npm 版本，而不是先怀疑 package scope 或 tarball 内容。
+自动 stable 发布链路会拆成 `publish_release -> sync_stable -> publish_npm` 三段。
+仓库 workflow 会在最终 npm 发布前升级 npm；如果看到带 provenance 的 `npm publish` 仍返回误导性的 `E404`，先检查 job 实际使用的 npm 版本，而不是先怀疑 package scope 或 tarball 内容。
+执行 `npm publish` 的 job 仍必须保留 `production` environment 上下文；否则 npm Trusted Publishing 可能因为 OIDC 身份不匹配而拒绝发布。
 
 ## RC 流程
 
@@ -399,11 +404,14 @@ git push origin vX.Y.Z
    - 执行 `make release-install-check`
    - 上传 `release-bundle-vX.Y.Z` artifact
 7. build 成功后，工作流会等待 `production` environment 审批。
-8. 审批通过后，publish 任务会：
+8. 审批通过后，stable 发布链路会按顺序执行：
    - 下载 `release-bundle-vX.Y.Z`
    - 创建 GitHub Release
+   - 同步远端 `stable` 分支到当前 stable tag 对应提交
    - 执行 `npm publish release-bundle/*.tgz --access public --provenance`
-9. stable 发布成功后，把 `release/vX.Y.Z` 合并回 `main`，再按需要回灌到对应开发线。
+9. 只有当 GitHub Release、`stable` 分支同步和 npm publish 都成功后，才算 stable 发布完成。
+10. 如果 GitHub Release 已成功，但 `sync_stable` 或 `publish_npm` 失败，优先使用 GitHub Actions 的 rerun failed jobs 恢复，不需要重新打 tag，也不要先手动重发 npm。
+11. stable 发布成功后，把 `release/vX.Y.Z` 合并回 `main`，再按需要回灌到对应开发线。
 
 ## 发版中断策略
 

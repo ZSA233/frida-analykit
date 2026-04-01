@@ -45,6 +45,23 @@ PROMOTION_ALLOWED_DIFFS = {
     AGENT_PACKAGE_JSON_PATH.as_posix(),
     RELEASE_VERSION_PATH.as_posix(),
 }
+ROOT_README_PATHS = (Path("README.md"), Path("README_EN.md"))
+PACKAGE_README_LINKS = {
+    Path("packages/frida-analykit-agent/README.md"): (
+        "https://github.com/ZSA233/frida-analykit/blob/stable/packages/frida-analykit-agent/README_EN.md"
+    ),
+    Path("packages/frida-analykit-agent/README_EN.md"): (
+        "https://github.com/ZSA233/frida-analykit/blob/stable/packages/frida-analykit-agent/README.md"
+    ),
+}
+STABLE_INSTALL_SPEC = "git+https://github.com/ZSA233/frida-analykit@stable"
+PINNED_RELEASE_INSTALL_RE = re.compile(
+    r"git\+https://github\.com/ZSA233/frida-analykit@v\d+\.\d+\.\d+(?:-rc\.\d+)?"
+)
+PACKAGE_STABLE_README_URL = (
+    "https://github.com/ZSA233/frida-analykit/blob/stable/packages/frida-analykit-agent/README.md"
+)
+PACKAGE_MAIN_BLOB_PREFIX = "https://github.com/ZSA233/frida-analykit/blob/main/"
 
 
 class ReleaseConfigError(RuntimeError):
@@ -328,6 +345,53 @@ def validate_release_contract(
     }
 
 
+def validate_stable_entrypoints(
+    repo_root: Path,
+    *,
+    ref: str | None = None,
+) -> dict[str, Any]:
+    errors: list[str] = []
+
+    for relative_path in ROOT_README_PATHS:
+        text = read_repo_text(repo_root, relative_path, ref=ref)
+        if STABLE_INSTALL_SPEC not in text:
+            errors.append(
+                f"{relative_path} must use {STABLE_INSTALL_SPEC} as the stable install entry"
+            )
+        if PINNED_RELEASE_INSTALL_RE.search(text):
+            errors.append(
+                f"{relative_path} must not pin user-facing installs to a concrete release tag"
+            )
+
+    for relative_path, expected_link in PACKAGE_README_LINKS.items():
+        text = read_repo_text(repo_root, relative_path, ref=ref)
+        if PINNED_RELEASE_INSTALL_RE.search(text):
+            errors.append(
+                f"{relative_path} must not pin user-facing installs to a concrete release tag"
+            )
+        if PACKAGE_MAIN_BLOB_PREFIX in text:
+            errors.append(f"{relative_path} must not link to blob/main")
+        if expected_link not in text:
+            errors.append(f"{relative_path} must link to {expected_link}")
+
+    agent_package = load_json_file(repo_root, AGENT_PACKAGE_JSON_PATH, ref=ref)
+    homepage = agent_package.get("homepage")
+    if homepage != PACKAGE_STABLE_README_URL:
+        errors.append(
+            "packages/frida-analykit-agent/package.json homepage must be "
+            f"{PACKAGE_STABLE_README_URL}"
+        )
+
+    if errors:
+        raise ReleaseConfigError("; ".join(errors))
+
+    return {
+        "stable_install_spec": STABLE_INSTALL_SPEC,
+        "package_homepage": PACKAGE_STABLE_README_URL,
+        "package_readmes": [path.as_posix() for path in PACKAGE_README_LINKS],
+    }
+
+
 def _run_git(repo_root: Path, args: list[str]) -> str:
     result = subprocess.run(
         ["git", *args],
@@ -340,6 +404,95 @@ def _run_git(repo_root: Path, args: list[str]) -> str:
         message = result.stderr.strip() or result.stdout.strip() or f"git {' '.join(args)} failed"
         raise ReleaseConfigError(message)
     return result.stdout.strip()
+
+
+def _branch_ref(branch: str) -> str:
+    return f"refs/heads/{branch}"
+
+
+def _resolve_remote_branch_sha(
+    repo_root: Path,
+    *,
+    remote: str,
+    branch: str,
+) -> str | None:
+    branch_ref = _branch_ref(branch)
+    output = _run_git(repo_root, ["ls-remote", "--heads", "--refs", remote, branch_ref])
+    if not output:
+        return None
+
+    lines = [line for line in output.splitlines() if line.strip()]
+    if len(lines) != 1:
+        raise ReleaseConfigError(
+            f"Expected at most one remote ref for {remote}/{branch}, found {len(lines)}"
+        )
+
+    parts = lines[0].split()
+    if len(parts) != 2:
+        raise ReleaseConfigError(
+            f"Unexpected ls-remote output for {remote}/{branch}: {lines[0]!r}"
+        )
+    sha, ref = parts
+    if ref != branch_ref:
+        raise ReleaseConfigError(
+            f"Unexpected remote ref for {remote}/{branch}: expected {branch_ref}, found {ref}"
+        )
+    if not re.fullmatch(r"[0-9a-f]{40}", sha):
+        raise ReleaseConfigError(
+            f"Unexpected remote SHA for {remote}/{branch}: {sha}"
+        )
+    return sha
+
+
+def _push_branch_ref(
+    repo_root: Path,
+    *,
+    remote: str,
+    branch: str,
+    target_commit: str,
+    expected_remote_sha: str | None,
+) -> None:
+    destination = f"{target_commit}:{_branch_ref(branch)}"
+    if expected_remote_sha is None:
+        _run_git(repo_root, ["push", remote, destination])
+        return
+
+    lease = f"--force-with-lease={_branch_ref(branch)}:{expected_remote_sha}"
+    _run_git(repo_root, ["push", lease, remote, destination])
+
+
+def sync_stable_ref(
+    repo_root: Path,
+    *,
+    tag: str,
+    branch: str = "stable",
+) -> dict[str, Any]:
+    try:
+        release = parse_release_tag(tag)
+    except ReleaseVersionError as exc:
+        raise ReleaseConfigError(str(exc)) from exc
+    if release.is_rc:
+        raise ReleaseConfigError("Stable ref sync only applies to stable tags")
+
+    target_commit = _run_git(repo_root, ["rev-list", "-n", "1", tag])
+    if not target_commit:
+        raise ReleaseConfigError(f"Could not resolve commit for tag {tag}")
+
+    remote_sha = _resolve_remote_branch_sha(repo_root, remote="origin", branch=branch)
+    _push_branch_ref(
+        repo_root,
+        remote="origin",
+        branch=branch,
+        target_commit=target_commit,
+        expected_remote_sha=remote_sha,
+    )
+
+    return {
+        "tag_name": tag,
+        "branch": branch,
+        "target_commit": target_commit,
+        "created": remote_sha is None,
+    }
 
 
 def _load_root_agent_dependency(repo_root: Path, *, ref: str | None = None) -> str:
@@ -713,6 +866,10 @@ def main(argv: list[str] | None = None) -> int:
     validate_parser.add_argument("--ref")
     validate_parser.add_argument("--json", action="store_true")
 
+    stable_parser = subparsers.add_parser("validate-stable-entrypoints")
+    stable_parser.add_argument("--ref")
+    stable_parser.add_argument("--json", action="store_true")
+
     version_parser = subparsers.add_parser("validate-release-version")
     version_parser.add_argument("--tag", required=True)
     version_parser.add_argument("--ref")
@@ -735,6 +892,11 @@ def main(argv: list[str] | None = None) -> int:
     stage_apk_parser.add_argument("--dist-dir", default="dist")
     stage_apk_parser.add_argument("--json", action="store_true")
 
+    sync_stable_parser = subparsers.add_parser("sync-stable-ref")
+    sync_stable_parser.add_argument("--tag", required=True)
+    sync_stable_parser.add_argument("--branch", default="stable")
+    sync_stable_parser.add_argument("--json", action="store_true")
+
     args = parser.parse_args(argv)
     repo_root = Path.cwd()
 
@@ -746,6 +908,16 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 print(
                     f"{result['name']} {result['base_version']} supports {result['support_range']}"
+                )
+            return 0
+
+        if args.command == "validate-stable-entrypoints":
+            payload = validate_stable_entrypoints(repo_root, ref=args.ref)
+            if args.json:
+                _dump_json(payload)
+            else:
+                print(
+                    f"stable install entry uses {payload['stable_install_spec']} and package docs use blob/stable"
                 )
             return 0
 
@@ -804,6 +976,21 @@ def main(argv: list[str] | None = None) -> int:
                 _dump_json(payload)
             else:
                 print(f"staged {apk_path}")
+            return 0
+
+        if args.command == "sync-stable-ref":
+            payload = sync_stable_ref(
+                repo_root,
+                tag=args.tag,
+                branch=args.branch,
+            )
+            if args.json:
+                _dump_json(payload)
+            else:
+                action = "created" if payload["created"] else "updated"
+                print(
+                    f"{action} {payload['branch']} -> {payload['target_commit']} for {payload['tag_name']}"
+                )
             return 0
     except ReleaseConfigError as exc:
         print(f"error: {exc}", file=sys.stderr)

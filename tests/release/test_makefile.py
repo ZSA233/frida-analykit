@@ -5,6 +5,12 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from tests.release.constants import (
+    EXAMPLE_BASE_VERSION,
+    EXAMPLE_RC_TAG,
+    EXAMPLE_RELEASE_REF,
+    EXAMPLE_STABLE_TAG,
+)
 from tests.support.paths import REPO_ROOT
 
 import pytest
@@ -55,7 +61,7 @@ def test_make_release_version_show_dispatch() -> None:
 @pytest.mark.skipif(not Path(MAKE_BIN).exists(), reason="make is not available")
 def test_make_release_preflight_uses_fail_fast_verbose_pytest() -> None:
     result = subprocess.run(
-        [MAKE_BIN, "-n", "release-preflight", "RELEASE_TAG=v2.0.0-rc.1"],
+        [MAKE_BIN, "-n", "release-preflight", f"RELEASE_TAG={EXAMPLE_RC_TAG}"],
         cwd=REPO_ROOT,
         check=False,
         capture_output=True,
@@ -64,13 +70,14 @@ def test_make_release_preflight_uses_fail_fast_verbose_pytest() -> None:
     )
 
     assert result.returncode == 0, result.stderr
+    assert "validate-stable-entrypoints" in result.stdout
     assert 'pytest -x -vv -m "not smoke and not scaffold and not device"' in result.stdout
 
 
 @pytest.mark.skipif(not Path(MAKE_BIN).exists(), reason="make is not available")
 def test_make_release_ci_dispatch() -> None:
     result = subprocess.run(
-        [MAKE_BIN, "-n", "release-ci", "CI_REF=release/v2.0.8"],
+        [MAKE_BIN, "-n", "release-ci", f"CI_REF={EXAMPLE_RELEASE_REF}"],
         cwd=REPO_ROOT,
         check=False,
         capture_output=True,
@@ -79,13 +86,13 @@ def test_make_release_ci_dispatch() -> None:
     )
 
     assert result.returncode == 0, result.stderr
-    assert 'scripts/release_ci.py --ref "release/v2.0.8"' in result.stdout
+    assert f'scripts/release_ci.py --ref "{EXAMPLE_RELEASE_REF}"' in result.stdout
 
 
 @pytest.mark.skipif(not Path(MAKE_BIN).exists(), reason="make is not available")
 def test_make_release_preflight_skips_promotion_without_rc_tag_for_stable() -> None:
     result = subprocess.run(
-        [MAKE_BIN, "-n", "release-preflight", "RELEASE_TAG=v2.0.0"],
+        [MAKE_BIN, "-n", "release-preflight", f"RELEASE_TAG={EXAMPLE_STABLE_TAG}"],
         cwd=REPO_ROOT,
         check=False,
         capture_output=True,
@@ -94,14 +101,15 @@ def test_make_release_preflight_skips_promotion_without_rc_tag_for_stable() -> N
     )
 
     assert result.returncode == 0, result.stderr
-    assert "validate-release-version --tag \"v2.0.0\"" in result.stdout
+    assert f'validate-release-version --tag "{EXAMPLE_STABLE_TAG}"' in result.stdout
+    assert "validate-stable-entrypoints" in result.stdout
     assert "validate-promotion" not in result.stdout
 
 
 @pytest.mark.skipif(not Path(MAKE_BIN).exists(), reason="make is not available")
 def test_make_release_preflight_runs_promotion_when_rc_tag_is_supplied() -> None:
     result = subprocess.run(
-        [MAKE_BIN, "-n", "release-preflight", "RELEASE_TAG=v2.0.0", "RC_TAG=v2.0.0-rc.1"],
+        [MAKE_BIN, "-n", "release-preflight", f"RELEASE_TAG={EXAMPLE_STABLE_TAG}", f"RC_TAG={EXAMPLE_RC_TAG}"],
         cwd=REPO_ROOT,
         check=False,
         capture_output=True,
@@ -110,13 +118,13 @@ def test_make_release_preflight_runs_promotion_when_rc_tag_is_supplied() -> None
     )
 
     assert result.returncode == 0, result.stderr
-    assert 'validate-promotion --tag "v2.0.0" --rc-tag "v2.0.0-rc.1"' in result.stdout
+    assert f'validate-promotion --tag "{EXAMPLE_STABLE_TAG}" --rc-tag "{EXAMPLE_RC_TAG}"' in result.stdout
 
 
 @pytest.mark.skipif(not Path(MAKE_BIN).exists(), reason="make is not available")
 def test_make_release_version_rc_dispatch() -> None:
     result = subprocess.run(
-        [MAKE_BIN, "-n", "release-version-rc", "BASE_VERSION=2.0.0", "RC=1"],
+        [MAKE_BIN, "-n", "release-version-rc", f"BASE_VERSION={EXAMPLE_BASE_VERSION}", "RC=1"],
         cwd=REPO_ROOT,
         check=False,
         capture_output=True,
@@ -125,13 +133,13 @@ def test_make_release_version_rc_dispatch() -> None:
     )
 
     assert result.returncode == 0, result.stderr
-    assert 'scripts/release_version.py set-rc --base "2.0.0" --rc "1"' in result.stdout
+    assert f'scripts/release_version.py set-rc --base "{EXAMPLE_BASE_VERSION}" --rc "1"' in result.stdout
 
 
 @pytest.mark.skipif(not Path(MAKE_BIN).exists(), reason="make is not available")
 def test_make_release_version_rc_check_dispatch() -> None:
     result = subprocess.run(
-        [MAKE_BIN, "-n", "release-version-rc", "BASE_VERSION=2.0.0", "RC=1", "CHECK=1"],
+        [MAKE_BIN, "-n", "release-version-rc", f"BASE_VERSION={EXAMPLE_BASE_VERSION}", "RC=1", "CHECK=1"],
         cwd=REPO_ROOT,
         check=False,
         capture_output=True,
@@ -140,7 +148,7 @@ def test_make_release_version_rc_check_dispatch() -> None:
     )
 
     assert result.returncode == 0, result.stderr
-    assert 'scripts/release_version.py set-rc --base "2.0.0" --rc "1" --check' in result.stdout
+    assert f'scripts/release_version.py set-rc --base "{EXAMPLE_BASE_VERSION}" --rc "1" --check' in result.stdout
     assert "release-preflight" not in result.stdout
 
 
@@ -151,9 +159,9 @@ def test_make_release_version_stable_dispatch_with_check_and_rc_tag() -> None:
             MAKE_BIN,
             "-n",
             "release-version-stable",
-            "BASE_VERSION=2.0.0",
+            f"BASE_VERSION={EXAMPLE_BASE_VERSION}",
             "CHECK=1",
-            "RC_TAG=v2.0.0-rc.1",
+            f"RC_TAG={EXAMPLE_RC_TAG}",
         ],
         cwd=REPO_ROOT,
         check=False,
@@ -163,7 +171,10 @@ def test_make_release_version_stable_dispatch_with_check_and_rc_tag() -> None:
     )
 
     assert result.returncode == 0, result.stderr
-    assert 'scripts/release_version.py set-stable --base "2.0.0" --check --rc-tag "v2.0.0-rc.1"' in result.stdout
+    assert (
+        f'scripts/release_version.py set-stable --base "{EXAMPLE_BASE_VERSION}" --check --rc-tag "{EXAMPLE_RC_TAG}"'
+        in result.stdout
+    )
     assert "release-preflight" not in result.stdout
 
 
