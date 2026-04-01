@@ -115,6 +115,8 @@ jobs:
     if: ${{ github.event_name == 'push' }}
     needs: sync_stable
     runs-on: ubuntu-latest
+    # npm trusted publishing is bound to the production environment context.
+    environment: production
     permissions:
       id-token: write
     steps:

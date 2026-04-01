@@ -57,3 +57,11 @@ def test_release_workflow_push_only_jobs_do_not_run_for_dispatch() -> None:
     assert jobs["publish_release"]["if"] == expected_if
     assert jobs["sync_stable"]["if"] == expected_if
     assert jobs["publish_npm"]["if"] == expected_if
+
+
+def test_release_workflow_publish_npm_keeps_production_environment_context() -> None:
+    workflow = _load_release_workflow()
+    jobs = workflow["jobs"]
+
+    assert jobs["publish_release"]["environment"] == "production"
+    assert jobs["publish_npm"]["environment"] == "production"

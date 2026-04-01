@@ -283,6 +283,7 @@ npm publish ./zsa233-frida-analykit-agent-X.Y.Z.tgz --access public
 
 自动 stable 发布链路会拆成 `publish_release -> sync_stable -> publish_npm` 三段。
 仓库 workflow 会在最终 npm 发布前升级 npm；如果看到带 provenance 的 `npm publish` 仍返回误导性的 `E404`，先检查 job 实际使用的 npm 版本，而不是先怀疑 package scope 或 tarball 内容。
+执行 `npm publish` 的 job 仍必须保留 `production` environment 上下文；否则 npm Trusted Publishing 可能因为 OIDC 身份不匹配而拒绝发布。
 
 ## RC 流程
 
