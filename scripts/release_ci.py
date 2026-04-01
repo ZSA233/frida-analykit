@@ -85,13 +85,30 @@ def list_ci_runs(repo_root: Path, ref: str, *, limit: int = 20) -> list[dict[str
     return [item for item in payload if isinstance(item, dict)]
 
 
-def find_matching_dispatched_run(runs: list[dict[str, Any]], *, head_sha: str) -> dict[str, Any] | None:
+def highest_database_id(runs: list[dict[str, Any]]) -> int:
+    highest = 0
     for run in runs:
+        run_id = run.get("databaseId")
+        if isinstance(run_id, int) and run_id > highest:
+            highest = run_id
+    return highest
+
+
+def find_matching_dispatched_run(
+    runs: list[dict[str, Any]],
+    *,
+    head_sha: str,
+    min_database_id: int = 0,
+) -> dict[str, Any] | None:
+    for run in runs:
+        run_id = run.get("databaseId")
+        if not isinstance(run_id, int):
+            continue
+        if run_id <= min_database_id:
+            continue
         if run.get("event") != "workflow_dispatch":
             continue
         if run.get("headSha") != head_sha:
-            continue
-        if not isinstance(run.get("databaseId"), int):
             continue
         return run
     return None
@@ -102,12 +119,17 @@ def wait_for_ci_run(
     *,
     ref: str,
     head_sha: str,
+    min_database_id: int = 0,
     timeout_seconds: int = 90,
     poll_interval_seconds: int = 3,
 ) -> dict[str, Any]:
     deadline = time.monotonic() + timeout_seconds
     while time.monotonic() < deadline:
-        run = find_matching_dispatched_run(list_ci_runs(repo_root, ref), head_sha=head_sha)
+        run = find_matching_dispatched_run(
+            list_ci_runs(repo_root, ref),
+            head_sha=head_sha,
+            min_database_id=min_database_id,
+        )
         if run is not None:
             return run
         time.sleep(poll_interval_seconds)
@@ -127,9 +149,15 @@ def main(argv: list[str] | None = None) -> int:
     try:
         ref = args.ref or resolve_current_branch(repo_root)
         head_sha = resolve_head_sha(repo_root, ref)
+        previous_highest_run_id = highest_database_id(list_ci_runs(repo_root, ref))
         print(f"Triggering CI for {ref} at {head_sha}")
         trigger_ci_workflow(repo_root, ref)
-        run = wait_for_ci_run(repo_root, ref=ref, head_sha=head_sha)
+        run = wait_for_ci_run(
+            repo_root,
+            ref=ref,
+            head_sha=head_sha,
+            min_database_id=previous_highest_run_id,
+        )
         print(f"Watching CI run: {run['url']}")
         watch_ci_run(repo_root, int(run["databaseId"]))
         print(f"CI passed for {ref} at {head_sha}")
