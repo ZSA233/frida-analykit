@@ -6,6 +6,8 @@ from typing import Final
 
 _DOC_FILES: Final[dict[str, str]] = {
     "index": "index.md",
+    "config": "config.md",
+    "quickstart": "quickstart.md",
     "workflow": "workflow.md",
     "tools": "tools.md",
     "recovery": "recovery.md",
@@ -21,6 +23,12 @@ class MCPDocsProvider:
 
     def resource_workflow_markdown(self) -> str:
         return self._read("workflow")
+
+    def resource_config_markdown(self) -> str:
+        return self._read("config")
+
+    def resource_quickstart_markdown(self) -> str:
+        return self._read("quickstart")
 
     def resource_tools_markdown(self) -> str:
         return self._read("tools")

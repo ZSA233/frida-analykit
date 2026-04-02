@@ -9,7 +9,7 @@ from typing import Literal
 import click
 
 from ...compat import FridaCompat
-from ...config import AppConfig
+from ...config import AppConfig, DEFAULT_CONFIG_FILENAME
 from ...development import (
     build_device_doctor_config,
     estimate_compat_boundary,
@@ -457,7 +457,7 @@ def _emit_doctor_verbose(report: DoctorReport) -> None:
     if report.config is None:
         return
     click.echo(f"  Configured server host: {report.config.server.host}")
-    click.echo(f"  Configured server path: {report.config.server.servername}")
+    click.echo(f"  Configured server path: {report.config.server.path}")
     click.echo(f"  Configured server device: {report.config.server.device or 'none'}")
     click.echo(f"  Configured server version: {report.config.server.version or 'none'}")
     if report.remote_status is None:
@@ -529,7 +529,7 @@ def _emit_device_compat_summary(summary) -> None:
 
 
 @click.group(invoke_without_command=True)
-@click.option("-c", "--config", "config_path", default="config.yml", show_default=True)
+@click.option("-c", "--config", "config_path", default=DEFAULT_CONFIG_FILENAME, show_default=True)
 @_verbose_option()
 @click.pass_context
 def doctor(ctx: click.Context, config_path: str, verbose: bool) -> None:
@@ -544,12 +544,12 @@ def doctor(ctx: click.Context, config_path: str, verbose: bool) -> None:
 
 
 @doctor.command("fix")
-@click.option("-c", "--config", "config_path", default="config.yml", show_default=True)
+@click.option("-c", "--config", "config_path", default=DEFAULT_CONFIG_FILENAME, show_default=True)
 @_verbose_option()
 @click.pass_context
 def doctor_fix(ctx: click.Context, config_path: str, verbose: bool) -> None:
     parent_options = ctx.parent.obj if ctx.parent is not None and isinstance(ctx.parent.obj, dict) else {}
-    if config_path == "config.yml" and isinstance(parent_options.get("config_path"), str):
+    if config_path == DEFAULT_CONFIG_FILENAME and isinstance(parent_options.get("config_path"), str):
         config_path = parent_options["config_path"]
     verbose = verbose or bool(parent_options.get("verbose"))
     cli_common._configure_verbose(verbose)
@@ -578,7 +578,7 @@ def doctor_fix(ctx: click.Context, config_path: str, verbose: bool) -> None:
             selected_version=report.config.server.version or str(compat.installed_version),
             selected_version_source="config.server.version" if report.config.server.version else "installed Frida",
             configured_version=report.config.server.version,
-            server_path=report.config.server.servername,
+            server_path=report.config.server.path,
             adb_target=report.config.server.device,
             resolved_device=report.config.server.device,
             resolved_device_source="config.server.device" if report.config.server.device else None,
@@ -612,7 +612,7 @@ def doctor_fix(ctx: click.Context, config_path: str, verbose: bool) -> None:
 
 
 @doctor.command("device-compat")
-@click.option("-c", "--config", "config_path", default="config.yml", show_default=True)
+@click.option("-c", "--config", "config_path", default=DEFAULT_CONFIG_FILENAME, show_default=True)
 @_verbose_option()
 @click.option("--serial", "serials", multiple=True)
 @click.option("--all-devices", is_flag=True, help="Run the compatibility probe on every connected adb device.")
@@ -645,7 +645,7 @@ def doctor_device_compat(
     probe_kinds: tuple[str, ...],
 ) -> None:
     parent_options = ctx.parent.obj if ctx.parent is not None and isinstance(ctx.parent.obj, dict) else {}
-    if config_path == "config.yml" and isinstance(parent_options.get("config_path"), str):
+    if config_path == DEFAULT_CONFIG_FILENAME and isinstance(parent_options.get("config_path"), str):
         config_path = parent_options["config_path"]
     verbose = verbose or bool(parent_options.get("verbose"))
     cli_common._configure_verbose(verbose)

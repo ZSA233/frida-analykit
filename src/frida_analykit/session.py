@@ -13,9 +13,9 @@ from frida.core import Script, Session, SessionDetachedCallback
 from ._version import __version__
 from .config import AgentConfig, AppConfig
 from .logging import LoggerBundle, build_loggers
-from .rpc.client import RPCClient
+from .rpc.client import AsyncRPCClient, SyncRPCClient
 from .rpc.exports import ScriptExportsAsyncWrapper, ScriptExportsSyncWrapper
-from .rpc.handler.js_handle import JsHandle
+from .rpc.handler.js_handle import AsyncJsHandle, SyncJsHandle
 from .rpc.message import RPCMessage, RPCMsgInitConfig
 from .rpc.registry import HandlerRegistry
 from .rpc.resolver import RPCResolver
@@ -74,10 +74,11 @@ class SessionRuntime:
 
 
 @dataclass(slots=True)
-class ScriptRuntime:
+class ScriptSharedRuntime:
     env: ScriptEnv
-    rpc: RPCClient
+    scope_id: str
     loggers: LoggerBundle | None = None
+    interactive: bool = False
 
 
 def try_inject_environ(script_src: str, env: dict | None = None) -> str:
@@ -146,19 +147,14 @@ def render_session_banner(config: AppConfig, *, jsfile: Path, updated: datetime)
     return "\n".join(lines)
 
 
-class ScriptWrapper:
-    def __init__(self, script: Script, runtime: ScriptRuntime) -> None:
+class _ScriptWrapperBase:
+    def __init__(self, script: Script, runtime: ScriptSharedRuntime) -> None:
         self._script = script
         self._runtime = runtime
-        self._scope_id = runtime.rpc.scope_id
-        # Public script exports should stay close to Frida's native semantics.
-        # RPC payload normalization belongs to RPCClient only.
-        self.exports_sync: ScriptExportsSyncWrapper = ScriptExportsSyncWrapper(script)
-        self.exports_async: ScriptExportsAsyncWrapper = ScriptExportsAsyncWrapper(script)
 
     @property
     def scope_id(self) -> str:
-        return self._scope_id
+        return self._runtime.scope_id
 
     def load(self) -> None:
         self._script.load()
@@ -177,12 +173,6 @@ class ScriptWrapper:
 
     def disable_debugger(self) -> None:
         self._script.disable_debugger()
-
-    def list_exports_sync(self) -> list[str]:
-        return self.exports_sync._list_exports()
-
-    async def list_exports_async(self) -> list[str]:
-        return await self.exports_async._list_exports()
 
     def set_log_handler(self, handler: Callable[[str, str], None] | None) -> None:
         self._script.set_log_handler(handler)
@@ -207,26 +197,49 @@ class ScriptWrapper:
 
         self.set_log_handler(handler)
 
-    def jsh(self, path: str) -> JsHandle:
-        return JsHandle.from_seed_path(path, client=self._runtime.rpc)
 
-    def eval(self, source: str) -> JsHandle:
-        return JsHandle.from_scope_result(self._runtime.rpc.eval(source), client=self._runtime.rpc)
+class SyncScriptWrapper(_ScriptWrapperBase):
+    def __init__(self, script: Script, runtime: ScriptSharedRuntime) -> None:
+        super().__init__(script, runtime)
+        self._rpc = SyncRPCClient(script, scope_id=runtime.scope_id, interactive=runtime.interactive)
+        self.exports_sync = ScriptExportsSyncWrapper(script)
 
-    async def eval_async(self, source: str) -> JsHandle:
-        return await JsHandle.from_scope_result_async(await self._runtime.rpc.eval_async(source), client=self._runtime.rpc)
+    def list_exports_sync(self) -> list[str]:
+        return self.exports_sync._list_exports()
+
+    def jsh(self, path: str) -> SyncJsHandle:
+        return SyncJsHandle.from_seed_path(path, client=self._rpc)
+
+    def eval(self, source: str) -> SyncJsHandle:
+        return SyncJsHandle.from_scope_result(self._rpc.eval(source), client=self._rpc)
 
     def ensure_runtime_compatible(self) -> None:
-        self._runtime.rpc.ensure_runtime_compatible()
-
-    async def ensure_runtime_compatible_async(self) -> None:
-        await self._runtime.rpc.ensure_runtime_compatible_async()
+        self._rpc.ensure_runtime_compatible()
 
     def clear_scope(self) -> None:
-        self._runtime.rpc.clear_scope_sync()
+        self._rpc.clear_scope()
+
+
+class AsyncScriptWrapper(_ScriptWrapperBase):
+    def __init__(self, script: Script, runtime: ScriptSharedRuntime) -> None:
+        super().__init__(script, runtime)
+        self._rpc = AsyncRPCClient(script, scope_id=runtime.scope_id, interactive=runtime.interactive)
+        self.exports_async = ScriptExportsAsyncWrapper(script)
+
+    async def list_exports_async(self) -> list[str]:
+        return await self.exports_async._list_exports()
+
+    def jsh(self, path: str) -> AsyncJsHandle:
+        return AsyncJsHandle.from_seed_path(path, client=self._rpc)
+
+    async def eval_async(self, source: str) -> AsyncJsHandle:
+        return await AsyncJsHandle.from_scope_result_async(await self._rpc.eval_async(source), client=self._rpc)
+
+    async def ensure_runtime_compatible_async(self) -> None:
+        await self._rpc.ensure_runtime_compatible_async()
 
     async def clear_scope_async(self) -> None:
-        await self._runtime.rpc.clear_scope()
+        await self._rpc.clear_scope_async()
 
 
 class SessionWrapper:
@@ -279,22 +292,20 @@ class SessionWrapper:
         snapshot: bytes | None = None,
         runtime: str | None = None,
         env: ScriptEnv | None = None,
-    ) -> ScriptWrapper:
-        inject_env = env or ScriptEnv(BatchMaxBytes=self._config.script.rpc.batch_max_bytes)
-        script = self._session.create_script(
-            try_inject_environ(source, inject_env.model_dump()),
-            name,
-            snapshot,
-            runtime,
-        )
-        self._runtime.resolver.register_script(script)
-        scope_id = uuid.uuid4().hex
-        script_runtime = ScriptRuntime(
-            env=inject_env,
-            rpc=RPCClient(script, scope_id=scope_id, interactive=self._runtime.interactive),
-            loggers=self._runtime.loggers,
-        )
-        return ScriptWrapper(script, script_runtime)
+    ) -> SyncScriptWrapper:
+        script, script_runtime = self._create_script_binding(source, name, snapshot, runtime, env)
+        return SyncScriptWrapper(script, script_runtime)
+
+    def create_script_async(
+        self,
+        source: str,
+        name: str | None = None,
+        snapshot: bytes | None = None,
+        runtime: str | None = None,
+        env: ScriptEnv | None = None,
+    ) -> AsyncScriptWrapper:
+        script, script_runtime = self._create_script_binding(source, name, snapshot, runtime, env)
+        return AsyncScriptWrapper(script, script_runtime)
 
     def open_script(
         self,
@@ -303,13 +314,52 @@ class SessionWrapper:
         snapshot: bytes | None = None,
         runtime: str | None = None,
         env: ScriptEnv | None = None,
-    ) -> ScriptWrapper:
-        path = Path(jsfile)
-        stat = path.stat()
-        updated = datetime.fromtimestamp(stat.st_mtime)
-        print(render_session_banner(self._config, jsfile=path, updated=updated))
-        source = path.read_text(encoding="utf-8")
+    ) -> SyncScriptWrapper:
+        source = self._read_script_source(jsfile, emit_banner=True)
         return self.create_script(source, name, snapshot, runtime, env)
+
+    def open_script_async(
+        self,
+        jsfile: str,
+        name: str | None = None,
+        snapshot: bytes | None = None,
+        runtime: str | None = None,
+        env: ScriptEnv | None = None,
+    ) -> AsyncScriptWrapper:
+        source = self._read_script_source(jsfile, emit_banner=True)
+        return self.create_script_async(source, name, snapshot, runtime, env)
+
+    def _create_script_binding(
+        self,
+        source: str,
+        name: str | None,
+        snapshot: bytes | None,
+        runtime: str | None,
+        env: ScriptEnv | None,
+    ) -> tuple[Script, ScriptSharedRuntime]:
+        inject_env = env or ScriptEnv(BatchMaxBytes=self._config.script.rpc.batch_max_bytes)
+        script = self._session.create_script(
+            try_inject_environ(source, inject_env.model_dump()),
+            name,
+            snapshot,
+            runtime,
+        )
+        self._runtime.resolver.register_script(script)
+        script_runtime = ScriptSharedRuntime(
+            env=inject_env,
+            scope_id=uuid.uuid4().hex,
+            loggers=self._runtime.loggers,
+            interactive=self._runtime.interactive,
+        )
+        return script, script_runtime
+
+    def _read_script_source(self, jsfile: str, *, emit_banner: bool) -> str:
+        path = Path(jsfile)
+        if emit_banner:
+            stat = path.stat()
+            updated = datetime.fromtimestamp(stat.st_mtime)
+            print(render_session_banner(self._config, jsfile=path, updated=updated))
+        return path.read_text(encoding="utf-8")
 
     @classmethod
     def from_session(

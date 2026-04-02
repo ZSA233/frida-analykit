@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 from ruamel.yaml import YAML
 
+DEFAULT_CONFIG_FILENAME = "config.toml"
+LEGACY_CONFIG_FILENAMES: tuple[str, ...] = ("config.yml", "config.yaml")
 DEFAULT_SCRIPT_REPL_GLOBALS: tuple[str, ...] = (
     "Process",
     "Module",
@@ -20,13 +23,24 @@ class ServerConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     device: str | None = None
-    servername: str = "frida-server"
+    path: str = Field(default="frida-server", validation_alias=AliasChoices("path", "servername"))
     host: str = "127.0.0.1:27042"
     version: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_duplicate_path_keys(cls, data: object) -> object:
+        if isinstance(data, dict) and "path" in data and "servername" in data:
+            raise ValueError("server config cannot specify both `path` and legacy `servername`; use `path`")
+        return data
 
     @property
     def is_remote(self) -> bool:
         return self.host not in {"local", "local://", "usb", "usb://"}
+
+    @property
+    def servername(self) -> str:
+        return self.path
 
 
 class AgentConfig(BaseModel):
@@ -88,6 +102,24 @@ class AppConfig(BaseModel):
     source_path: Path | None = Field(default=None, exclude=True, repr=False)
 
     @classmethod
+    def from_file(cls, filepath: str | Path) -> "AppConfig":
+        path = Path(filepath).expanduser().resolve()
+        suffix = path.suffix.lower()
+        if suffix == ".toml":
+            return cls.from_toml(path)
+        if suffix in {".yml", ".yaml"}:
+            return cls.from_yaml(path)
+        raise ValueError(f"unsupported config format for `{path}`; expected .toml, .yml, or .yaml")
+
+    @classmethod
+    def from_toml(cls, filepath: str | Path) -> "AppConfig":
+        path = Path(filepath).expanduser().resolve()
+        with path.open("rb") as handle:
+            data = tomllib.load(handle) or {}
+        config = cls.model_validate(data)
+        return config.resolve_paths(path.parent, source_path=path)
+
+    @classmethod
     def from_yaml(cls, filepath: str | Path) -> "AppConfig":
         path = Path(filepath).expanduser().resolve()
         yaml = YAML(typ="safe")
@@ -143,6 +175,71 @@ class AppConfig(BaseModel):
             }
         )
 
+    def to_data(self, *, exclude_none: bool = True) -> dict[str, Any]:
+        return self.model_dump(mode="json", exclude={"source_path"}, exclude_none=exclude_none)
+
+    def to_toml_text(self) -> str:
+        return _render_toml_document(self.to_data())
+
     def to_yaml_data(self) -> dict[str, Any]:
-        data = self.model_dump(mode="json", exclude={"source_path"})
-        return data
+        return self.to_data()
+
+
+def resolve_default_config_path(filepath: str | Path) -> Path:
+    candidate = Path(filepath).expanduser()
+    if candidate.exists():
+        return candidate.resolve()
+    if candidate.name == DEFAULT_CONFIG_FILENAME:
+        for legacy_name in LEGACY_CONFIG_FILENAMES:
+            legacy_candidate = candidate.with_name(legacy_name)
+            if legacy_candidate.exists():
+                return legacy_candidate.resolve()
+    return candidate.resolve()
+
+
+def _render_toml_document(data: dict[str, Any]) -> str:
+    blocks = _render_toml_blocks(data)
+    return "\n\n".join(block for block in blocks if block) + "\n"
+
+
+def _render_toml_blocks(data: dict[str, Any], prefix: tuple[str, ...] = ()) -> list[str]:
+    scalars: list[str] = []
+    blocks: list[str] = []
+    for key, value in data.items():
+        if value is None:
+            continue
+        if isinstance(value, dict):
+            blocks.extend(_render_toml_blocks(value, (*prefix, key)))
+            continue
+        scalars.append(f"{key} = {_render_toml_value(value)}")
+
+    header = f"[{'.'.join(prefix)}]" if prefix else ""
+    current_block = "\n".join([*( [header] if header and scalars else [] ), *scalars])
+    return ([current_block] if current_block else []) + blocks
+
+
+def _render_toml_value(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        return repr(value)
+    if isinstance(value, str):
+        return _quote_toml_string(value)
+    if isinstance(value, list):
+        return "[" + ", ".join(_render_toml_value(item) for item in value) + "]"
+    raise TypeError(f"unsupported TOML value: {value!r}")
+
+
+def _quote_toml_string(value: str) -> str:
+    escaped = (
+        value.replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\b", "\\b")
+        .replace("\t", "\\t")
+        .replace("\n", "\\n")
+        .replace("\f", "\\f")
+        .replace("\r", "\\r")
+    )
+    return f'"{escaped}"'

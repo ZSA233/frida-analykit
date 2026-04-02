@@ -7,7 +7,13 @@ from frida_analykit._version import __version__
 from frida_analykit.config import AppConfig
 from frida_analykit.logging import LoggerBundle
 from frida_analykit.rpc.protocol import RPCRuntimeInfo
-from frida_analykit.session import SessionWrapper, render_session_banner, try_inject_environ
+from frida_analykit.session import (
+    AsyncScriptWrapper,
+    SessionWrapper,
+    SyncScriptWrapper,
+    render_session_banner,
+    try_inject_environ,
+)
 
 
 def _config(
@@ -186,12 +192,30 @@ def test_render_session_banner_includes_core_metadata(tmp_path: Path) -> None:
     assert "outerr.log" in banner
 
 
-def test_script_wrapper_public_exports_remain_transparent(tmp_path: Path) -> None:
+def test_explicit_sync_and_async_script_wrappers_keep_exports_transparent(tmp_path: Path) -> None:
     session = SessionWrapper(_FakeSession(), config=_config(tmp_path))
-    script = session.create_script("16 /index.js\n✄\n")
+    sync_script = session.create_script("16 /index.js\n✄\n")
+    async_script = session.create_script_async("16 /index.js\n✄\n")
 
-    assert script.exports_sync.plain_payload() == {"type": "demo"}
-    assert asyncio.run(script.exports_async.plain_payload()) == {"type": "demo"}
+    assert sync_script.exports_sync.plain_payload() == {"type": "demo"}
+    assert asyncio.run(async_script.exports_async.plain_payload()) == {"type": "demo"}
+
+
+def test_session_wrapper_exposes_sync_default_and_explicit_async_script_owners(tmp_path: Path) -> None:
+    session = SessionWrapper(_FakeSession(), config=_config(tmp_path))
+
+    sync_script = session.create_script("16 /index.js\n✄\n")
+    async_script = session.create_script_async("16 /index.js\n✄\n")
+    opened_script_path = tmp_path / "_agent.js"
+    opened_script_path.write_text("16 /index.js\n✄\n", encoding="utf-8")
+    opened_sync_script = session.open_script(str(opened_script_path))
+
+    assert isinstance(sync_script, SyncScriptWrapper)
+    assert isinstance(async_script, AsyncScriptWrapper)
+    assert isinstance(opened_sync_script, SyncScriptWrapper)
+    assert hasattr(sync_script, "eval") and not hasattr(sync_script, "eval_async")
+    assert hasattr(async_script, "eval_async") and not hasattr(async_script, "eval")
+    assert hasattr(opened_sync_script, "eval") and not hasattr(opened_sync_script, "eval_async")
 
 
 def test_session_wrapper_injects_default_batch_limit(tmp_path: Path) -> None:

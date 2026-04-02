@@ -1,0 +1,35 @@
+app = ""
+jsfile = "_agent.js"
+
+[server]
+path = "/data/local/tmp/frida-server"
+host = "127.0.0.1:27042"
+# device = ""
+# version = ""
+
+[agent]
+datadir = "./data/"
+stdout = "./logs/outerr.log"
+stderr = "./logs/outerr.log"
+
+[script.rpc]
+batch_max_bytes = 8388608
+
+[script.repl]
+globals = [
+  "Process",
+  "Module",
+  "Memory",
+  "Java",
+  "ObjC",
+  "Swift",
+]
+
+[script.dextools]
+output_dir = "./data/dextools/"
+
+[script.elftools]
+output_dir = "./data/elftools/"
+
+[script.nettools]
+ssl_log_secret = "./data/nettools/sslkey/"

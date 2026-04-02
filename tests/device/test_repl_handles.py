@@ -22,6 +22,7 @@ def _run_repl_probe(
     body: str,
     *,
     pid: int | None = None,
+    script_mode: str = "sync",
 ) -> dict[str, object]:
     body_lines = textwrap.dedent(body).strip().splitlines()
     session_lines = [f"pid = {pid}"] if pid is not None else ["pid = device.spawn([config.app])"]
@@ -29,6 +30,40 @@ def _run_repl_probe(
         session_lines.append("resume_pid = True")
     else:
         session_lines.append("resume_pid = False")
+    if script_mode == "sync":
+        open_script_line = "script = session.open_script(str(config.jsfile))"
+        repl_lines = [
+            "        repl_namespace = build_repl_namespace(",
+            "            {",
+            "                'config': config,",
+            "                'device': device,",
+            "                'pid': pid,",
+            "                'session': session,",
+            "                'script': script,",
+            "            },",
+            "            script=script,",
+            "            global_names=config.script.repl.globals,",
+            "        )",
+            "        Process = repl_namespace.get('Process')",
+            "        Module = repl_namespace.get('Module')",
+            "        Memory = repl_namespace.get('Memory')",
+            "        Java = repl_namespace.get('Java')",
+            "        ObjC = repl_namespace.get('ObjC')",
+            "        Swift = repl_namespace.get('Swift')",
+        ]
+    elif script_mode == "async":
+        open_script_line = "script = session.open_script_async(str(config.jsfile))"
+        repl_lines = [
+            "        Process = None",
+            "        Module = None",
+            "        Memory = None",
+            "        Java = None",
+            "        ObjC = None",
+            "        Swift = None",
+        ]
+    else:
+        raise ValueError(f"unsupported script_mode: {script_mode}")
+
     script_lines = [
         "import asyncio",
         "import json",
@@ -45,7 +80,7 @@ def _run_repl_probe(
         "device = compat.get_device(config.server.host)",
         *session_lines,
         "session = SessionWrapper.from_session(device.attach(pid), config=config, interactive=True)",
-        "script = session.open_script(str(config.jsfile))",
+        open_script_line,
         "script.set_logger()",
         "script.load()",
         "if resume_pid:",
@@ -53,23 +88,7 @@ def _run_repl_probe(
         "",
         "async def main() -> dict[str, object]:",
         "    try:",
-        "        repl_namespace = build_repl_namespace(",
-        "            {",
-        "                'config': config,",
-        "                'device': device,",
-        "                'pid': pid,",
-        "                'session': session,",
-        "                'script': script,",
-        "            },",
-        "            script=script,",
-        "            global_names=config.script.repl.globals,",
-        "        )",
-        "        Process = repl_namespace.get('Process')",
-        "        Module = repl_namespace.get('Module')",
-        "        Memory = repl_namespace.get('Memory')",
-        "        Java = repl_namespace.get('Java')",
-        "        ObjC = repl_namespace.get('ObjC')",
-        "        Swift = repl_namespace.get('Swift')",
+        *repl_lines,
         *[f"        {line}" if line else "" for line in body_lines],
         "    finally:",
         "        try:",
@@ -290,6 +309,7 @@ def test_repl_handle_async_eval_and_resolve_on_device(
         }
         """,
         pid=running_device_repl_app_pid,
+        script_mode="async",
     )
 
     assert isinstance(payload["arch"], str)
@@ -306,13 +326,14 @@ def test_repl_handle_scope_root_async_call_on_device(
         device_helpers,
         booted_device_repl_workspace,
         """
-        handle = script.eval("Process").getCurrentThreadId
+        handle = await script.eval_async("Process.getCurrentThreadId")
         result = await handle.call_async()
         return {
             "thread_id": await result.resolve_async(),
         }
         """,
         pid=running_device_repl_app_pid,
+        script_mode="async",
     )
 
     assert isinstance(payload["thread_id"], int)

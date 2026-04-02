@@ -89,7 +89,7 @@ def test_scaffold_can_use_local_packed_runtime(tmp_path: Path) -> None:
     runner = CliRunner()
     result = runner.invoke(
         cli,
-        ["build", "--config", str(tmp_path / "config.yml"), "--project-dir", str(tmp_path)],
+        ["build", "--config", str(tmp_path / "config.toml"), "--project-dir", str(tmp_path)],
     )
 
     package = json.loads((tmp_path / "package.json").read_text(encoding="utf-8"))
@@ -98,4 +98,4 @@ def test_scaffold_can_use_local_packed_runtime(tmp_path: Path) -> None:
     assert "frida-java-bridge" not in package["dependencies"]
     assert (tmp_path / "_agent.js").exists()
     assert "OK!" in (tmp_path / "index.ts").read_text(encoding="utf-8")
-    assert AppConfig.from_yaml(tmp_path / "config.yml").script.repl.globals == list(DEFAULT_SCRIPT_REPL_GLOBALS)
+    assert AppConfig.from_file(tmp_path / "config.toml").script.repl.globals == list(DEFAULT_SCRIPT_REPL_GLOBALS)

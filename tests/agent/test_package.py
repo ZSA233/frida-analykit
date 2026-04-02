@@ -19,7 +19,7 @@ def test_agent_package_exports_prebuilt_runtime() -> None:
     assert "README.md" in package_json["files"]
     assert "README_EN.md" in package_json["files"]
     assert package_json["homepage"] == (
-        "https://github.com/ZSA233/frida-analykit/blob/stable/packages/frida-analykit-agent/README.md"
+        "https://github.com/ZSA233/frida-analykit"
     )
     package_readme = (repo_root / "packages/frida-analykit-agent/README.md").read_text(encoding="utf-8")
     package_readme_en = (repo_root / "packages/frida-analykit-agent/README_EN.md").read_text(encoding="utf-8")

@@ -13,16 +13,20 @@
 - 入口模块应尽量薄，只负责参数接线、对象装配、生命周期编排和对外暴露，不承载大量细节逻辑。
 - 跨步骤共享状态时，优先使用显式 runtime/context 对象，而不是把依赖散落在宿主对象私有字段里。
 - 当前仓库已经形成的风格包括：
-  - `SessionRuntime` / `ScriptRuntime`
+  - `SessionRuntime` / `ScriptSharedRuntime`
   - `ServerRuntime`
   - `DeviceServerRuntime`
-  - `SessionWrapper` / `ScriptWrapper`
-  - `RPCClient`
-  - `DebugSessionManager`
+  - `SessionWrapper` / `SyncScriptWrapper` / `AsyncScriptWrapper`
+  - `SyncRPCClient` / `AsyncRPCClient`
+  - `SyncJsHandle` / `AsyncJsHandle`
+  - `AsyncDebugSessionManager`
 - 组件边界应尽量清楚：
   - wrapper 负责对外易用接口和生命周期装配
   - runtime/context 负责显式持有依赖
   - client / resolver / handler 负责具体协议与行为
+- sync/async 主线应优先拆成显式 owner，不要再引入“一个 public 对象同时承载 sync/async 两条主线”的 compat facade。
+- 普通 CLI / REPL 默认走 `SyncScriptWrapper`；`AsyncScriptWrapper` 属于 MCP 与 Promise-aware expert path，不应被包装成 REPL 的对称主入口。
+- Frida async 能力选择必须按当前 script/export 的实际 capability 探测；compat profile 只保留给诊断、doctor 输出和测试语义，不参与 native async / shim async 分流。
 - 不要默认使用隐式 mixin 契约，不要让一个类依赖“宿主碰巧有这个字段/方法”才能成立。
 - 如果某项兼容性处理、协议握手或错误恢复较复杂，应把它收敛到专门组件里，而不是散在多个 CLI 或 wrapper 入口里。
 
@@ -63,7 +67,9 @@
 - `development` 域内也应保持薄入口，优先拆成 `profiles / managed_envs / device_testing / device_compat` 这类显式 owner，而不是把交叉逻辑重新堆回包根。
 - 包根 `__init__`、CLI 根入口和对外 convenience 模块不应承担内部中转层职责。
 - `mcp` 域负责 stdio MCP server、长会话 manager、tool/resource schema 和会话资源回收；它不应复用会向 stdout 打 banner 或普通日志的 CLI 入口路径。
-- `mcp` 域的主线实现应优先使用 async manager / async tool handlers；如需兼容同步调用方，应通过薄 sync adapter 桥接，而不是把同步实现继续当作主线。
+- `mcp` 域的主线实现应优先使用 async manager / async tool handlers；不要再为 MCP 保留独立的 sync manager public surface。
+- MCP 启动配置应保持独立 typed module，并在进程启动时一次性解析固定；`session_open_quick` 不应再接受会覆盖服务级 server/output 默认值的逐次参数。
+- MCP 面向大模型的 quick session / prepared workspace 能力应继续收敛在 `mcp/prepared/` 这类显式子系统里，负责模板、capability 校验、缓存签名和构建编排；不要把这部分逻辑塞回主 manager 单文件。
 - MCP 面向大模型的使用文档应作为打包资源进入 wheel，并通过 MCP resources 暴露；不要依赖仓库根目录下的 README / docs 文件在安装后仍可直接读取。
 - 如果某个文件已经同时承载配置解析、生命周期、错误处理、协议序列化、日志落盘等多种责任，应主动拆分。
 - 测试目录也遵循相同思路：
@@ -77,6 +83,7 @@
 ## 接口风格 / Interface Style
 
 - Python 对外接口倾向显式对象和显式参数，不依赖隐藏全局状态。
+- 用户向配置主线默认使用 TOML；`config.toml` 与 `server.path` 是当前推荐写法，legacy YAML / `server.servername` 只保留输入兼容，不应继续作为新文档和新脚手架的主线事实。
 - 公共 wrapper 应尽量保留底层 Frida 语义；如果需要做 payload 归一化、句柄协议转换或兼容性预检，应收在内部 client 层，而不是污染公共 exports 面。
 - stdio MCP 入口是协议通道，不允许混入 session banner、普通 `print(...)` 日志或其它用户向 stdout 输出；这类可读信息应改走 MCP resource/tool 返回值或文件日志。
 - 错误信息应尽量具备操作性，直接指出失败阶段、冲突条件和建议动作，而不是只抛底层异常。

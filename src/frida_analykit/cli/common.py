@@ -13,13 +13,13 @@ import frida
 from frida.core import Session
 
 from ..compat import FridaCompat
-from ..config import AppConfig
+from ..config import AppConfig, resolve_default_config_path
 from ..env import EnvManager
 from ..diagnostics import set_verbose
 from ..frontend import FrontendError, WatchProcess, build_agent_bundle, load_frontend_project, start_watch
 from ..repl import LazyJsHandleProxy, build_repl_namespace
 from ..server import FridaServerManager, ServerManagerError
-from ..session import ScriptWrapper, SessionWrapper
+from ..session import SessionWrapper, SyncScriptWrapper
 
 F = TypeVar("F", bound=Callable[..., object])
 ClickDecorator: TypeAlias = Callable[[F], F]
@@ -38,18 +38,18 @@ class RuntimeDevice(Protocol):
     def resume(self, pid: int) -> None: ...
 
 
-ReplNamespaceValue: TypeAlias = AppConfig | int | SessionWrapper | ScriptWrapper | RuntimeDevice | LazyJsHandleProxy
+ReplNamespaceValue: TypeAlias = AppConfig | int | SessionWrapper | SyncScriptWrapper | RuntimeDevice | LazyJsHandleProxy
 
 
 def _load_config(path: str) -> AppConfig:
-    return AppConfig.from_yaml(path)
+    return AppConfig.from_file(resolve_default_config_path(path))
 
 
 def _load_optional_config(path: str) -> AppConfig | None:
-    candidate = Path(path).expanduser()
+    candidate = resolve_default_config_path(path)
     if not candidate.exists():
         return None
-    return AppConfig.from_yaml(candidate)
+    return AppConfig.from_file(candidate)
 
 
 def _frontend_project_option() -> ClickDecorator:
@@ -135,7 +135,8 @@ def _prepare_session(
     pid: int,
     *,
     interactive: bool = False,
-) -> tuple[RuntimeDevice, SessionWrapper, ScriptWrapper]:
+) -> tuple[RuntimeDevice, SessionWrapper, SyncScriptWrapper]:
+    # REPL and the regular CLI stay on the sync wrapper path for direct object browsing.
     session = SessionWrapper.from_session(device.attach(pid), config=config, interactive=interactive)
     session.on("detached", _on_session_detached)
     script = session.open_script(str(config.jsfile))
@@ -176,7 +177,7 @@ def _post_attach(
     config: AppConfig,
     device: RuntimeDevice,
     session: SessionWrapper,
-    script: ScriptWrapper,
+    script: SyncScriptWrapper,
     pid: int,
     repl: bool,
     detach_on_load: bool,

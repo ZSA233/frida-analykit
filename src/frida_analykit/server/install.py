@@ -126,7 +126,7 @@ class ServerInstaller:
             except ServerManagerError as exc:
                 abi_error = str(exc)
 
-        remote_path = config.server.servername
+        remote_path = config.server.path
         exists_probe = self._adb.shell_with_auto_root(
             config,
             f"ls {shlex.quote(remote_path)}",
@@ -247,7 +247,7 @@ class ServerInstaller:
             )
             local_binary = downloaded.binary_path
 
-        remote_path = config.server.servername
+        remote_path = config.server.path
         temp_name = f".frida-analykit-{PurePosixPath(remote_path).name}-{selected_version}"
         temp_remote_path = f"/data/local/tmp/{temp_name}"
         remote_dir = str(PurePosixPath(remote_path).parent)

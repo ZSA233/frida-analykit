@@ -9,7 +9,9 @@ from types import SimpleNamespace
 import pytest
 
 from frida_analykit.config import AppConfig
-from frida_analykit.mcp.async_manager import AsyncDebugSessionManager, MCPManagerError
+from frida_analykit.mcp.config import MCPStartupConfig
+from frida_analykit.mcp.manager import DebugSessionManager, MCPManagerError
+from frida_analykit.mcp.prepared import PreparedWorkspaceManager
 from frida_analykit.rpc import RPCCompatibilityError
 
 
@@ -139,7 +141,7 @@ class FakeSessionWrapper:
     def on(self, signal: str, callback) -> None:
         self.handlers[signal] = callback
 
-    def create_script(self, source: str, name=None, snapshot=None, runtime=None, env=None) -> FakeScriptWrapper:
+    def create_script_async(self, source: str, name=None, snapshot=None, runtime=None, env=None) -> FakeScriptWrapper:
         del name, snapshot, runtime, env
         self.created_source = source
         return self.script
@@ -284,7 +286,7 @@ def test_session_open_reuses_same_target_and_force_replace_reopens(tmp_path: Pat
         script = FakeScriptWrapper({"snippet:demo": _snippet_handle})
         device = FakeDevice(lambda: FakeSessionWrapper(script))
         config = _config(tmp_path)
-        manager = AsyncDebugSessionManager(
+        manager = DebugSessionManager(
             config_loader=lambda path: config if Path(path).resolve() == config.source_path else None,  # type: ignore[return-value]
             compat_factory=lambda: FakeCompat(device, app_pid=321),
             session_factory=lambda raw_session, *, config, interactive: raw_session,
@@ -320,7 +322,7 @@ def test_idle_timeout_closes_current_session(tmp_path: Path) -> None:
         script = FakeScriptWrapper({})
         device = FakeDevice(lambda: FakeSessionWrapper(script))
         config = _config(tmp_path)
-        manager = AsyncDebugSessionManager(
+        manager = DebugSessionManager(
             idle_timeout_seconds=1,
             config_loader=lambda path: config if Path(path).resolve() == config.source_path else None,  # type: ignore[return-value]
             compat_factory=lambda: FakeCompat(device, app_pid=111),
@@ -350,7 +352,7 @@ def test_snippet_lifecycle_and_log_ring(tmp_path: Path) -> None:
         )
         device = FakeDevice(lambda: FakeSessionWrapper(script))
         config = _config(tmp_path)
-        manager = AsyncDebugSessionManager(
+        manager = DebugSessionManager(
             config_loader=lambda path: config if Path(path).resolve() == config.source_path else None,  # type: ignore[return-value]
             compat_factory=lambda: FakeCompat(device, app_pid=111),
             session_factory=lambda raw_session, *, config, interactive: raw_session,
@@ -393,7 +395,7 @@ def test_broken_session_requires_explicit_recover_and_keeps_snippet_metadata(tmp
 
         device = FakeDevice(make_session)
         config = _config(tmp_path)
-        manager = AsyncDebugSessionManager(
+        manager = DebugSessionManager(
             config_loader=lambda path: config if Path(path).resolve() == config.source_path else None,  # type: ignore[return-value]
             compat_factory=lambda: FakeCompat(device, app_pid=222),
             session_factory=lambda raw_session, *, config, interactive: raw_session,
@@ -430,7 +432,7 @@ def test_remote_open_boots_owned_server_and_stops_it_on_close(tmp_path: Path) ->
         device = FakeDevice(lambda: FakeSessionWrapper(script))
         config = _config(tmp_path, host="127.0.0.1:27042")
         remote = FakeRemoteServerManager()
-        manager = AsyncDebugSessionManager(
+        manager = DebugSessionManager(
             config_loader=lambda path: config if Path(path).resolve() == config.source_path else None,  # type: ignore[return-value]
             compat_factory=lambda: FakeCompat(device, app_pid=333),
             server_manager_factory=lambda: remote,
@@ -456,7 +458,7 @@ def test_session_open_surfaces_runtime_mismatch_from_loaded_agent(tmp_path: Path
         script.compat_error = RPCCompatibilityError("RPC runtime mismatch: missing `/rpc`")
         device = FakeDevice(lambda: FakeSessionWrapper(script))
         config = _config(tmp_path)
-        manager = AsyncDebugSessionManager(
+        manager = DebugSessionManager(
             config_loader=lambda path: config if Path(path).resolve() == config.source_path else None,  # type: ignore[return-value]
             compat_factory=lambda: FakeCompat(device, app_pid=444),
             session_factory=lambda raw_session, *, config, interactive: raw_session,
@@ -465,6 +467,120 @@ def test_session_open_surfaces_runtime_mismatch_from_loaded_agent(tmp_path: Path
         with pytest.raises(RPCCompatibilityError, match="missing `/rpc`"):
             await manager.session_open(config_path=str(config.source_path), mode="attach", pid=444)
 
+        await manager.aclose()
+
+    _run_async(scenario())
+
+
+def test_session_open_does_not_inherit_mcp_startup_config_for_explicit_config_path(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        script = FakeScriptWrapper({})
+        device = FakeDevice(lambda: FakeSessionWrapper(script))
+        config = _config(tmp_path, host="local")
+        manager = DebugSessionManager(
+            startup_config=MCPStartupConfig.model_validate(
+                {
+                    "server": {
+                        "host": "usb",
+                        "device": "SERIAL999",
+                        "path": "/data/local/tmp/frida-server",
+                    }
+                }
+            ),
+            config_loader=lambda path: config if Path(path).resolve() == config.source_path else None,  # type: ignore[return-value]
+            compat_factory=lambda: FakeCompat(device, app_pid=777),
+            session_factory=lambda raw_session, *, config, interactive: raw_session,
+        )
+
+        opened = await manager.session_open(config_path=str(config.source_path), mode="attach", pid=777)
+
+        assert opened.target is not None
+        assert opened.target.host == "local"
+        assert opened.target.device is None
+        await manager.aclose()
+
+    _run_async(scenario())
+
+
+def test_session_open_quick_reuses_cached_workspace_and_exposes_prepared_resource(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def scenario() -> None:
+        def fake_build_agent_bundle(project, *, install=False, env=None):
+            del install
+            assert env is not None
+            project.bundle_path.write_text("16 /index.js\n✄\n", encoding="utf-8")
+            return project.bundle_path
+
+        monkeypatch.setattr(
+            "frida_analykit.mcp.prepared.service.build_agent_bundle",
+            fake_build_agent_bundle,
+        )
+
+        script = FakeScriptWrapper({})
+        device = FakeDevice(lambda: FakeSessionWrapper(script))
+        startup_config = MCPStartupConfig.model_validate(
+            {
+                "server": {
+                    "host": "local",
+                    "path": "/data/local/tmp/frida-server",
+                },
+                "agent": {
+                    "stdout": str(tmp_path / "logs" / "outerr.log"),
+                },
+                "script": {
+                    "nettools": {"ssl_log_secret": str(tmp_path / "ssl")},
+                },
+            }
+        )
+        prepared = PreparedWorkspaceManager(cache_root=tmp_path / "prepared-cache", startup_config=startup_config)
+        manager = DebugSessionManager(
+            startup_config=startup_config,
+            compat_factory=lambda: FakeCompat(device, app_pid=555),
+            session_factory=lambda raw_session, *, config, interactive: raw_session,
+            prepared_workspace=prepared,
+        )
+
+        first = await manager.session_open_quick(
+            app="com.example.demo",
+            mode="attach",
+            pid=555,
+            template="process_probe",
+            bootstrap_source='console.log("spawn-bootstrap")',
+        )
+        second = await manager.session_open_quick(
+            app="com.example.demo",
+            mode="attach",
+            pid=555,
+            template="process_probe",
+            bootstrap_source='console.log("spawn-bootstrap")',
+        )
+        inspect = await manager.prepared_session_inspect()
+        pruned = await manager.prepared_session_prune(all_unused=True)
+        service_config_resource = await manager.resource_service_config_json()
+        prepared_resource = await manager.resource_prepared_json()
+
+        assert first.prepared is True
+        assert first.prepared_signature is not None
+        assert "helper" in first.prepared_capabilities
+        assert "process" in first.prepared_capabilities
+        assert second.prepared_signature == first.prepared_signature
+        assert device.attach_calls == [555]
+        assert inspect.prepared is True
+        assert inspect.current_session_uses_artifact is True
+        assert inspect.last_prepare_outcome == "cache_hit"
+        assert inspect.bootstrap_kind == "source"
+        assert inspect.bootstrap_source == 'console.log("spawn-bootstrap")'
+        assert inspect.config is not None
+        assert inspect.config.host == "local"
+        assert inspect.config.path == "/data/local/tmp/frida-server"
+        assert inspect.config.stdout == (tmp_path / "logs" / "outerr.log").resolve()
+        assert inspect.config.ssl_log_secret == (tmp_path / "ssl").resolve()
+        assert pruned.deleted_signatures == []
+        assert pruned.skipped_active_signatures == [first.prepared_signature]
+        assert '"host": "local"' in service_config_resource
+        assert first.prepared_signature in prepared_resource
         await manager.aclose()
 
     _run_async(scenario())

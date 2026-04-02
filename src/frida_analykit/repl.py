@@ -4,22 +4,22 @@ import keyword
 from collections.abc import Mapping, Sequence
 from typing import Any, Final, Protocol
 
-from .rpc.handler.js_handle import JsHandle
+from .rpc.handler.js_handle import SyncJsHandle
 
 REPL_RESERVED_NAMES: Final[frozenset[str]] = frozenset({"config", "device", "pid", "session", "script"})
 
 
 class ScriptHandleFactory(Protocol):
-    def jsh(self, path: str) -> JsHandle: ...
+    def jsh(self, path: str) -> SyncJsHandle: ...
 
 
 class LazyJsHandleProxy:
     def __init__(self, script: ScriptHandleFactory, path: str) -> None:
         self._script = script
         self._path = path
-        self._handle: JsHandle | None = None
+        self._handle: SyncJsHandle | None = None
 
-    def _materialize(self) -> JsHandle:
+    def _materialize(self) -> SyncJsHandle:
         if self._handle is None:
             self._handle = self._script.jsh(self._path)
         return self._handle
@@ -47,10 +47,10 @@ class LazyJsHandleProxy:
             raise AttributeError(name)
         return getattr(self._materialize(), name)
 
-    def __getitem__(self, key: Any) -> JsHandle:
+    def __getitem__(self, key: Any) -> SyncJsHandle:
         return self._materialize()[key]
 
-    def __call__(self, *args: Any, **kwargs: Any) -> JsHandle:
+    def __call__(self, *args: Any, **kwargs: Any) -> SyncJsHandle:
         if kwargs:
             raise TypeError("REPL lazy handles do not support keyword arguments")
         return self._materialize()(*args)

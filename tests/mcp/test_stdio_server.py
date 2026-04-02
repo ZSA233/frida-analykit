@@ -12,6 +12,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 EXPECTED_TOOL_NAMES = [
     "session_open",
     "session_status",
+    "session_open_quick",
     "session_close",
     "session_recover",
     "eval_js",
@@ -21,13 +22,19 @@ EXPECTED_TOOL_NAMES = [
     "remove_snippet",
     "list_snippets",
     "tail_logs",
+    "prepared_session_inspect",
+    "prepared_session_prune",
 ]
 
 EXPECTED_RESOURCE_URIS = [
     "frida://session/current",
+    "frida://service/config",
+    "frida://session/prepared",
     "frida://session/snippets",
     "frida://session/logs",
     "frida://docs/mcp/index",
+    "frida://docs/mcp/config",
+    "frida://docs/mcp/quickstart",
     "frida://docs/mcp/workflow",
     "frida://docs/mcp/tools",
     "frida://docs/mcp/recovery",
@@ -78,49 +85,79 @@ def test_stdio_server_returns_structured_payloads_and_surfaces_runtime_mismatch(
 
 
             class FakeManager:
-                def session_open(self, *, config_path, mode, pid=None, force_replace=False):
+                async def session_open(self, *, config_path, mode, pid=None, force_replace=False):
                     raise RuntimeError("RPC runtime mismatch: missing `/rpc`")
 
-                def session_status(self):
+                async def session_status(self):
                     return _closed_status()
 
-                def session_close(self):
+                async def session_open_quick(
+                    self,
+                    *,
+                    app,
+                    mode,
+                    capabilities=None,
+                    template="minimal",
+                    pid=None,
+                    bootstrap_path=None,
+                    bootstrap_source=None,
+                    force_replace=False,
+                ):
+                    raise RuntimeError("RPC runtime mismatch: missing `/rpc`")
+
+                async def session_close(self):
                     return _closed_status()
 
-                def session_recover(self):
+                async def session_recover(self):
                     return _closed_status()
 
-                def eval_js(self, *, source):
+                async def eval_js(self, *, source):
                     return {"source": source}
 
-                def install_snippet(self, *, name, source, replace=False):
+                async def install_snippet(self, *, name, source, replace=False):
                     return {"name": name, "source": source, "replace": replace}
 
-                def call_snippet(self, *, name, method=None, args=None):
+                async def call_snippet(self, *, name, method=None, args=None):
                     return {"name": name, "method": method, "args": args or []}
 
-                def inspect_snippet(self, *, name):
+                async def inspect_snippet(self, *, name):
                     return {"name": name}
 
-                def remove_snippet(self, *, name):
+                async def remove_snippet(self, *, name):
                     return {"name": name}
 
-                def list_snippets(self):
+                async def list_snippets(self):
                     return SnippetCollectionResult(session=_closed_status(), snippets=[])
 
-                def tail_logs(self, *, limit=50):
+                async def tail_logs(self, *, limit=50):
                     return TailLogsResult(
                         session=_closed_status(),
                         entries=[TailLogsEntry(timestamp="2026-04-01T00:00:00Z", level="info", text=str(limit))],
                     )
 
-                def resource_current_json(self):
+                async def prepared_session_inspect(self, *, signature=None):
+                    return {"prepared": False, "signature": signature}
+
+                async def prepared_session_prune(self, *, signature=None, all_unused=False, older_than_seconds=None):
+                    return {
+                        "deleted_signatures": [],
+                        "skipped_active_signatures": [],
+                        "message": "noop",
+                    }
+
+                async def resource_current_json(self):
                     return '{"state":"closed"}'
 
-                def resource_snippets_json(self):
+                async def resource_service_config_json(self):
+                    return '{"server":{"host":"127.0.0.1:27042"}}'
+
+                async def resource_prepared_json(self):
+                    return '{"prepared":false}'
+
+                async def resource_snippets_json(self):
                     return '{"snippets":[]}'
 
-                def resource_logs_json(self):
+                async def resource_logs_json(self):
                     return '{"entries":[]}'
 
 
@@ -142,16 +179,18 @@ def test_stdio_server_returns_structured_payloads_and_surfaces_runtime_mismatch(
                 status = await session.call_tool("session_status")
                 failure = await session.call_tool(
                     "session_open",
-                    {"config_path": "config.yml", "mode": "attach", "pid": 1},
+                    {"config_path": "config.toml", "mode": "attach", "pid": 1},
                 )
+                service_config = await session.read_resource("frida://service/config")
                 resource = await session.read_resource("frida://session/current")
-                docs = await session.read_resource("frida://docs/mcp/index")
+                docs = await session.read_resource("frida://docs/mcp/config")
 
         assert status.structuredContent["state"] == "closed"
         assert status.structuredContent["closed_reason"] == "not started"
         assert failure.isError is True
         assert "missing `/rpc`" in failure.content[0].text
+        assert "127.0.0.1:27042" in service_config.contents[0].text
         assert resource.contents[0].text == '{"state":"closed"}'
-        assert "session_open" in docs.contents[0].text
+        assert "session_open_quick" in docs.contents[0].text
 
     _run_async(scenario())

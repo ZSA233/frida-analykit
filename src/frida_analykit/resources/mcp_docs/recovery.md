@@ -26,6 +26,8 @@ When Frida detaches, the MCP session becomes `broken`.
 
 If session open fails with an RPC runtime mismatch, the loaded `_agent.js` does not expose the required RPC runtime.
 
-- Rebuild `_agent.js` with the local `@zsa233/frida-analykit-agent` runtime from this checkout.
+- If possible, switch to `session_open_quick`, which always regenerates a minimal bundle with `/rpc` imported first.
+- Check `frida://service/config` if the failure might be caused by an unexpected host, device, or output-path setup on the MCP side.
+- Otherwise rebuild `_agent.js` with the local `@zsa233/frida-analykit-agent` runtime from this checkout.
 - Re-run the bundle build.
 - Retry `session_open` after the rebuilt artifact is ready.
