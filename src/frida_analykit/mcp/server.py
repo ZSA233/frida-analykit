@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+from contextlib import asynccontextmanager
 from typing import Protocol
 
 from mcp.server.fastmcp import FastMCP
@@ -112,11 +114,18 @@ def build_mcp_server(
     name: str = "frida-analykit-mcp",
     docs_provider: MCPDocsProtocol | None = None,
 ) -> FastMCP:
-    mcp = FastMCP(name)
+    @asynccontextmanager
+    async def manager_lifespan(_: FastMCP):
+        try:
+            yield
+        finally:
+            await asyncio.shield(manager.aclose())
+
+    mcp = FastMCP(name, lifespan=manager_lifespan)
     docs = docs_provider or MCPDocsProvider()
 
     @mcp.tool(
-        description="Open or reuse the current Frida debug session. Start here, then reuse the same session for follow-up validation.",
+        description="Open or reuse the current Frida debug session from an explicit workspace config. A real open creates a user-visible session archive directory for later inspection.",
         structured_output=True,
     )
     async def session_open(
@@ -140,7 +149,7 @@ def build_mcp_server(
         return await manager.session_status()
 
     @mcp.tool(
-        description="Recommended MCP entrypoint. Prepare or reuse a cached minimal agent workspace, optionally import `bootstrap_path` or compile `bootstrap_source`, write `config.toml` from the fixed MCP startup config, then open or reuse the session.",
+        description="Recommended MCP entrypoint. Prepare or reuse a cached minimal agent workspace, always install `/rpc`, preload the template preset plus additive global capabilities, optionally import a copied self-contained `bootstrap_path` file or inline `bootstrap_source` into the generated `index.ts`, build with `frida-compile` from the MCP PATH plus a shared lightweight runtime cache, then open or reuse the session. That generated `index.ts` is the effective quick compile entry. A real open also creates a user-visible session archive directory. Prefer `template=\"minimal\"` when the bootstrap file already owns the real imports. Read `frida://service/config` first and confirm `quick_path.state == \"ready\"` before calling this tool.",
         structured_output=True,
     )
     async def session_open_quick(
@@ -186,7 +195,7 @@ def build_mcp_server(
         return await manager.eval_js(source=source)
 
     @mcp.tool(
-        description="Install a named JavaScript snippet and keep its root handle alive in the current session for repeated calls.",
+        description="Install a named JavaScript snippet and keep its root handle alive in the current session for repeated calls. Successful installs also archive the snippet source under the current session directory, but that archive is not auto-replayed.",
         structured_output=True,
     )
     async def install_snippet(name: str, source: str, replace: bool = False) -> SnippetMutationResult:
@@ -214,7 +223,7 @@ def build_mcp_server(
         return await manager.remove_snippet(name=name)
 
     @mcp.tool(
-        description="List named snippets tracked in the current session, including inactive metadata after a broken detach.",
+        description="List named snippets tracked in the current session, including inactive metadata after a broken detach. This is live in-memory state, not the durable snippet archive on disk.",
         structured_output=True,
     )
     async def list_snippets() -> SnippetCollectionResult:
@@ -261,7 +270,7 @@ def build_mcp_server(
     @mcp.resource(
         "frida://service/config",
         name="service-config",
-        description="Effective MCP startup config loaded for this server process.",
+        description="Effective MCP startup config plus quick-path readiness and warmup summary for this server process.",
         mime_type="application/json",
     )
     async def service_config_resource() -> str:

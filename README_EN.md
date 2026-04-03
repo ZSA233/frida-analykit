@@ -121,7 +121,9 @@ If you want to hand the current device flow to an MCP client / LLM, run this in 
 frida-analykit-mcp --config ./mcp.toml
 ```
 
-After connecting, it is recommended to read `frida://service/config`, `frida://docs/mcp/config`, `frida://docs/mcp/index`, `frida://docs/mcp/quickstart`, and `frida://docs/mcp/workflow` first, then start with `session_open_quick` before deciding which `eval_js` and snippet-management steps are needed.
+After connecting, it is recommended to read `frida://service/config`, `frida://docs/mcp/config`, `frida://docs/mcp/index`, `frida://docs/mcp/quickstart`, and `frida://docs/mcp/workflow` first, use `frida://service/config` to read the fixed defaults for the current MCP process, confirm that `quick_path.state` is already `ready`, then start with `session_open_quick` before deciding which `eval_js` and snippet-management steps are needed.
+
+`session_open(config_path, ...)` is still available for explicit workspaces, but it is a low-level session entrypoint after MCP has started successfully, not a startup-bypass path when quick warmup fails.
 
 ## Common Config And Commands
 
@@ -186,7 +188,7 @@ If you want to hand the current device session to an MCP client, you can also st
 frida-analykit-mcp --config ./mcp.toml
 ```
 
-After connecting, it is recommended to read `frida://service/config`, `frida://docs/mcp/config`, `frida://docs/mcp/index`, `frida://docs/mcp/quickstart`, and `frida://docs/mcp/workflow` first, then start with `session_open_quick` before deciding which `eval_js` and snippet-management steps are needed.
+After connecting, it is recommended to read `frida://service/config`, `frida://docs/mcp/config`, `frida://docs/mcp/index`, `frida://docs/mcp/quickstart`, and `frida://docs/mcp/workflow` first, use `frida://service/config` to read the fixed defaults for the current MCP process, confirm that `quick_path.state` is already `ready`, then start with `session_open_quick` before deciding which `eval_js` and snippet-management steps are needed.
 
 Keep these behaviors in mind:
 
@@ -204,11 +206,18 @@ Keep these behaviors in mind:
 - `script.dextools.output_dir` is the default Python-side output directory for dex dumps.
 - `frida-analykit-mcp` currently supports stdio transport only and keeps exactly one active debug session at a time by default.
 - `frida-analykit-mcp` supports an optional startup config, `--config ./mcp.toml`; when omitted, built-in defaults are used, and `--idle-timeout` can still override the idle reclaim time.
+- `frida-analykit-mcp` now performs quick-path preflight + warmup before entering stdio serve; if `prepared_cache_root` is not writable, if `frida-compile` or `npm` is missing from the MCP process `PATH`, or if the compile probe fails, the service exits non-zero immediately.
+- The startup banner prints a quick-path status block on `stderr`, and `frida://service/config` exposes the same structured `quick_path` readiness summary. Prefer confirming `quick_path.state == "ready"` before opening a session.
+- `frida://service/config` also exposes the effective `session_history_root`; every real MCP session creates an archive directory there using the form `{yyyyMMdd-HHMMSS-shortid}`.
 - MCP also exposes `frida://service/config`, plus six queryable Markdown resources: `frida://docs/mcp/index`, `frida://docs/mcp/config`, `frida://docs/mcp/quickstart`, `frida://docs/mcp/workflow`, `frida://docs/mcp/tools`, and `frida://docs/mcp/recovery`.
-- The recommended MCP starting point is `session_open_quick`: it generates a minimal workspace inside the MCP cache, builds `_agent.js`, writes `config.toml` inherited from the startup config, and reuses cached artifacts for the same signature.
+- The recommended MCP starting point is `session_open_quick`: it generates a minimal workspace inside the MCP cache, reuses a shared lightweight runtime dependency cache, builds `_agent.js` with the `frida-compile` already available in the MCP process `PATH`, writes `config.toml` inherited from the startup config, and reuses cached artifacts for the same signature.
+- The quick generator now keeps capability preloads alive through explicit local references in the generated `index.ts`; if you maintain `bootstrap_path` or a custom workspace yourself, prefer explicit imports plus explicit references instead of assuming a bare import will survive bundler pruning.
 - `session_open` remains the low-level explicit entry for custom workspaces where you already maintain `config.toml` or a legacy YAML config together with `_agent.js`.
 - The quick path only allows official `@zsa233/frida-analykit-agent` capability subpaths / templates, and it does not take over watch / hot reload.
+- The quick path does not install `frida-compile`, `frida`, or `@types/node` into each prepared workspace; it reuses `prepared_cache_root/npm-cache` and `prepared_cache_root/_toolchains/<digest>` as a shared cache instead of creating a separate npm cache per Python virtual environment.
 - `session_open_quick` supports both `bootstrap_path` and `bootstrap_source`: the former is for reusing a repo-visible `.ts` / `.js` file, while the latter is for one-off inline initialization hooks. Neither becomes part of the snippet registry.
+- `prepared_cache_root` remains an internal quick-cache area; the effective workspace copy, `session.json`, `events.jsonl`, and archived snippet source files that users inspect later all live under `session_history_root`.
+- Successful `install_snippet` calls archive the snippet source into the current session directory, but that archive is historical only and is not auto-replayed into later sessions.
 
 ## Agent Capability Overview
 

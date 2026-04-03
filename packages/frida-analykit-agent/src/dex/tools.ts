@@ -100,14 +100,14 @@ function normalizeDumpArgs(
         return {
             tag: tagOrOptions.tag ?? "",
             dumpDir: tagOrOptions.dumpDir ?? "",
-            log: tagOrOptions.log ?? console.error,
+            log: tagOrOptions.log ?? console.log,
             maxBatchBytes: tagOrOptions.maxBatchBytes,
         }
     }
     return {
         tag: tagOrOptions ?? "",
         dumpDir: dumpDir ?? "",
-        log: log ?? console.error,
+        log: log ?? console.log,
         maxBatchBytes: undefined,
     }
 }

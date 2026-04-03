@@ -11,6 +11,10 @@ SessionState = Literal["closed", "live", "broken"]
 SnippetState = Literal["active", "inactive"]
 PreparedOutcome = Literal["cache_hit", "rebuilt", "failed"]
 BootstrapKind = Literal["none", "source", "path"]
+QuickPathState = Literal["ready", "failed"]
+QuickPathCheckState = Literal["ready", "failed", "skipped"]
+QuickPathToolchainState = Literal["cache_hit", "installed", "failed", "skipped"]
+QuickPathCompileState = Literal["compiled", "failed", "skipped"]
 
 
 class HandleSnapshot(BaseModel):
@@ -54,6 +58,9 @@ class SessionStatus(BaseModel):
 
     state: SessionState
     target: SessionTargetStatus | None = None
+    session_id: str | None = None
+    session_label: str | None = None
+    session_workspace: Path | None = None
     idle_timeout_seconds: int
     last_activity_at: datetime | None = None
     broken_reason: str | None = None
@@ -92,15 +99,59 @@ class ServiceServerConfigSummary(BaseModel):
     path: str
 
 
+class QuickPathCheckSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    state: QuickPathCheckState
+    path: Path | None = None
+    detail: str | None = None
+
+
+class QuickPathToolchainSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    state: QuickPathToolchainState
+    root: Path
+    agent_package_spec: str
+    detail: str | None = None
+
+
+class QuickPathCompileProbeSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    state: QuickPathCompileState
+    workspace_root: Path
+    bundle_path: Path
+    detail: str | None = None
+    last_error: str | None = None
+
+
+class QuickPathReadinessSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    state: QuickPathState
+    checked_at: datetime
+    message: str | None = None
+    cache_root: QuickPathCheckSummary
+    npm: QuickPathCheckSummary
+    frida_compile: QuickPathCheckSummary
+    shared_toolchain: QuickPathToolchainSummary
+    compile_probe: QuickPathCompileProbeSummary
+
+
 class ServiceConfigSummary(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    service_instance_id: str
+    service_started_at: datetime
     config_path: Path | None = None
     idle_timeout_seconds: int
     prepared_cache_root: Path
+    session_history_root: Path
     server: ServiceServerConfigSummary
     agent: ServiceAgentConfigSummary
     script: ServiceScriptConfigSummary
+    quick_path: QuickPathReadinessSummary
 
 
 class EvalResult(BaseModel):

@@ -9,6 +9,9 @@ from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
 from typing import Any, Protocol, TypeVar
+from uuid import uuid4
+
+from pydantic import ValidationError
 
 from ..compat import FridaCompat
 from ..config import AppConfig
@@ -17,12 +20,18 @@ from ..rpc.handler.js_handle import AsyncJsHandle
 from ..server import FridaServerManager, ServerManagerError
 from ..session import AsyncScriptWrapper, SessionWrapper
 from .config import MCPStartupConfig
+from .history import SessionHistoryManager, SessionHistoryRecord
+from .history.service import SessionHistoryError
 from .models import (
     EvalResult,
     HandleSnapshot,
     PreparedConfigSummary,
     PreparedSessionInspectResult,
     PreparedSessionPruneResult,
+    QuickPathCheckSummary,
+    QuickPathCompileProbeSummary,
+    QuickPathReadinessSummary,
+    QuickPathToolchainSummary,
     ServiceConfigSummary,
     SessionMode,
     SessionState,
@@ -107,6 +116,65 @@ class PreparedWorkspaceProtocol(Protocol):
     ) -> tuple[list[str], list[str]]: ...
 
 
+class SessionHistoryProtocol(Protocol):
+    @property
+    def root(self) -> Path: ...
+
+    def begin_session(
+        self,
+        *,
+        open_kind: str,
+        requested_mode: str,
+        requested_pid: int | None,
+        app: str | None,
+        config_path: Path | None,
+        prepared_artifact: PreparedArtifactManifest | None,
+    ) -> SessionHistoryRecord: ...
+
+    def record_open_success(
+        self,
+        record: SessionHistoryRecord,
+        *,
+        config: AppConfig,
+        attached_pid: int,
+        prepared_artifact: PreparedArtifactManifest | None,
+    ) -> None: ...
+
+    def record_open_failure(
+        self,
+        record: SessionHistoryRecord,
+        *,
+        message: str,
+        config: AppConfig | None = None,
+        prepared_artifact: PreparedArtifactManifest | None = None,
+        attached_pid: int | None = None,
+    ) -> None: ...
+
+    def record_broken(
+        self,
+        record: SessionHistoryRecord,
+        *,
+        reason: str,
+        snippet_names: list[str],
+        crash_report: str | None,
+    ) -> None: ...
+
+    def record_recovered(self, record: SessionHistoryRecord, *, attached_pid: int) -> None: ...
+
+    def record_closed(self, record: SessionHistoryRecord, *, reason: str) -> None: ...
+
+    def persist_snippet(
+        self,
+        record: SessionHistoryRecord,
+        *,
+        name: str,
+        source: str,
+        replaced: bool,
+    ) -> Path: ...
+
+    def record_snippet_removed(self, record: SessionHistoryRecord, *, name: str) -> None: ...
+
+
 SessionFactory = Callable[..., SessionWrapper]
 ConfigLoader = Callable[[str | Path], AppConfig]
 
@@ -117,6 +185,42 @@ async def _to_thread(callable_obj: Callable[..., T], /, *args: object, **kwargs:
 
 def _default_session_factory(raw_session: object, *, config: AppConfig, interactive: bool) -> SessionWrapper:
     return SessionWrapper.from_session(raw_session, config=config, interactive=interactive)
+
+
+def _default_quick_path_summary(*, cache_root: Path, checked_at: datetime) -> QuickPathReadinessSummary:
+    return QuickPathReadinessSummary(
+        state="failed",
+        checked_at=checked_at,
+        message="startup quick-path warmup summary was not provided",
+        cache_root=QuickPathCheckSummary(
+            state="skipped",
+            path=cache_root,
+            detail="startup quick-path warmup summary was not provided",
+        ),
+        npm=QuickPathCheckSummary(
+            state="skipped",
+            path=None,
+            detail="startup quick-path warmup summary was not provided",
+        ),
+        frida_compile=QuickPathCheckSummary(
+            state="skipped",
+            path=None,
+            detail="startup quick-path warmup summary was not provided",
+        ),
+        shared_toolchain=QuickPathToolchainSummary(
+            state="skipped",
+            root=cache_root / "_toolchains",
+            agent_package_spec="unknown",
+            detail="startup quick-path warmup summary was not provided",
+        ),
+        compile_probe=QuickPathCompileProbeSummary(
+            state="skipped",
+            workspace_root=cache_root / "_startup_probe",
+            bundle_path=cache_root / "_startup_probe" / "_agent.js",
+            detail="startup quick-path warmup summary was not provided",
+            last_error=None,
+        ),
+    )
 
 
 @dataclass(slots=True, frozen=True)
@@ -244,6 +348,7 @@ class ActiveDebugSession:
     remote_lease: RemoteServerLease | None
     logs: deque[LogEntryRecord]
     snippets: dict[str, SnippetRecord]
+    history: SessionHistoryRecord
     prepared_artifact: PreparedArtifactManifest | None = None
     state: SessionState = "live"
     last_activity_at: datetime | None = None
@@ -288,6 +393,9 @@ class ActiveDebugSession:
         return SessionStatus(
             state=self.state,
             target=target,
+            session_id=self.history.session_id,
+            session_label=self.history.session_label,
+            session_workspace=self.history.root,
             idle_timeout_seconds=idle_timeout_seconds,
             last_activity_at=self.last_activity_at,
             broken_reason=self.broken_reason,
@@ -316,7 +424,11 @@ class DebugSessionManager:
         server_manager_factory: Callable[[], ServerManagerProtocol] = FridaServerManager,
         session_factory: SessionFactory = _default_session_factory,
         prepared_workspace: PreparedWorkspaceProtocol | None = None,
+        session_history: SessionHistoryProtocol | None = None,
         startup_config: MCPStartupConfig | None = None,
+        startup_instance_id: str | None = None,
+        startup_started_at: datetime | None = None,
+        startup_quick_path_summary: QuickPathReadinessSummary | None = None,
         now_fn: Callable[[], datetime] | None = None,
     ) -> None:
         self._startup_config = startup_config or MCPStartupConfig()
@@ -326,8 +438,18 @@ class DebugSessionManager:
         self._compat_factory = compat_factory
         self._server_manager_factory = server_manager_factory
         self._session_factory = session_factory
-        self._prepared_workspace = prepared_workspace or PreparedWorkspaceManager(startup_config=self._startup_config)
         self._now_fn = now_fn or (lambda: datetime.now(timezone.utc))
+        self._prepared_workspace = prepared_workspace or PreparedWorkspaceManager(startup_config=self._startup_config)
+        self._session_history = session_history or SessionHistoryManager(
+            self._startup_config.session_history_root(prepared_cache_root=self._prepared_workspace.cache_root),
+            now_fn=self._now_fn,
+        )
+        self._startup_instance_id = startup_instance_id or uuid4().hex[:12]
+        self._startup_started_at = startup_started_at or self._now_fn()
+        self._startup_quick_path_summary = startup_quick_path_summary or _default_quick_path_summary(
+            cache_root=self._prepared_workspace.cache_root,
+            checked_at=self._startup_started_at,
+        )
         self._current: ActiveDebugSession | None = None
         self._last_closed_reason: str | None = None
         self._lock = asyncio.Lock()
@@ -335,6 +457,14 @@ class DebugSessionManager:
         self._background_tasks: set[asyncio.Task[None]] = set()
         self._home_loop: asyncio.AbstractEventLoop | None = None
         self._closed = False
+
+    @property
+    def startup_instance_id(self) -> str:
+        return self._startup_instance_id
+
+    @property
+    def startup_started_at(self) -> datetime:
+        return self._startup_started_at
 
     async def session_open(
         self,
@@ -352,7 +482,39 @@ class DebugSessionManager:
         )
         async with self._lock:
             self._ensure_not_closed()
-            return await self._open_or_reuse_locked(spec, force_replace=force_replace, prepared_artifact=None)
+            current = self._current
+            if current is not None and current.spec.matches(spec) and not force_replace:
+                self._touch_locked(current)
+                return current.to_status(idle_timeout_seconds=self._idle_timeout_seconds)
+            if current is not None and not force_replace:
+                raise MCPManagerError(
+                    "an MCP session is already active for a different target; call `session_close` "
+                    "or retry with `force_replace=true`"
+                )
+            try:
+                history_record = self._session_history.begin_session(
+                    open_kind="explicit",
+                    requested_mode=mode,
+                    requested_pid=pid,
+                    app=None,
+                    config_path=spec.config_path,
+                    prepared_artifact=None,
+                )
+            except SessionHistoryError as exc:
+                raise MCPManagerError(str(exc)) from exc
+            try:
+                return await self._open_or_reuse_locked(
+                    spec,
+                    force_replace=force_replace,
+                    prepared_artifact=None,
+                    history_record=history_record,
+                )
+            except SessionHistoryError as exc:
+                self._record_open_failure_best_effort(history_record, message=str(exc))
+                raise MCPManagerError(str(exc)) from exc
+            except Exception as exc:
+                self._record_open_failure_best_effort(history_record, message=str(exc))
+                raise
 
     async def session_open_quick(
         self,
@@ -367,32 +529,73 @@ class DebugSessionManager:
         force_replace: bool = False,
     ) -> SessionStatus:
         self._bind_home_loop()
-        request = PreparedSessionOpenRequest(
-            app=app,
-            mode=mode,
-            capabilities=capabilities or [],
-            template=template,
-            pid=pid,
-            bootstrap_path=bootstrap_path,
-            bootstrap_source=bootstrap_source,
-            force_replace=force_replace,
-        )
         async with self._lock:
             self._ensure_not_closed()
             try:
+                request = PreparedSessionOpenRequest(
+                    app=app,
+                    mode=mode,
+                    capabilities=capabilities or [],
+                    template=template,
+                    pid=pid,
+                    bootstrap_path=bootstrap_path,
+                    bootstrap_source=bootstrap_source,
+                    force_replace=force_replace,
+                )
                 prepared = await _to_thread(self._prepared_workspace.prepare, request)
-            except PreparedWorkspaceError as exc:
+            except (PreparedWorkspaceError, ValidationError, ValueError, OSError) as exc:
+                try:
+                    history_record = self._session_history.begin_session(
+                        open_kind="quick",
+                        requested_mode=mode,
+                        requested_pid=pid,
+                        app=app,
+                        config_path=None,
+                        prepared_artifact=None,
+                    )
+                    self._record_open_failure_best_effort(history_record, message=str(exc))
+                except SessionHistoryError:
+                    pass
                 raise MCPManagerError(str(exc)) from exc
             spec = OpenSessionSpec(
                 config_path=prepared.manifest.config_path.expanduser().resolve(),
                 mode=mode,
                 requested_pid=pid,
             )
-            return await self._open_or_reuse_locked(
-                spec,
-                force_replace=force_replace,
-                prepared_artifact=prepared.manifest,
-            )
+            current = self._current
+            if current is not None and current.spec.matches(spec) and not force_replace:
+                current.prepared_artifact = prepared.manifest
+                self._touch_locked(current)
+                return current.to_status(idle_timeout_seconds=self._idle_timeout_seconds)
+            if current is not None and not force_replace:
+                raise MCPManagerError(
+                    "an MCP session is already active for a different target; call `session_close` "
+                    "or retry with `force_replace=true`"
+                )
+            try:
+                history_record = self._session_history.begin_session(
+                    open_kind="quick",
+                    requested_mode=mode,
+                    requested_pid=pid,
+                    app=app,
+                    config_path=spec.config_path,
+                    prepared_artifact=prepared.manifest,
+                )
+            except SessionHistoryError as exc:
+                raise MCPManagerError(str(exc)) from exc
+            try:
+                return await self._open_or_reuse_locked(
+                    spec,
+                    force_replace=force_replace,
+                    prepared_artifact=prepared.manifest,
+                    history_record=history_record,
+                )
+            except SessionHistoryError as exc:
+                self._record_open_failure_best_effort(history_record, message=str(exc))
+                raise MCPManagerError(str(exc)) from exc
+            except Exception as exc:
+                self._record_open_failure_best_effort(history_record, message=str(exc))
+                raise
 
     async def session_status(self) -> SessionStatus:
         self._bind_home_loop()
@@ -495,6 +698,8 @@ class DebugSessionManager:
                 preserved_snippets=preserved_snippets,
                 remote_lease=remote_lease,
                 prepared_artifact=current.prepared_artifact,
+                history_record=current.history,
+                history_transition="recover",
             )
             current.remote_lease = None
             await self._cleanup_session_transport_locked(current, stop_remote=False)
@@ -532,31 +737,53 @@ class DebugSessionManager:
             existing = current.snippets.get(name)
             if existing is not None and not replace:
                 raise MCPManagerError(f"snippet `{name}` already exists; retry with `replace=true` to overwrite it")
-            if existing is not None:
-                await self._remove_snippet_locked(current, name=name)
 
             handle = await current.script.eval_async(source)
-            snapshot = await self._snapshot_handle_async(handle, include_props=True)
-            record = SnippetRecord(
-                name=name,
-                source=source,
-                snapshot=snapshot,
-                installed_at=self._now_fn(),
-                has_dispose="dispose" in snapshot.props,
-                handle=handle,
-                state="active",
-            )
-            current.snippets[name] = record
-            current.append_log(
-                level="info",
-                text=f"[mcp] installed snippet `{name}`",
-                timestamp=self._now_fn(),
-            )
-            self._touch_locked(current)
-            return SnippetMutationResult(
-                session=current.to_status(idle_timeout_seconds=self._idle_timeout_seconds),
-                snippet=record.to_status(),
-            )
+            snapshot: HandleSnapshot | None = None
+            replaced = existing is not None
+            installed = False
+            try:
+                snapshot = await self._snapshot_handle_async(handle, include_props=True)
+                # Persist the replacement before touching the live snippet so a history write
+                # failure cannot silently delete the previously working controller.
+                self._session_history.persist_snippet(
+                    current.history,
+                    name=name,
+                    source=source,
+                    replaced=replaced,
+                )
+                if existing is not None:
+                    await self._remove_snippet_locked(current, name=name, reason="replace")
+                record = SnippetRecord(
+                    name=name,
+                    source=source,
+                    snapshot=snapshot,
+                    installed_at=self._now_fn(),
+                    has_dispose="dispose" in snapshot.props,
+                    handle=handle,
+                    state="active",
+                )
+                current.snippets[name] = record
+                installed = True
+                current.append_log(
+                    level="info",
+                    text=f"[mcp] {'replaced' if replaced else 'installed'} snippet `{name}`",
+                    timestamp=self._now_fn(),
+                )
+                self._touch_locked(current)
+                return SnippetMutationResult(
+                    session=current.to_status(idle_timeout_seconds=self._idle_timeout_seconds),
+                    snippet=record.to_status(),
+                )
+            except SessionHistoryError as exc:
+                raise MCPManagerError(str(exc)) from exc
+            finally:
+                if not installed:
+                    await self._dispose_snippet_handle_async(
+                        handle,
+                        has_dispose=snapshot is not None and "dispose" in snapshot.props,
+                        suppress_dispose_error=True,
+                    )
 
     async def call_snippet(
         self,
@@ -605,7 +832,10 @@ class DebugSessionManager:
         async with self._lock:
             self._ensure_not_closed()
             current = self._require_session_locked()
-            removed = await self._remove_snippet_locked(current, name=name)
+            try:
+                removed = await self._remove_snippet_locked(current, name=name)
+            except SessionHistoryError as exc:
+                raise MCPManagerError(str(exc)) from exc
             if current.state == "live":
                 self._touch_locked(current)
             return SnippetMutationResult(
@@ -690,6 +920,7 @@ class DebugSessionManager:
         *,
         force_replace: bool,
         prepared_artifact: PreparedArtifactManifest | None,
+        history_record: SessionHistoryRecord,
     ) -> SessionStatus:
         current = self._current
         if current is not None and current.spec.matches(spec) and not force_replace:
@@ -708,7 +939,11 @@ class DebugSessionManager:
         if current is not None:
             await self._close_current_locked(reason="replaced session", stop_remote=True, drop_snippets=True)
 
-        self._current = await self._open_active_session(spec, prepared_artifact=prepared_artifact)
+        self._current = await self._open_active_session(
+            spec,
+            prepared_artifact=prepared_artifact,
+            history_record=history_record,
+        )
         self._touch_locked(self._current)
         return self._current.to_status(idle_timeout_seconds=self._idle_timeout_seconds)
 
@@ -719,7 +954,12 @@ class DebugSessionManager:
         preserved_snippets: dict[str, SnippetRecord] | None = None,
         remote_lease: RemoteServerLease | None = None,
         prepared_artifact: PreparedArtifactManifest | None = None,
+        history_record: SessionHistoryRecord,
+        history_transition: str = "open",
     ) -> ActiveDebugSession:
+        config: AppConfig | None = None
+        resolved_pid: int | None = None
+        session: SessionWrapper | None = None
         config = await _to_thread(self._config_loader, spec.config_path)
         lease = remote_lease
         created_lease = False
@@ -763,6 +1003,7 @@ class DebugSessionManager:
                 remote_lease=lease,
                 logs=deque(maxlen=self._log_capacity),
                 snippets=preserved_snippets or {},
+                history=history_record,
                 prepared_artifact=prepared_artifact,
                 last_activity_at=self._now_fn(),
             )
@@ -772,12 +1013,39 @@ class DebugSessionManager:
             await script.ensure_runtime_compatible_async()
             if resume_after_load:
                 await _to_thread(device.resume, resolved_pid)
+            if history_transition == "recover":
+                self._session_history.record_recovered(history_record, attached_pid=resolved_pid)
+            else:
+                self._session_history.record_open_success(
+                    history_record,
+                    config=config,
+                    attached_pid=resolved_pid,
+                    prepared_artifact=prepared_artifact,
+                )
             return active
         except ServerManagerError as exc:
+            self._record_open_failure_best_effort(
+                history_record,
+                message=str(exc),
+                config=config,
+                prepared_artifact=prepared_artifact,
+                attached_pid=resolved_pid,
+            )
+            if session is not None:
+                await self._detach_session_best_effort(session)
             if created_lease and lease is not None:
                 await self._stop_remote_lease(lease)
             raise MCPManagerError(str(exc)) from exc
-        except Exception:
+        except Exception as exc:
+            self._record_open_failure_best_effort(
+                history_record,
+                message=str(exc),
+                config=config,
+                prepared_artifact=prepared_artifact,
+                attached_pid=resolved_pid,
+            )
+            if session is not None:
+                await self._detach_session_best_effort(session)
             if created_lease and lease is not None:
                 await self._stop_remote_lease(lease)
             raise
@@ -821,6 +1089,14 @@ class DebugSessionManager:
         if drop_snippets:
             current.snippets.clear()
         current.closed_reason = reason
+        try:
+            self._session_history.record_closed(current.history, reason=reason)
+        except SessionHistoryError as exc:
+            current.append_log(
+                level="error",
+                text=f"[mcp] failed to record session close history: {exc}",
+                timestamp=self._now_fn(),
+            )
         self._last_closed_reason = reason
         self._current = None
 
@@ -833,23 +1109,44 @@ class DebugSessionManager:
         if stop_remote and session.remote_lease is not None:
             await self._stop_remote_lease(session.remote_lease)
 
-    async def _remove_snippet_locked(self, current: ActiveDebugSession, *, name: str) -> SnippetRecord:
+    async def _remove_snippet_locked(
+        self,
+        current: ActiveDebugSession,
+        *,
+        name: str,
+        reason: str = "remove",
+    ) -> SnippetRecord:
         record = self._require_snippet_locked(current, name=name)
-        if record.handle is not None and record.has_dispose:
-            dispose_handle = await record.handle.resolve_path_async("dispose")
-            result = await dispose_handle.call_async()
-            await result.release_async()
         if record.handle is not None:
-            await record.handle.release_async()
+            await self._dispose_snippet_handle_async(record.handle, has_dispose=record.has_dispose)
         record.handle = None
         record.state = "inactive"
         current.snippets.pop(name, None)
-        current.append_log(
-            level="info",
-            text=f"[mcp] removed snippet `{name}`",
-            timestamp=self._now_fn(),
-        )
+        if reason != "replace":
+            self._session_history.record_snippet_removed(current.history, name=name)
+            current.append_log(
+                level="info",
+                text=f"[mcp] removed snippet `{name}`",
+                timestamp=self._now_fn(),
+            )
         return record
+
+    @staticmethod
+    async def _dispose_snippet_handle_async(
+        handle: AsyncJsHandle,
+        *,
+        has_dispose: bool,
+        suppress_dispose_error: bool = False,
+    ) -> None:
+        try:
+            if has_dispose:
+                dispose_handle = await handle.resolve_path_async("dispose")
+                dispose_result = await dispose_handle.call_async()
+                await dispose_result.release_async()
+        except Exception:
+            if not suppress_dispose_error:
+                raise
+        await handle.release_async()
 
     def _require_session_locked(self) -> ActiveDebugSession:
         if self._current is None:
@@ -982,6 +1279,19 @@ class DebugSessionManager:
             crash_report=crash_report,
             timestamp=self._now_fn(),
         )
+        try:
+            self._session_history.record_broken(
+                active.history,
+                reason=reason,
+                snippet_names=list(active.snippets),
+                crash_report=crash_report,
+            )
+        except SessionHistoryError as exc:
+            active.append_log(
+                level="error",
+                text=f"[mcp] failed to record broken session history: {exc}",
+                timestamp=self._now_fn(),
+            )
         detail = reason.strip() or "detached"
         active.append_log(
             level="error",
@@ -1121,8 +1431,40 @@ class DebugSessionManager:
         except Exception:
             pass
 
+    def _record_open_failure_best_effort(
+        self,
+        history_record: SessionHistoryRecord,
+        *,
+        message: str,
+        config: AppConfig | None = None,
+        prepared_artifact: PreparedArtifactManifest | None = None,
+        attached_pid: int | None = None,
+    ) -> None:
+        try:
+            self._session_history.record_open_failure(
+                history_record,
+                message=message,
+                config=config,
+                prepared_artifact=prepared_artifact,
+                attached_pid=attached_pid,
+            )
+        except SessionHistoryError:
+            pass
+
+    @staticmethod
+    async def _detach_session_best_effort(session: SessionWrapper) -> None:
+        try:
+            if not session.is_detached:
+                await _to_thread(session.detach)
+        except Exception:
+            pass
+
     def _service_config_summary(self) -> ServiceConfigSummary:
         return self._startup_config.to_summary(
+            service_instance_id=self._startup_instance_id,
+            service_started_at=self._startup_started_at,
             prepared_cache_root=self._prepared_workspace.cache_root,
+            session_history_root=self._session_history.root,
             idle_timeout_seconds=self._idle_timeout_seconds,
+            quick_path=self._startup_quick_path_summary,
         )

@@ -70,6 +70,7 @@
 - `mcp` 域的主线实现应优先使用 async manager / async tool handlers；不要再为 MCP 保留独立的 sync manager public surface。
 - MCP 启动配置应保持独立 typed module，并在进程启动时一次性解析固定；`session_open_quick` 不应再接受会覆盖服务级 server/output 默认值的逐次参数。
 - MCP 面向大模型的 quick session / prepared workspace 能力应继续收敛在 `mcp/prepared/` 这类显式子系统里，负责模板、capability 校验、缓存签名和构建编排；不要把这部分逻辑塞回主 manager 单文件。
+- MCP 的用户可见会话归档与 snippet 持久化应继续收敛在独立的 `mcp/history/` 子系统里；`prepared_cache_root` 只承担内部 quick cache 角色，不与用户向 session-history 目录混用。
 - MCP 面向大模型的使用文档应作为打包资源进入 wheel，并通过 MCP resources 暴露；不要依赖仓库根目录下的 README / docs 文件在安装后仍可直接读取。
 - 如果某个文件已经同时承载配置解析、生命周期、错误处理、协议序列化、日志落盘等多种责任，应主动拆分。
 - 测试目录也遵循相同思路：

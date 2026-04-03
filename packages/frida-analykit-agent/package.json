@@ -27,6 +27,20 @@
     "README_EN.md",
     "LICENSE"
   ],
+  "sideEffects": [
+    "./dist/config/index.js",
+    "./dist/bridges/index.js",
+    "./dist/helper/index.js",
+    "./dist/process/index.js",
+    "./dist/jni/index.js",
+    "./dist/ssl/index.js",
+    "./dist/elf/index.js",
+    "./dist/dex/index.js",
+    "./dist/native/libssl/index.js",
+    "./dist/native/libart/index.js",
+    "./dist/native/libc/index.js",
+    "./dist/rpc/index.js"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

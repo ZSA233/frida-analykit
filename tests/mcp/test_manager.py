@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import threading
 from collections.abc import Callable
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -10,9 +12,18 @@ import pytest
 
 from frida_analykit.config import AppConfig
 from frida_analykit.mcp.config import MCPStartupConfig
+from frida_analykit.mcp.history.service import SessionHistoryError
 from frida_analykit.mcp.manager import DebugSessionManager, MCPManagerError
+from frida_analykit.mcp.models import (
+    QuickPathCheckSummary,
+    QuickPathCompileProbeSummary,
+    QuickPathReadinessSummary,
+    QuickPathToolchainSummary,
+)
 from frida_analykit.mcp.prepared import PreparedWorkspaceManager
+from frida_analykit.mcp.prepared import service as prepared_service
 from frida_analykit.rpc import RPCCompatibilityError
+from frida_analykit.workspace import workspace_build_resources
 
 
 class FakeHandle:
@@ -248,7 +259,7 @@ def _config(
     app: str | None = "com.example.demo",
 ) -> AppConfig:
     _write_agent_file(tmp_path)
-    return AppConfig.model_validate(
+    config = AppConfig.model_validate(
         {
             "app": app,
             "jsfile": "_agent.js",
@@ -256,6 +267,55 @@ def _config(
             "script": {"nettools": {}},
         }
     ).resolve_paths(tmp_path, source_path=tmp_path / "config.yml")
+    config.source_path.write_text("app: demo\n", encoding="utf-8")
+    return config
+
+
+def _quick_ready_summary(cache_root: Path) -> QuickPathReadinessSummary:
+    return QuickPathReadinessSummary(
+        state="ready",
+        checked_at=datetime(2026, 4, 3, tzinfo=timezone.utc),
+        message="quick path toolchain is ready",
+        cache_root=QuickPathCheckSummary(
+            state="ready",
+            path=cache_root,
+            detail="prepared cache root is writable",
+        ),
+        npm=QuickPathCheckSummary(
+            state="ready",
+            path=Path("/usr/bin/npm"),
+            detail="found in MCP PATH",
+        ),
+        frida_compile=QuickPathCheckSummary(
+            state="ready",
+            path=Path("/usr/bin/frida-compile"),
+            detail="found in MCP PATH",
+        ),
+        shared_toolchain=QuickPathToolchainSummary(
+            state="cache_hit",
+            root=cache_root / "_toolchains" / "demo",
+            agent_package_spec="@zsa233/frida-analykit-agent@1.0.0",
+            detail="reused shared quick runtime toolchain",
+        ),
+        compile_probe=QuickPathCompileProbeSummary(
+            state="compiled",
+            workspace_root=cache_root / "_startup_probe" / "demo",
+            bundle_path=cache_root / "_startup_probe" / "demo" / "_agent.js",
+            detail="compile sanity probe succeeded",
+            last_error=None,
+        ),
+    )
+
+
+def _mcp_startup_config(tmp_path: Path) -> MCPStartupConfig:
+    return MCPStartupConfig.model_validate(
+        {
+            "mcp": {
+                "prepared_cache_root": str(tmp_path / "prepared-cache"),
+                "session_history_root": str(tmp_path / "session-history"),
+            }
+        }
+    )
 
 
 def _snippet_handle() -> FakeHandle:
@@ -287,6 +347,7 @@ def test_session_open_reuses_same_target_and_force_replace_reopens(tmp_path: Pat
         device = FakeDevice(lambda: FakeSessionWrapper(script))
         config = _config(tmp_path)
         manager = DebugSessionManager(
+            startup_config=_mcp_startup_config(tmp_path),
             config_loader=lambda path: config if Path(path).resolve() == config.source_path else None,  # type: ignore[return-value]
             compat_factory=lambda: FakeCompat(device, app_pid=321),
             session_factory=lambda raw_session, *, config, interactive: raw_session,
@@ -297,6 +358,12 @@ def test_session_open_reuses_same_target_and_force_replace_reopens(tmp_path: Pat
 
         assert first.state == "live"
         assert second.state == "live"
+        assert first.session_id is not None
+        assert first.session_label is not None
+        assert first.session_workspace is not None and first.session_workspace.is_dir()
+        assert (first.session_workspace / "workspace" / "config.yml").is_file()
+        assert (first.session_workspace / "workspace" / "_agent.js").is_file()
+        assert second.session_id == first.session_id
         assert device.attach_calls == [321]
 
         with pytest.raises(MCPManagerError, match="already active for a different target"):
@@ -311,6 +378,7 @@ def test_session_open_reuses_same_target_and_force_replace_reopens(tmp_path: Pat
 
         assert reopened.target is not None
         assert reopened.target.attached_pid == 654
+        assert reopened.session_id != first.session_id
         assert device.attach_calls == [321, 654]
         await manager.aclose()
 
@@ -324,6 +392,7 @@ def test_idle_timeout_closes_current_session(tmp_path: Path) -> None:
         config = _config(tmp_path)
         manager = DebugSessionManager(
             idle_timeout_seconds=1,
+            startup_config=_mcp_startup_config(tmp_path),
             config_loader=lambda path: config if Path(path).resolve() == config.source_path else None,  # type: ignore[return-value]
             compat_factory=lambda: FakeCompat(device, app_pid=111),
             session_factory=lambda raw_session, *, config, interactive: raw_session,
@@ -353,6 +422,7 @@ def test_snippet_lifecycle_and_log_ring(tmp_path: Path) -> None:
         device = FakeDevice(lambda: FakeSessionWrapper(script))
         config = _config(tmp_path)
         manager = DebugSessionManager(
+            startup_config=_mcp_startup_config(tmp_path),
             config_loader=lambda path: config if Path(path).resolve() == config.source_path else None,  # type: ignore[return-value]
             compat_factory=lambda: FakeCompat(device, app_pid=111),
             session_factory=lambda raw_session, *, config, interactive: raw_session,
@@ -375,9 +445,60 @@ def test_snippet_lifecycle_and_log_ring(tmp_path: Path) -> None:
         assert "dispose" in inspected.snippet.root.props
         assert called.result.preview == "pong:7"
         assert any(entry.text == "hook-ready" for entry in logs.entries)
+        assert installed.session.session_id == logs.session.session_id
         assert removed.snippet.name == "demo"
+        assert installed.session.session_workspace is not None
+        snippet_files = sorted((installed.session.session_workspace / "snippets" / "demo").glob("*.js"))
+        assert len(snippet_files) == 1
+        manifest = json.loads((installed.session.session_workspace / "session.json").read_text(encoding="utf-8"))
+        assert manifest["snippets"]["demo"]["state"] == "removed"
         assert listed.snippets == []
         assert root_handle.release_calls == 1
+        await manager.aclose()
+
+    _run_async(scenario())
+
+
+def test_snippet_replace_keeps_previous_snippet_when_history_persist_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def scenario() -> None:
+        script = FakeScriptWrapper(
+            {
+                "snippet:v1": _snippet_handle,
+                "snippet:v2": _snippet_handle,
+            }
+        )
+        device = FakeDevice(lambda: FakeSessionWrapper(script))
+        config = _config(tmp_path)
+        manager = DebugSessionManager(
+            startup_config=_mcp_startup_config(tmp_path),
+            config_loader=lambda path: config if Path(path).resolve() == config.source_path else None,  # type: ignore[return-value]
+            compat_factory=lambda: FakeCompat(device, app_pid=111),
+            session_factory=lambda raw_session, *, config, interactive: raw_session,
+        )
+
+        await manager.session_open(config_path=str(config.source_path), mode="attach", pid=111)
+        await manager.install_snippet(name="demo", source="snippet:v1")
+
+        original_persist = manager._session_history.persist_snippet
+
+        def fail_on_replace(*args, **kwargs):
+            if kwargs.get("replaced"):
+                raise SessionHistoryError("history exploded")
+            return original_persist(*args, **kwargs)
+
+        monkeypatch.setattr(manager._session_history, "persist_snippet", fail_on_replace)
+
+        with pytest.raises(MCPManagerError):
+            await manager.install_snippet(name="demo", source="snippet:v2", replace=True)
+
+        listed = await manager.list_snippets()
+        called = await manager.call_snippet(name="demo", method="ping", args=[9])
+
+        assert [snippet.name for snippet in listed.snippets] == ["demo"]
+        assert called.result.preview == "pong:9"
         await manager.aclose()
 
     _run_async(scenario())
@@ -396,6 +517,7 @@ def test_broken_session_requires_explicit_recover_and_keeps_snippet_metadata(tmp
         device = FakeDevice(make_session)
         config = _config(tmp_path)
         manager = DebugSessionManager(
+            startup_config=_mcp_startup_config(tmp_path),
             config_loader=lambda path: config if Path(path).resolve() == config.source_path else None,  # type: ignore[return-value]
             compat_factory=lambda: FakeCompat(device, app_pid=222),
             session_factory=lambda raw_session, *, config, interactive: raw_session,
@@ -412,6 +534,7 @@ def test_broken_session_requires_explicit_recover_and_keeps_snippet_metadata(tmp
         broken = await manager.session_status()
         assert broken.state == "broken"
         assert broken.snippets[0].state == "inactive"
+        assert broken.session_workspace is not None
         with pytest.raises(MCPManagerError, match="broken"):
             await manager.call_snippet(name="demo", method="ping", args=[1])
 
@@ -419,8 +542,12 @@ def test_broken_session_requires_explicit_recover_and_keeps_snippet_metadata(tmp
         listed = await manager.list_snippets()
 
         assert recovered.state == "live"
+        assert recovered.session_workspace == broken.session_workspace
         assert device.attach_calls == [222, 222]
         assert listed.snippets[0].state == "inactive"
+        events = (broken.session_workspace / "events.jsonl").read_text(encoding="utf-8")
+        assert '"event":"session_broken"' in events
+        assert '"event":"session_recovered"' in events
         await manager.aclose()
 
     _run_async(scenario())
@@ -433,6 +560,7 @@ def test_remote_open_boots_owned_server_and_stops_it_on_close(tmp_path: Path) ->
         config = _config(tmp_path, host="127.0.0.1:27042")
         remote = FakeRemoteServerManager()
         manager = DebugSessionManager(
+            startup_config=_mcp_startup_config(tmp_path),
             config_loader=lambda path: config if Path(path).resolve() == config.source_path else None,  # type: ignore[return-value]
             compat_factory=lambda: FakeCompat(device, app_pid=333),
             server_manager_factory=lambda: remote,
@@ -459,6 +587,7 @@ def test_session_open_surfaces_runtime_mismatch_from_loaded_agent(tmp_path: Path
         device = FakeDevice(lambda: FakeSessionWrapper(script))
         config = _config(tmp_path)
         manager = DebugSessionManager(
+            startup_config=_mcp_startup_config(tmp_path),
             config_loader=lambda path: config if Path(path).resolve() == config.source_path else None,  # type: ignore[return-value]
             compat_factory=lambda: FakeCompat(device, app_pid=444),
             session_factory=lambda raw_session, *, config, interactive: raw_session,
@@ -480,6 +609,10 @@ def test_session_open_does_not_inherit_mcp_startup_config_for_explicit_config_pa
         manager = DebugSessionManager(
             startup_config=MCPStartupConfig.model_validate(
                 {
+                    "mcp": {
+                        "prepared_cache_root": str(tmp_path / "prepared-cache"),
+                        "session_history_root": str(tmp_path / "session-history"),
+                    },
                     "server": {
                         "host": "usb",
                         "device": "SERIAL999",
@@ -507,21 +640,46 @@ def test_session_open_quick_reuses_cached_workspace_and_exposes_prepared_resourc
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def scenario() -> None:
-        def fake_build_agent_bundle(project, *, install=False, env=None):
-            del install
-            assert env is not None
-            project.bundle_path.write_text("16 /index.js\n✄\n", encoding="utf-8")
-            return project.bundle_path
+        original_which = prepared_service.shutil.which
 
-        monkeypatch.setattr(
-            "frida_analykit.mcp.prepared.service.build_agent_bundle",
-            fake_build_agent_bundle,
-        )
+        def fake_which(command: str) -> str | None:
+            if command == "npm":
+                return "/usr/bin/npm"
+            if command == "frida-compile":
+                return "/usr/bin/frida-compile"
+            return original_which(command)
+
+        def fake_run_subprocess(command: list[str], *, cwd: Path, env, error_prefix: str) -> None:
+            del env, error_prefix
+            executable = Path(command[0]).name
+            if executable == "npm":
+                node_modules = cwd / "node_modules"
+                prepared_service._package_install_path(node_modules, prepared_service.AGENT_PACKAGE_NAME).mkdir(
+                    parents=True, exist_ok=True
+                )
+                prepared_service._package_install_path(node_modules, "@types/frida-gum").mkdir(
+                    parents=True, exist_ok=True
+                )
+                prepared_service._package_install_path(node_modules, "typescript").mkdir(
+                    parents=True, exist_ok=True
+                )
+                return
+            if executable == "frida-compile":
+                (cwd / "_agent.js").write_text("16 /index.js\n✄\n", encoding="utf-8")
+                return
+            raise AssertionError(f"unexpected command: {command}")
+
+        monkeypatch.setattr(prepared_service.shutil, "which", fake_which)
+        monkeypatch.setattr(PreparedWorkspaceManager, "_run_subprocess", staticmethod(fake_run_subprocess))
 
         script = FakeScriptWrapper({})
         device = FakeDevice(lambda: FakeSessionWrapper(script))
         startup_config = MCPStartupConfig.model_validate(
             {
+                "mcp": {
+                    "prepared_cache_root": str(tmp_path / "prepared-cache"),
+                    "session_history_root": str(tmp_path / "session-history"),
+                },
                 "server": {
                     "host": "local",
                     "path": "/data/local/tmp/frida-server",
@@ -540,6 +698,7 @@ def test_session_open_quick_reuses_cached_workspace_and_exposes_prepared_resourc
             compat_factory=lambda: FakeCompat(device, app_pid=555),
             session_factory=lambda raw_session, *, config, interactive: raw_session,
             prepared_workspace=prepared,
+            startup_quick_path_summary=_quick_ready_summary(prepared.cache_root),
         )
 
         first = await manager.session_open_quick(
@@ -563,9 +722,11 @@ def test_session_open_quick_reuses_cached_workspace_and_exposes_prepared_resourc
 
         assert first.prepared is True
         assert first.prepared_signature is not None
+        assert first.session_workspace is not None
         assert "helper" in first.prepared_capabilities
         assert "process" in first.prepared_capabilities
         assert second.prepared_signature == first.prepared_signature
+        assert second.session_id == first.session_id
         assert device.attach_calls == [555]
         assert inspect.prepared is True
         assert inspect.current_session_uses_artifact is True
@@ -579,8 +740,52 @@ def test_session_open_quick_reuses_cached_workspace_and_exposes_prepared_resourc
         assert inspect.config.ssl_log_secret == (tmp_path / "ssl").resolve()
         assert pruned.deleted_signatures == []
         assert pruned.skipped_active_signatures == [first.prepared_signature]
+        assert '"service_instance_id"' in service_config_resource
         assert '"host": "local"' in service_config_resource
+        assert '"quick_path"' in service_config_resource
+        assert '"session_history_root"' in service_config_resource
+        assert '"state": "ready"' in service_config_resource
         assert first.prepared_signature in prepared_resource
+        assert (first.session_workspace / "workspace" / "index.ts").is_file()
+        assert (first.session_workspace / "workspace" / "_agent.js").is_file()
+        await manager.aclose()
+
+    _run_async(scenario())
+
+
+def test_session_open_quick_rejects_non_global_quick_capability(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        manager = DebugSessionManager(startup_config=_mcp_startup_config(tmp_path))
+        with pytest.raises(MCPManagerError, match="not supported as a quick-session preload capability"):
+            await manager.session_open_quick(
+                app="com.example.demo",
+                mode="attach",
+                capabilities=["elf_enhanced"],
+            )
+        session_dirs = sorted((tmp_path / "session-history").iterdir())
+        assert len(session_dirs) == 1
+        manifest = json.loads((session_dirs[0] / "session.json").read_text(encoding="utf-8"))
+        assert manifest["state"] == "failed"
+        assert "not supported as a quick-session preload capability" in manifest["last_error"]
+        await manager.aclose()
+
+    _run_async(scenario())
+
+
+def test_session_open_quick_normalizes_prepared_npm_cache_errors(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        startup_config = _mcp_startup_config(tmp_path)
+        prepared = PreparedWorkspaceManager(cache_root=tmp_path / "prepared-cache", startup_config=startup_config)
+        occupied_parent = tmp_path / "occupied-parent"
+        occupied_parent.write_text("not-a-directory\n", encoding="utf-8")
+        prepared._build_resources = workspace_build_resources(occupied_parent / "nested")
+        manager = DebugSessionManager(prepared_workspace=prepared, startup_config=startup_config)
+
+        with pytest.raises(MCPManagerError, match="writable npm cache"):
+            await manager.session_open_quick(
+                app="com.example.demo",
+                mode="attach",
+            )
         await manager.aclose()
 
     _run_async(scenario())

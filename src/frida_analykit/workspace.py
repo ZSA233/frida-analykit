@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -67,7 +68,7 @@ def prepare_workspace_npm_env(
     resources: WorkspaceBuildResources,
 ) -> dict[str, str]:
     env = dict(base_env or os.environ)
-    resources.npm_cache_dir.mkdir(parents=True, exist_ok=True)
+    _ensure_workspace_build_directory(resources.npm_cache_dir)
     env["npm_config_cache"] = str(resources.npm_cache_dir)
     return env
 
@@ -76,6 +77,15 @@ def acquire_workspace_build_lock(resources: WorkspaceBuildResources) -> Workspac
     lock = WorkspaceBuildLock(resources.lock_path)
     lock.acquire()
     return lock
+
+
+def _ensure_workspace_build_directory(path: Path) -> None:
+    if path.exists() and not path.is_dir():
+        if path.is_symlink() or path.is_file():
+            path.unlink(missing_ok=True)
+        else:
+            shutil.rmtree(path, ignore_errors=True)
+    path.mkdir(parents=True, exist_ok=True)
 
 
 def write_workspace_config(

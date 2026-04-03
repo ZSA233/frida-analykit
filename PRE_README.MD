@@ -194,6 +194,8 @@ frida-analykit-mcp --config ./mcp.toml
 - 当前只支持 stdio transport，不支持 HTTP / SSE。
 - 默认只维护一个活动调试会话，不做多会话并存。
 - `--config` 是可选的 MCP 启动 TOML；未提供时，MCP 会回退到内建默认值。`--idle-timeout` 继续保留为 CLI override。
+- MCP 启动现在固定走三阶段：`startup preflight -> startup warmup -> stdio serve`。只要 quick-path 所需工具链缺失或 warmup 失败，进程就会 fail-fast 非零退出，不会继续进入 serve。
+- 启动 banner 会打印一组 quick-path readiness 状态行；如果 `stderr.isatty()`，则用 ANSI 颜色渲染 `✓ / ✗ / ●`，否则保留同样的状态符号但不输出转义序列。
 - Python 侧实现已经切到 async-first manager 主线，并且不再保留独立的 sync MCP manager public surface。
 - MCP tools 当前统一走 `AsyncScriptWrapper` / `AsyncJsHandle` 这条 Promise-aware agent/RPC 语义，不提供 REPL 里那套以 sync handle 为主的对象浏览体验。
 - 因此在 MCP 中如果要访问 `a.b.c` 这类长路径，推荐直接把路径写进 `eval_js` / snippet 源码，或封装成 snippet method 返回结构化值，而不是依赖交互式属性链浏览。
@@ -206,7 +208,7 @@ frida-analykit-mcp --config ./mcp.toml
   - `[script.nettools]`：`ssl_log_secret`
 - 这些服务级默认值在 MCP 进程启动后固定不变，`session_open_quick` 不再让大模型逐次指定 `host`、`device`、`path`、`server.version` 或 runtime 包版本。
 - `session_open` 首次需要 `config_path` 和 `mode`；如果当前 live session 与目标一致，则直接复用；如果目标不同，则需要 `force_replace=true`。
-- 推荐入口 `session_open_quick(app, mode, capabilities?, template?, bootstrap_path?, bootstrap_source?, ...)`：它会自动生成最小 `index.ts`、编译 `_agent.js`、写出继承 startup config 的 `config.toml`，然后复用同一套 session manager 打开会话。
+- 推荐入口 `session_open_quick(app, mode, capabilities?, template?, bootstrap_path?, bootstrap_source?, ...)`：它会自动生成最小 `index.ts`、复用共享轻量 runtime cache、使用 MCP 进程 `PATH` 中预装的 `frida-compile` 编译 `_agent.js`、写出继承 startup config 的 `config.toml`，然后复用同一套 session manager 打开会话。
 - `session_open` 继续保留为底层显式入口，适用于用户已经自定义维护好的工作区。
 - 当前 tool 集合固定为：
   - `session_open`
@@ -229,6 +231,7 @@ frida-analykit-mcp --config ./mcp.toml
   - `frida://session/prepared`
   - `frida://session/snippets`
   - `frida://session/logs`
+- `frida://service/config` 现在除了固定 startup config 外，还会返回结构化的 `quick_path` readiness / warmup 摘要，至少覆盖 cache root、`npm`、`frida-compile`、shared toolchain 和 compile probe，并暴露实际生效的 `session_history_root`。
 - 当前还会额外暴露六个可查询 Markdown 文档 resource：
   - `frida://docs/mcp/index`
   - `frida://docs/mcp/config`
@@ -238,18 +241,26 @@ frida-analykit-mcp --config ./mcp.toml
   - `frida://docs/mcp/recovery`
 - 默认 idle timeout 是 `1200` 秒，可通过 `--idle-timeout` 覆盖；超时后会自动回收当前 live session。
 - MCP server 不会复用 CLI 的 session banner / 普通 stdout 输出路径，避免污染 stdio 协议通道。
-- `eval_js` 只做一次性求值；`install_snippet(name, source)` 会保留返回的根 handle，并按名称管理它。
+- `eval_js` 只做一次性求值；`install_snippet(name, source)` 会保留返回的根 handle，并按名称管理它，同时把源码归档到当前会话目录下的 `snippets/` 中。
 - 如果 snippet 根对象暴露 `dispose` 方法，则 `remove_snippet` 会先尝试调用它，再释放对应 handle。
-- `session_open_quick` 会在 MCP 专用缓存目录里自动生成最小 TS workspace，并通过 `frida-compile` 构建 `_agent.js`；相同参数签名会复用缓存结果。
+- `session_open_quick` 会在 MCP 专用缓存目录里自动生成最小 TS workspace，复用一份共享的轻量 runtime 依赖缓存，并通过 MCP 进程 `PATH` 中预装的 `frida-compile` 构建 `_agent.js`；相同参数签名会复用缓存结果。
+- 每个真实 MCP 会话都会在 `session_history_root` 下分配独立目录，目录名固定为 `{yyyyMMdd-HHMMSS-shortid}`；这个目录会保存 copied `workspace/`、`session.json`、`events.jsonl` 和 snippet 历史源码。
+- quick generator 现在会在生成的 `index.ts` 里对 capability 做显式本地 binding 引用，以避免只 import 但未引用时被 bundler 裁剪；这属于 generated workspace 语义，不再依赖 agent runtime 内部 retain helper。
 - `session_open_quick` 同时支持 `bootstrap_path` 和 `bootstrap_source`：前者会复制本地 `.ts` / `.js` 文件到 prepared workspace 并导入，后者则生成一段内联 bootstrap 文件；它们都不进入 snippet registry。
 - quick path 只允许官方 `@zsa233/frida-analykit-agent` capability subpath / 模板名，不开放任意 npm 包和任意 import 文本。
+- quick path 不会在每个 prepared workspace 里安装 `frida-compile`、`frida` 或 `@types/node`；MCP 会在启动时先检查 `PATH` 里的 `frida-compile` 和 `npm`，并预热一份 shared runtime toolchain 与 compile probe。只要这一步失败，服务就不会启动。
+- quick path 的共享粒度不是“按 Python 虚拟环境”，而是“按 `prepared_cache_root` + agent package spec”：`npm_config_cache` 指向 `prepared_cache_root/npm-cache`，shared toolchain 位于 `prepared_cache_root/_toolchains/<digest>`。普通 workspace `npm install` / `build` 仍然是另一条链路。
+- `prepared_cache_root` 继续只承担内部 quick build/cache 角色；给用户看的会话记录和持久化 snippet 不放在 signature cache 目录里，而是放到 `session_history_root`。
+- `session_open(config_path, ...)` 仍然保留给显式 workspace，但它是 MCP 成功启动后的低层会话入口，不是 quick warmup 失败时的启动绕过路径。
 - 当前不会替 MCP 接管 watch / hot reload；`session_open_quick` 只负责一次性 prepare + build，`session_open` 仍要求 `config.jsfile` 已经是可注入的 bundle。
 - 当前要求加载到设备上的 `_agent.js` 已导入 `@zsa233/frida-analykit-agent/rpc`；如果 bundle 仍缺 `/rpc`，MCP 会直接返回 `RPC runtime mismatch` 类错误，提示用户 rebuild 本地 runtime。
 - `install_snippet` 仍只用于会话已打开后的受管 controller 生命周期，不扩展成 pre-open bootstrap 机制。
+- snippet 持久化只是归档，不会自动在后续新会话里 replay；`frida://session/snippets` 仍然只表示当前 live session 的内存状态。
 - MCP 不负责运行时切换 Frida / frida-server 版本，也不负责自动安装；这部分环境由用户在启动 MCP 前预先准备。
 - 如果会话因为 detach / crash 进入 broken，MCP 不会自动 reattach，也不会自动 replay 已安装 snippet；需要显式调用 `session_recover`，并在恢复后按需重新安装 snippet。
 - 给 MCP client / 大模型的推荐顺序是：
   - 先读 `frida://service/config`、`frida://docs/mcp/config`、`frida://docs/mcp/index`、`frida://docs/mcp/quickstart` 和 `frida://docs/mcp/workflow`
+  - 使用 `frida://service/config` 读取当前 MCP 进程固定下来的默认值，并检查 `quick_path.state == "ready"`
   - 再 `session_open_quick`
   - 先用 `eval_js` 做一次性验证
   - 需要复用时再切到 `install_snippet` / `call_snippet`

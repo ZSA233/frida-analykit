@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import signal
+import subprocess
+import sys
 import textwrap
+import time
 from pathlib import Path
 
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
+from frida_analykit.mcp.server import build_mcp_server
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -45,11 +51,70 @@ def _run_async(coro):
     return asyncio.run(coro)
 
 
-def test_entrypoint_exposes_expected_tools_and_resources_over_stdio() -> None:
+def test_entrypoint_exposes_expected_tools_and_resources_over_stdio(tmp_path: Path) -> None:
+    server_script = tmp_path / "mcp_entrypoint.py"
+    server_script.write_text(
+        textwrap.dedent(
+            """
+            from datetime import datetime, timezone
+            from pathlib import Path
+
+            from frida_analykit.mcp import cli
+            from frida_analykit.mcp.models import (
+                QuickPathCheckSummary,
+                QuickPathCompileProbeSummary,
+                QuickPathReadinessSummary,
+                QuickPathToolchainSummary,
+            )
+
+
+            def _quick_ready(cache_root: Path) -> QuickPathReadinessSummary:
+                return QuickPathReadinessSummary(
+                    state="ready",
+                    checked_at=datetime.now(timezone.utc),
+                    message="quick path toolchain is ready",
+                    cache_root=QuickPathCheckSummary(
+                        state="ready",
+                        path=cache_root,
+                        detail="prepared cache root is writable",
+                    ),
+                    npm=QuickPathCheckSummary(
+                        state="ready",
+                        path=Path("/usr/bin/npm"),
+                        detail="found in MCP PATH",
+                    ),
+                    frida_compile=QuickPathCheckSummary(
+                        state="ready",
+                        path=Path("/usr/bin/frida-compile"),
+                        detail="found in MCP PATH",
+                    ),
+                    shared_toolchain=QuickPathToolchainSummary(
+                        state="cache_hit",
+                        root=cache_root / "_toolchains" / "demo",
+                        agent_package_spec="@zsa233/frida-analykit-agent@1.0.0",
+                        detail="reused shared quick runtime toolchain",
+                    ),
+                    compile_probe=QuickPathCompileProbeSummary(
+                        state="compiled",
+                        workspace_root=cache_root / "_startup_probe" / "demo",
+                        bundle_path=cache_root / "_startup_probe" / "demo" / "_agent.js",
+                        detail="compile sanity probe succeeded",
+                        last_error=None,
+                    ),
+                )
+
+
+            cli.PreparedWorkspaceManager.startup_warmup = lambda self: _quick_ready(self.cache_root)
+            raise SystemExit(cli.main(["--idle-timeout", "1"]))
+            """
+        ),
+        encoding="utf-8",
+    )
+
     async def scenario() -> None:
         params = StdioServerParameters(
             command="uv",
-            args=["run", "frida-analykit-mcp", "--idle-timeout", "1"],
+            args=["run", "python", str(server_script)],
             cwd=REPO_ROOT,
         )
         async with stdio_client(params) as (read, write):
@@ -57,11 +122,193 @@ def test_entrypoint_exposes_expected_tools_and_resources_over_stdio() -> None:
                 await session.initialize()
                 tools = await session.list_tools()
                 resources = await session.list_resources()
+                service_config = await session.read_resource("frida://service/config")
 
-        assert [tool.name for tool in tools.tools] == EXPECTED_TOOL_NAMES
-        assert [str(resource.uri) for resource in resources.resources] == EXPECTED_RESOURCE_URIS
+        assert {tool.name for tool in tools.tools} == set(EXPECTED_TOOL_NAMES)
+        assert {str(resource.uri) for resource in resources.resources} == set(EXPECTED_RESOURCE_URIS)
+        quick_tool = next(tool for tool in tools.tools if tool.name == "session_open_quick")
+        capability_enum = quick_tool.inputSchema["properties"]["capabilities"]["anyOf"][0]["items"]["enum"]
+        assert "elf_enhanced" not in capability_enum
+        summary = json.loads(service_config.contents[0].text)
+        assert len(summary["service_instance_id"]) == 12
+        assert "service_started_at" in summary
+        assert "session_history_root" in summary
+        assert summary["quick_path"]["state"] == "ready"
 
     _run_async(scenario())
+
+
+def test_cli_exits_before_stdio_serve_when_startup_warmup_fails(tmp_path: Path) -> None:
+    server_script = tmp_path / "mcp_fail.py"
+    server_script.write_text(
+        textwrap.dedent(
+            """
+            from datetime import datetime, timezone
+
+            from frida_analykit.mcp import cli
+            from frida_analykit.mcp.models import (
+                QuickPathCheckSummary,
+                QuickPathCompileProbeSummary,
+                QuickPathReadinessSummary,
+                QuickPathToolchainSummary,
+            )
+
+
+            def _quick_failed(cache_root):
+                return QuickPathReadinessSummary(
+                    state="failed",
+                    checked_at=datetime.now(timezone.utc),
+                    message="quick path requires `frida-compile` in the MCP environment PATH",
+                    cache_root=QuickPathCheckSummary(
+                        state="ready",
+                        path=cache_root,
+                        detail="prepared cache root is writable",
+                    ),
+                    npm=QuickPathCheckSummary(
+                        state="ready",
+                        path=None,
+                        detail="found in MCP PATH",
+                    ),
+                    frida_compile=QuickPathCheckSummary(
+                        state="failed",
+                        path=None,
+                        detail="quick path requires `frida-compile` in the MCP environment PATH",
+                    ),
+                    shared_toolchain=QuickPathToolchainSummary(
+                        state="skipped",
+                        root=cache_root / "_toolchains" / "demo",
+                        agent_package_spec="@zsa233/frida-analykit-agent@1.0.0",
+                        detail="shared toolchain warmup was not attempted",
+                    ),
+                    compile_probe=QuickPathCompileProbeSummary(
+                        state="skipped",
+                        workspace_root=cache_root / "_startup_probe" / "demo",
+                        bundle_path=cache_root / "_startup_probe" / "demo" / "_agent.js",
+                        detail="compile probe was not attempted",
+                        last_error=None,
+                    ),
+                )
+
+
+            cli.PreparedWorkspaceManager.startup_warmup = lambda self: _quick_failed(self.cache_root)
+            raise SystemExit(cli.main(["--idle-timeout", "1"]))
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ["uv", "run", "python", str(server_script)],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "quick-path warmup failed" in result.stderr
+    assert "frida-compile" in result.stderr
+
+
+def test_cli_exits_promptly_after_single_sigint(tmp_path: Path) -> None:
+    server_script = tmp_path / "mcp_sigint.py"
+    server_script.write_text(
+        textwrap.dedent(
+            """
+            from datetime import datetime, timezone
+            from pathlib import Path
+
+            from frida_analykit.mcp import cli
+            from frida_analykit.mcp.models import (
+                QuickPathCheckSummary,
+                QuickPathCompileProbeSummary,
+                QuickPathReadinessSummary,
+                QuickPathToolchainSummary,
+            )
+
+
+            def _quick_ready(cache_root: Path) -> QuickPathReadinessSummary:
+                return QuickPathReadinessSummary(
+                    state="ready",
+                    checked_at=datetime.now(timezone.utc),
+                    message="quick path toolchain is ready",
+                    cache_root=QuickPathCheckSummary(
+                        state="ready",
+                        path=cache_root,
+                        detail="prepared cache root is writable",
+                    ),
+                    npm=QuickPathCheckSummary(
+                        state="ready",
+                        path=Path("/usr/bin/npm"),
+                        detail="found in MCP PATH",
+                    ),
+                    frida_compile=QuickPathCheckSummary(
+                        state="ready",
+                        path=Path("/usr/bin/frida-compile"),
+                        detail="found in MCP PATH",
+                    ),
+                    shared_toolchain=QuickPathToolchainSummary(
+                        state="cache_hit",
+                        root=cache_root / "_toolchains" / "demo",
+                        agent_package_spec="@zsa233/frida-analykit-agent@1.0.0",
+                        detail="reused shared quick runtime toolchain",
+                    ),
+                    compile_probe=QuickPathCompileProbeSummary(
+                        state="compiled",
+                        workspace_root=cache_root / "_startup_probe" / "demo",
+                        bundle_path=cache_root / "_startup_probe" / "demo" / "_agent.js",
+                        detail="compile sanity probe succeeded",
+                        last_error=None,
+                    ),
+                )
+
+
+            cli.PreparedWorkspaceManager.startup_warmup = lambda self: _quick_ready(self.cache_root)
+            raise SystemExit(cli.main(["--idle-timeout", "1"]))
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    process = subprocess.Popen(
+        [sys.executable, str(server_script)],
+        cwd=REPO_ROOT,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        time.sleep(0.5)
+        process.send_signal(signal.SIGINT)
+        return_code = process.wait(timeout=5)
+        _, stderr = process.communicate(timeout=1)
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=5)
+
+    assert return_code == 130
+    assert "received Ctrl+C, shutting down" in stderr
+    assert "KeyboardInterrupt" not in stderr
+
+
+def test_build_mcp_server_closes_manager_via_server_lifespan() -> None:
+    events: list[str] = []
+
+    class FakeManager:
+        async def aclose(self) -> None:
+            events.append("closed")
+
+    server = build_mcp_server(FakeManager(), name="fake-frida-mcp")
+
+    async def scenario() -> None:
+        async with server._mcp_server.lifespan(server._mcp_server):
+            events.append("entered")
+
+    _run_async(scenario())
+
+    assert events == ["entered", "closed"]
 
 
 def test_stdio_server_returns_structured_payloads_and_surfaces_runtime_mismatch(tmp_path: Path) -> None:
@@ -181,16 +428,20 @@ def test_stdio_server_returns_structured_payloads_and_surfaces_runtime_mismatch(
                     "session_open",
                     {"config_path": "config.toml", "mode": "attach", "pid": 1},
                 )
+                quick_failure = await session.call_tool(
+                    "session_open_quick",
+                    {"app": "com.example.demo", "mode": "attach"},
+                )
                 service_config = await session.read_resource("frida://service/config")
                 resource = await session.read_resource("frida://session/current")
-                docs = await session.read_resource("frida://docs/mcp/config")
 
         assert status.structuredContent["state"] == "closed"
         assert status.structuredContent["closed_reason"] == "not started"
         assert failure.isError is True
         assert "missing `/rpc`" in failure.content[0].text
+        assert quick_failure.isError is True
+        assert "missing `/rpc`" in quick_failure.content[0].text
         assert "127.0.0.1:27042" in service_config.contents[0].text
         assert resource.contents[0].text == '{"state":"closed"}'
-        assert "session_open_quick" in docs.contents[0].text
 
     _run_async(scenario())

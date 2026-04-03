@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import tomllib
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,7 @@ from ..workspace import (
     DEFAULT_WORKSPACE_STDOUT,
 )
 from .models import (
+    QuickPathReadinessSummary,
     ServiceAgentConfigSummary,
     ServiceConfigSummary,
     ServiceScriptConfigSummary,
@@ -30,6 +32,7 @@ class MCPConfigSection(BaseModel):
 
     idle_timeout_seconds: int = 1200
     prepared_cache_root: Path | None = None
+    session_history_root: Path | None = None
 
 
 class MCPServerSection(BaseModel):
@@ -131,6 +134,7 @@ class MCPStartupConfig(BaseModel):
                 "mcp": self.mcp.model_copy(
                     update={
                         "prepared_cache_root": resolve(self.mcp.prepared_cache_root),
+                        "session_history_root": resolve(self.mcp.session_history_root),
                     }
                 ),
                 "agent": self.agent.model_copy(
@@ -171,17 +175,30 @@ class MCPStartupConfig(BaseModel):
             "ssl_log_secret": self.script.nettools.ssl_log_secret or DEFAULT_WORKSPACE_SSL_LOG_SECRET,
         }
 
+    def session_history_root(self, *, prepared_cache_root: Path) -> Path:
+        configured = self.mcp.session_history_root
+        if configured is not None:
+            return configured
+        return (prepared_cache_root / "sessions").resolve()
+
     def to_summary(
         self,
         *,
+        service_instance_id: str,
+        service_started_at: datetime,
         prepared_cache_root: Path,
+        session_history_root: Path,
         idle_timeout_seconds: int,
+        quick_path: QuickPathReadinessSummary,
     ) -> ServiceConfigSummary:
         workspace = self.workspace_write_kwargs()
         return ServiceConfigSummary(
+            service_instance_id=service_instance_id,
+            service_started_at=service_started_at,
             config_path=self.source_path,
             idle_timeout_seconds=idle_timeout_seconds,
             prepared_cache_root=prepared_cache_root,
+            session_history_root=session_history_root,
             server=ServiceServerConfigSummary(
                 host=self.server.host,
                 device=self.server.device,
@@ -197,6 +214,7 @@ class MCPStartupConfig(BaseModel):
                 elftools_output_dir=workspace["elftools_output_dir"],
                 ssl_log_secret=workspace["ssl_log_secret"],
             ),
+            quick_path=quick_path,
         )
 
 

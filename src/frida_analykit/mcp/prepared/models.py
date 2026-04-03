@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
@@ -15,7 +16,6 @@ QuickCapability = Literal[
     "jni",
     "ssl",
     "elf",
-    "elf_enhanced",
     "dex",
     "native_libssl",
     "native_libart",
@@ -31,6 +31,12 @@ QuickTemplate = Literal[
 ]
 PreparedOutcome = Literal["cache_hit", "rebuilt", "failed"]
 BootstrapKind = Literal["none", "source", "path"]
+_UNSUPPORTED_QUICK_CAPABILITY = "elf_enhanced"
+_UNSUPPORTED_QUICK_CAPABILITY_MESSAGE = (
+    "`elf_enhanced` is not supported as a quick-session preload capability; "
+    "import `@zsa233/frida-analykit-agent/elf/enhanced` from `bootstrap_path`, "
+    "`bootstrap_source`, or a custom workspace instead"
+)
 
 
 class PreparedSessionOpenRequest(BaseModel):
@@ -44,6 +50,15 @@ class PreparedSessionOpenRequest(BaseModel):
     bootstrap_path: str | None = None
     bootstrap_source: str | None = None
     force_replace: bool = False
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_unsupported_capabilities(cls, data: object) -> object:
+        if isinstance(data, Mapping):
+            raw_capabilities = data.get("capabilities")
+            if isinstance(raw_capabilities, list) and _UNSUPPORTED_QUICK_CAPABILITY in raw_capabilities:
+                raise ValueError(_UNSUPPORTED_QUICK_CAPABILITY_MESSAGE)
+        return data
 
     @model_validator(mode="after")
     def _validate_bootstrap_inputs(self) -> "PreparedSessionOpenRequest":
