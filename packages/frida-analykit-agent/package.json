@@ -1,6 +1,6 @@
 {
   "name": "@zsa233/frida-analykit-agent",
-  "version": "2.1.1",
+  "version": "2.1.2",
   "description": "Frida agent runtime for frida-analykit",
   "license": "MIT",
   "keywords": [
