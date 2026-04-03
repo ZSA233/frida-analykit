@@ -104,12 +104,17 @@ def write_workspace_config(
     elftools_output_dir: str | Path = DEFAULT_WORKSPACE_ELFTOOLS_OUTPUT_DIR,
     ssl_log_secret: str | Path = DEFAULT_WORKSPACE_SSL_LOG_SECRET,
 ) -> AppConfig:
+    def render_path(value: str | Path) -> str:
+        if isinstance(value, Path):
+            return value.as_posix()
+        return value.replace("\\", "/")
+
     config_file = Path(config_path).expanduser().resolve()
     config_file.parent.mkdir(parents=True, exist_ok=True)
     config = AppConfig.model_validate(
         {
             "app": app,
-            "jsfile": str(jsfile),
+            "jsfile": render_path(jsfile),
             "server": {
                 "host": host,
                 "path": path,
@@ -117,14 +122,14 @@ def write_workspace_config(
                 "device": device,
             },
             "agent": {
-                "datadir": str(datadir),
-                "stdout": str(stdout),
-                "stderr": str(stdout if stderr is None else stderr),
+                "datadir": render_path(datadir),
+                "stdout": render_path(stdout),
+                "stderr": render_path(stdout if stderr is None else stderr),
             },
             "script": {
-                "dextools": {"output_dir": str(dextools_output_dir)},
-                "elftools": {"output_dir": str(elftools_output_dir)},
-                "nettools": {"ssl_log_secret": str(ssl_log_secret)},
+                "dextools": {"output_dir": render_path(dextools_output_dir)},
+                "elftools": {"output_dir": render_path(elftools_output_dir)},
+                "nettools": {"ssl_log_secret": render_path(ssl_log_secret)},
             },
         }
     )
