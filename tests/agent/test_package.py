@@ -21,22 +21,6 @@ _EXPECTED_PUBLIC_EXPORTS = {
     "./rpc": "./dist/rpc/index.js",
 }
 
-_EXPECTED_SIDE_EFFECTS = {
-    "./dist/config/index.js",
-    "./dist/bridges/index.js",
-    "./dist/helper/index.js",
-    "./dist/process/index.js",
-    "./dist/jni/index.js",
-    "./dist/ssl/index.js",
-    "./dist/elf/index.js",
-    "./dist/dex/index.js",
-    "./dist/native/libssl/index.js",
-    "./dist/native/libart/index.js",
-    "./dist/native/libc/index.js",
-    "./dist/rpc/index.js",
-}
-
-
 def test_agent_package_manifest_and_public_exports() -> None:
     package_json = json.loads((REPO_ROOT / "packages/frida-analykit-agent/package.json").read_text(encoding="utf-8"))
     package_readme = (REPO_ROOT / "packages/frida-analykit-agent/README.md").read_text(encoding="utf-8")
@@ -52,7 +36,7 @@ def test_agent_package_manifest_and_public_exports() -> None:
     assert "blob/stable/packages/frida-analykit-agent/README.md" in package_readme_en
     assert package_json["exports"]["."]["types"] == "./dist/index.d.ts"
     assert package_json["exports"]["./rpc"]["types"] == "./dist/rpc/index.d.ts"
-    assert set(package_json["sideEffects"]) == _EXPECTED_SIDE_EFFECTS
+    assert "sideEffects" not in package_json
     assert "./libssl" not in package_json["exports"]
     assert "./*" not in package_json["exports"]
 
