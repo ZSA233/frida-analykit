@@ -9,11 +9,13 @@ import subprocess
 import sys
 import textwrap
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import pytest
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
+from frida_analykit.mcp import stdio as mcp_stdio
 from frida_analykit.mcp.server import build_mcp_server
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -349,6 +351,37 @@ def test_build_mcp_server_closes_manager_via_server_lifespan() -> None:
     _run_async(scenario())
 
     assert events == ["entered", "closed"]
+
+
+def test_interruptible_stdio_server_delegates_to_native_stdio_on_windows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+
+    @asynccontextmanager
+    async def fake_platform_stdio_server(*, stdin=None, stdout=None):
+        assert stdin is None
+        assert stdout is None
+        events.append("entered")
+        try:
+            yield "read-stream", "write-stream"
+        finally:
+            events.append("exited")
+
+    monkeypatch.setattr(mcp_stdio.os, "name", "nt", raising=False)
+    monkeypatch.setattr(mcp_stdio, "platform_stdio_server", fake_platform_stdio_server)
+
+    async def scenario() -> None:
+        async with mcp_stdio.interruptible_stdio_server(
+            interrupted=lambda: False,
+        ) as (read_stream, write_stream, wake_reader):
+            assert read_stream == "read-stream"
+            assert write_stream == "write-stream"
+            wake_reader()
+
+    _run_async(scenario())
+
+    assert events == ["entered", "exited"]
 
 
 def test_stdio_server_returns_structured_payloads_and_surfaces_runtime_mismatch(tmp_path: Path) -> None:

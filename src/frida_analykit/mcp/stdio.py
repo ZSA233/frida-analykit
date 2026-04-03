@@ -16,6 +16,7 @@ import anyio
 import mcp.types as mcp_types
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
 from mcp.server.fastmcp import FastMCP
+from mcp.server.stdio import stdio_server as platform_stdio_server
 from mcp.shared.message import SessionMessage
 
 
@@ -108,6 +109,16 @@ async def interruptible_stdio_server(
     stdin: TextIO | None = None,
     stdout: TextIO | None = None,
 ):
+    if os.name == "nt":
+        wrapped_stdin = anyio.wrap_file(stdin) if stdin is not None else None
+        wrapped_stdout = anyio.wrap_file(stdout) if stdout is not None else None
+        async with platform_stdio_server(stdin=wrapped_stdin, stdout=wrapped_stdout) as (
+            read_stream,
+            write_stream,
+        ):
+            yield read_stream, write_stream, lambda: None
+        return
+
     input_stream = stdin or TextIOWrapper(sys.stdin.buffer, encoding="utf-8")
     output_stream = stdout or TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
     stdin_fd = input_stream.fileno()
