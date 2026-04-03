@@ -58,9 +58,7 @@ STABLE_INSTALL_SPEC = "git+https://github.com/ZSA233/frida-analykit@stable"
 PINNED_RELEASE_INSTALL_RE = re.compile(
     r"git\+https://github\.com/ZSA233/frida-analykit@v\d+\.\d+\.\d+(?:-rc\.\d+)?"
 )
-PACKAGE_STABLE_README_URL = (
-    "https://github.com/ZSA233/frida-analykit/blob/stable/packages/frida-analykit-agent/README.md"
-)
+PACKAGE_REPOSITORY_URL = "https://github.com/ZSA233/frida-analykit"
 PACKAGE_MAIN_BLOB_PREFIX = "https://github.com/ZSA233/frida-analykit/blob/main/"
 
 
@@ -376,10 +374,10 @@ def validate_stable_entrypoints(
 
     agent_package = load_json_file(repo_root, AGENT_PACKAGE_JSON_PATH, ref=ref)
     homepage = agent_package.get("homepage")
-    if homepage != PACKAGE_STABLE_README_URL:
+    if homepage != PACKAGE_REPOSITORY_URL:
         errors.append(
             "packages/frida-analykit-agent/package.json homepage must be "
-            f"{PACKAGE_STABLE_README_URL}"
+            f"{PACKAGE_REPOSITORY_URL}"
         )
 
     if errors:
@@ -387,7 +385,7 @@ def validate_stable_entrypoints(
 
     return {
         "stable_install_spec": STABLE_INSTALL_SPEC,
-        "package_homepage": PACKAGE_STABLE_README_URL,
+        "package_homepage": PACKAGE_REPOSITORY_URL,
         "package_readmes": [path.as_posix() for path in PACKAGE_README_LINKS],
     }
 

@@ -16,20 +16,31 @@ from .message import RPCBatchSource, RPCMsgBatch, RPCMsgProgressing, RPCMsgSSLSe
 
 MessageHandler = Callable[[RPCPayload], None]
 ExceptionHandler = Callable[[dict, bytes | None], None]
+HostLogHandler = Callable[[str, str], None]
 
 
 class HandlerRegistry:
-    def __init__(self, config: AppConfig, stdout: TextIO, stderr: TextIO) -> None:
+    def __init__(
+        self,
+        config: AppConfig,
+        stdout: TextIO,
+        stderr: TextIO,
+        log_sink: HostLogHandler | None = None,
+    ) -> None:
         self._config = config
         self._stdout = stdout
         self._stderr = stderr
+        self._log_sink = log_sink
         self._message_handlers: dict[str, MessageHandler] = {}
         self._batch_handlers: dict[str, MessageHandler] = {}
         self._exception_handler: ExceptionHandler = self._default_exception_handler
         self._ssl_secret_loggers: dict[str, TextIO] = {}
-        self._dex_handler = DexDumpHandler(config, stdout, stderr)
-        self._elf_handler = ElfHandler(config, stdout, stderr)
+        self._dex_handler = DexDumpHandler(config, emit_info=self._emit_info, emit_error=self._emit_error)
+        self._elf_handler = ElfHandler(config, emit_info=self._emit_info, emit_error=self._emit_error)
         self._register_defaults()
+
+    def set_log_sink(self, log_sink: HostLogHandler | None) -> None:
+        self._log_sink = log_sink
 
     def on_message(self, msg_type: RPCMsgType | str, func: MessageHandler | None = None):
         key = msg_type.value if isinstance(msg_type, RPCMsgType) else str(msg_type)
@@ -92,7 +103,7 @@ class HandlerRegistry:
         column = message.get("columnNumber")
 
         if not any(value is not None for value in (description, stack, file_name, line, column)):
-            print(json.dumps(message, ensure_ascii=False), file=self._stderr)
+            self._emit_error(json.dumps(message, ensure_ascii=False))
             return
 
         if file_name:
@@ -101,13 +112,13 @@ class HandlerRegistry:
                 location = f"{location}:{line}"
                 if column is not None:
                     location = f"{location}:{column}"
-            print(f"[script-error] {location}", file=self._stderr)
+            self._emit_error(f"[script-error] {location}")
 
         if description:
-            print(f"[script-error] {description}", file=self._stderr)
+            self._emit_error(f"[script-error] {description}")
 
         if stack:
-            print(stack, file=self._stderr)
+            self._emit_error(stack)
 
     def _default_batch_handler(self, payload: RPCPayload) -> None:
         for item in unpack_batch_payload(payload):
@@ -115,10 +126,9 @@ class HandlerRegistry:
 
     def _default_message_handler(self, payload: RPCPayload) -> None:
         suffix = datetime.now().strftime("%Y%m%d%H%M%S%f")
-        print(
+        self._emit_info(
             f"{colorama.Fore.MAGENTA}[{payload.message.type.value}]{suffix} "
-            f"{payload.message.data.model_dump_json()}{colorama.Fore.RESET}",
-            file=self._stdout,
+            f"{payload.message.data.model_dump_json()}{colorama.Fore.RESET}"
         )
 
         if not payload.data:
@@ -128,24 +138,18 @@ class HandlerRegistry:
             path = ensure_filepath(self._config.agent.datadir / filename)
             with open(path, "wb") as handle:
                 handle.write(payload.data)
-            print(
-                f"{colorama.Fore.GREEN}[{path}] {len(payload.data)}{colorama.Fore.RESET}",
-                file=self._stdout,
-            )
+            self._emit_info(f"{colorama.Fore.GREEN}[{path}] {len(payload.data)}{colorama.Fore.RESET}")
             return
-        print(
-            f"{colorama.Fore.MAGENTA}[{filename}] {len(payload.data)} <drop>{colorama.Fore.RESET}",
-            file=self._stderr,
-        )
+        self._emit_error(f"{colorama.Fore.MAGENTA}[{filename}] {len(payload.data)} <drop>{colorama.Fore.RESET}")
 
     def _handle_progressing(self, payload: RPCPayload) -> None:
         data = payload.message.data
         assert isinstance(data, RPCMsgProgressing)
         if data.error:
-            print(f"[x] | {data.tag} | {data.step} => {data.error}", file=self._stderr)
+            self._emit_error(f"[x] | {data.tag} | {data.step} => {data.error}")
             return
         intro = data.extra.get("intro", ",".join(data.extra.keys()))
-        print(f"[~] | {data.tag} | {data.step} => {intro}", file=self._stdout)
+        self._emit_info(f"[~] | {data.tag} | {data.step} => {intro}")
 
     def _ssl_secret_logger(self, tag: str) -> TextIO:
         safe_tag = Path(tag or "sslkey.log").name
@@ -162,3 +166,14 @@ class HandlerRegistry:
         assert isinstance(data, RPCMsgSSLSecret)
         logger = self._ssl_secret_logger(data.tag)
         print(f"{data.label} {data.client_random} {data.secret}", file=logger)
+
+    def _emit(self, level: str, text: str, stream: TextIO) -> None:
+        print(text, file=stream)
+        if self._log_sink is not None:
+            self._log_sink(level, text)
+
+    def _emit_info(self, text: str) -> None:
+        self._emit("info", text, self._stdout)
+
+    def _emit_error(self, text: str) -> None:
+        self._emit("error", text, self._stderr)

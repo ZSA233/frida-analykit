@@ -12,6 +12,14 @@ from pathlib import Path
 from ..config import AppConfig
 from ..scaffold import generate_dev_workspace
 from ..server import FridaServerManager, ServerManagerError
+from ..workspace import (
+    WorkspaceBuildLock,
+    WorkspaceBuildResources,
+    acquire_workspace_build_lock,
+    prepare_workspace_npm_env,
+    workspace_build_resources,
+    write_workspace_config,
+)
 from .constants import DEFAULT_DEVICE_TEST_APP_ID
 from .defaults import (
     DEFAULT_AGENT_SOURCE,
@@ -22,7 +30,7 @@ from .defaults import (
     TRANSIENT_DEVICE_FAILURE_MARKERS,
 )
 from .models import AppProbeResult, DeviceAppResolutionError, DeviceWorkspace
-from .selection import DeviceTestLock, derive_remote_host, safe_device_serial_token
+from .selection import derive_remote_host, safe_device_serial_token
 
 
 class DeviceHelpers:
@@ -62,17 +70,19 @@ class DeviceHelpers:
     def workspace_npm_cache_dir(self) -> Path:
         return self.repo_root / ".pytest_cache" / "frida-analykit-npm-cache"
 
-    def _prepare_host_npm_env(self) -> dict[str, str]:
-        env = dict(self.env)
-        npm_cache_dir = self.workspace_npm_cache_dir
-        npm_cache_dir.mkdir(parents=True, exist_ok=True)
-        env["npm_config_cache"] = str(npm_cache_dir)
-        return env
+    @property
+    def workspace_build_resources(self) -> WorkspaceBuildResources:
+        return workspace_build_resources(
+            self.repo_root / ".pytest_cache",
+            lock_filename="frida-analykit-workspace-build.lock",
+            npm_cache_dirname="frida-analykit-npm-cache",
+        )
 
-    def _acquire_host_npm_lock(self) -> DeviceTestLock:
-        lock = DeviceTestLock(self.workspace_build_lock_path)
-        lock.acquire()
-        return lock
+    def _prepare_host_npm_env(self) -> dict[str, str]:
+        return prepare_workspace_npm_env(self.env, self.workspace_build_resources)
+
+    def _acquire_host_npm_lock(self) -> WorkspaceBuildLock:
+        return acquire_workspace_build_lock(self.workspace_build_resources)
 
     def _write_workspace_config(
         self,
@@ -82,29 +92,16 @@ class DeviceHelpers:
         jsfile: str | Path,
         log_path: Path,
     ) -> None:
-        lines = [
-            f"app: {app or ''}",
-            f"jsfile: {jsfile}",
-            "server:",
-            f"  host: {self.remote_host}",
-            f"  servername: {self.remote_servername}",
-            f"  version: {self.frida_version}",
-        ]
-        if self.resolved_serial:
-            lines.append(f"  device: {self.resolved_serial}")
-        lines.extend(
-            [
-                "agent:",
-                "  datadir: ./data",
-                f"  stdout: {log_path}",
-                f"  stderr: {log_path}",
-                "script:",
-                "  dextools:",
-                "    output_dir: ./data/dextools",
-                "  nettools: {}",
-            ]
+        write_workspace_config(
+            config_path,
+            app=app,
+            jsfile=jsfile,
+            host=self.remote_host,
+            path=self.remote_servername,
+            version=self.frida_version,
+            device=self.resolved_serial,
+            stdout=log_path,
         )
-        config_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     def adb_run(self, args: list[str], *, timeout: int = 30) -> subprocess.CompletedProcess[str]:
         command = [self.adb_executable]
@@ -690,14 +687,13 @@ class DeviceHelpers:
         ]
         if install:
             args.append("--install")
-        npm_cache_dir = self.workspace_npm_cache_dir
-        npm_cache_dir.mkdir(parents=True, exist_ok=True)
+        self.workspace_build_resources.npm_cache_dir.mkdir(parents=True, exist_ok=True)
         build_lock = self._acquire_host_npm_lock()
         try:
             result = self.run_cli_with_env(
                 args,
                 timeout=timeout,
-                extra_env={"npm_config_cache": str(npm_cache_dir)},
+                extra_env={"npm_config_cache": str(self.workspace_build_resources.npm_cache_dir)},
             )
         finally:
             build_lock.release()

@@ -133,7 +133,7 @@ def _make_release_repo(tmp_path: Path) -> Path:
         {
           "name": "@zsa233/frida-analykit-agent",
           "version": "0.5.0",
-          "homepage": "https://github.com/ZSA233/frida-analykit/blob/stable/packages/frida-analykit-agent/README.md"
+          "homepage": "https://github.com/ZSA233/frida-analykit"
         }
         """,
     )
@@ -373,7 +373,7 @@ def test_validate_stable_entrypoints_accepts_stable_install_and_links(tmp_path: 
     payload = release_assets.validate_stable_entrypoints(repo_root)
 
     assert payload["stable_install_spec"] == release_assets.STABLE_INSTALL_SPEC
-    assert payload["package_homepage"] == release_assets.PACKAGE_STABLE_README_URL
+    assert payload["package_homepage"] == release_assets.PACKAGE_REPOSITORY_URL
 
 
 def test_validate_stable_entrypoints_rejects_version_pinned_root_readme_install(tmp_path: Path) -> None:

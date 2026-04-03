@@ -118,7 +118,7 @@ def test_build_agent_bundle_runs_install_then_build(tmp_path: Path, monkeypatch:
         stdout = ""
         stderr = ""
 
-    def fake_run(command: list[str], *, cwd: Path, capture_output: bool, text: bool, check: bool):
+    def fake_run(command: list[str], *, cwd: Path, env, capture_output: bool, text: bool, check: bool):
         calls.append(command)
         if command == ["npm", "install"]:
             (cwd / "node_modules").mkdir()

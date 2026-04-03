@@ -10,6 +10,7 @@
 ## 项目定位
 
 - Python CLI：负责 `frida-server` 生命周期、设备连接、构建编排、attach/spawn、REPL、日志与二进制数据落盘。
+- Python 安装还会同时提供独立命令 `frida-analykit-mcp`，用于把当前 Frida 调试链路暴露成 stdio MCP server。
 - npm runtime：发布为 `@zsa233/frida-analykit-agent`，提供 RPC、helper、JNI、ELF、SSL、Dex dump 和部分 native binding。
 - v2 的主线模式是“用户维护独立 TypeScript agent 工作区，CLI 负责构建、注入和结果归档”。
 
@@ -66,7 +67,7 @@ flowchart LR
 
 ```sh
 frida-analykit doctor
-frida-analykit doctor fix --config ./config.yml
+frida-analykit doctor fix --config ./config.toml
 frida-analykit doctor device-compat --all-devices
 ```
 
@@ -79,6 +80,8 @@ Python 包通过 GitHub 仓库 / GitHub Release 分发，不发布到 PyPI。
 ```sh
 uv tool install "git+https://github.com/ZSA233/frida-analykit@stable"
 ```
+
+同一安装会同时提供 `frida-analykit` 与 `frida-analykit-mcp` 两个命令入口。
 
 如果你需要维护多套 Frida 版本环境，可以使用内置环境管理：
 
@@ -93,7 +96,7 @@ frida-analykit env remove legacy-16
 
 ## 普通用户：主线工作流
 
-下面这条主线流程假设你已经有一个可运行的 agent 工作区，或者已经从模板仓库拿到了 `config.yml` 和 `index.ts`。
+下面这条主线流程假设你已经有一个可运行的 agent 工作区，或者已经从模板仓库拿到了 `config.toml` 和 `index.ts`。
 
 1. 准备好 Python 环境与目标设备连接。
 2. 先用 `doctor` 检查当前 Frida 版本、设备连通性和 `frida-server` 状态。
@@ -103,18 +106,28 @@ frida-analykit env remove legacy-16
 6. 需要交互式调试时，追加 `--repl` 进入 async `ptpython`。
 
 ```sh
-frida-analykit doctor --config ./config.yml
-frida-analykit doctor fix --config ./config.yml
-frida-analykit server install --config ./config.yml
-frida-analykit server boot --config ./config.yml
-frida-analykit build --config ./config.yml
-frida-analykit spawn --config ./config.yml
-frida-analykit attach --config ./config.yml --build --repl
+frida-analykit doctor --config ./config.toml
+frida-analykit doctor fix --config ./config.toml
+frida-analykit server install --config ./config.toml
+frida-analykit server boot --config ./config.toml
+frida-analykit build --config ./config.toml
+frida-analykit spawn --config ./config.toml
+frida-analykit attach --config ./config.toml --build --repl
 ```
+
+如果你要把当前设备链路交给 MCP client / 大模型，可在宿主机上另开一个终端运行：
+
+```sh
+frida-analykit-mcp --config ./mcp.toml
+```
+
+连接后建议先读取 `frida://service/config`、`frida://docs/mcp/config`、`frida://docs/mcp/index`、`frida://docs/mcp/quickstart` 与 `frida://docs/mcp/workflow`，用 `frida://service/config` 读取当前 MCP 进程固定下来的默认值，并确认 `quick_path.state` 是否已经是 `ready`，然后优先调用 `session_open_quick`，再决定具体的 `eval_js` 与 snippet 管理步骤。
+
+`session_open(config_path, ...)` 仍然保留给显式 workspace，但它是 MCP 成功启动后的低层会话入口，不是 quick warmup 失败时的启动绕过路径。
 
 ## 常用配置与命令
 
-`config.yml` 顶层常用字段包括：
+`config.toml` 顶层常用字段包括：
 
 - `app`：目标包名；`spawn` 时必须提供，`attach` 时可作为 PID 自动解析依据。
 - `jsfile`：编译产物 `_agent.js` 路径。
@@ -122,52 +135,60 @@ frida-analykit attach --config ./config.yml --build --repl
 - `agent`：Python 侧日志与二进制数据输出路径。
 - `script`：agent 侧扩展配置；当前包括 `rpc.batch_max_bytes`、`repl.globals`、`nettools.ssl_log_secret`、`dextools.output_dir`。
 
-```yml
-app: com.example.demo
-jsfile: ./_agent.js
+```toml
+app = "com.example.demo"
+jsfile = "./_agent.js"
 
-server:
-  servername: /data/local/tmp/frida-server
-  host: 127.0.0.1:27042
-  device:
-  version:
+[server]
+path = "/data/local/tmp/frida-server"
+host = "127.0.0.1:27042"
 
-agent:
-  datadir: ./data
-  stdout: ./logs/stdout.log
-  stderr: ./logs/stderr.log
+[agent]
+datadir = "./data"
+stdout = "./logs/stdout.log"
+stderr = "./logs/stderr.log"
 
-script:
-  rpc:
-    batch_max_bytes: 8388608
-  repl:
-    globals:
-      - Process
-      - Module
-      - Memory
-      - Java
-      - ObjC
-      - Swift
-  nettools:
-    ssl_log_secret: ./data/nettools/sslkey
-  dextools:
-    output_dir: ./data/dextools
+[script.rpc]
+batch_max_bytes = 8388608
+
+[script.repl]
+globals = ["Process", "Module", "Memory", "Java", "ObjC", "Swift"]
+
+[script.nettools]
+ssl_log_secret = "./data/nettools/sslkey"
+
+[script.dextools]
+output_dir = "./data/dextools"
 ```
+
+兼容说明：
+
+- 主线配置文件名已经切到 `config.toml`。
+- 旧的 `config.yml` / `config.yaml` 仍可继续读取。
+- `server.path` 是新的主字段；旧的 `server.servername` 仍保留输入兼容。
 
 常用命令：
 
 ```sh
-frida-analykit build --config ./config.yml
-frida-analykit watch --config ./config.yml
-frida-analykit spawn --config ./config.yml
-frida-analykit attach --config ./config.yml --pid 12345
-frida-analykit attach --config ./config.yml --watch --repl
-frida-analykit doctor --config ./config.yml --verbose
-frida-analykit doctor fix --config ./config.yml
-frida-analykit server stop --config ./config.yml
-frida-analykit server install --config ./config.yml --version 17.8.2
-frida-analykit server install --config ./config.yml --local-server ./frida-server-17.8.2-android-arm64.xz
+frida-analykit build --config ./config.toml
+frida-analykit watch --config ./config.toml
+frida-analykit spawn --config ./config.toml
+frida-analykit attach --config ./config.toml --pid 12345
+frida-analykit attach --config ./config.toml --watch --repl
+frida-analykit doctor --config ./config.toml --verbose
+frida-analykit doctor fix --config ./config.toml
+frida-analykit server stop --config ./config.toml
+frida-analykit server install --config ./config.toml --version 17.8.2
+frida-analykit server install --config ./config.toml --local-server ./frida-server-17.8.2-android-arm64.xz
 ```
+
+如果你要把当前设备会话交给 MCP client，也可以直接启动独立 stdio server：
+
+```sh
+frida-analykit-mcp --config ./mcp.toml
+```
+
+连接后建议先读取 `frida://service/config`、`frida://docs/mcp/config`、`frida://docs/mcp/index`、`frida://docs/mcp/quickstart` 与 `frida://docs/mcp/workflow`，用 `frida://service/config` 读取当前 MCP 进程固定下来的默认值，并确认 `quick_path.state` 是否已经是 `ready`，然后优先调用 `session_open_quick`，再决定具体的 `eval_js` 与 snippet 管理步骤。
 
 使用时需要特别记住：
 
@@ -183,6 +204,21 @@ frida-analykit server install --config ./config.yml --local-server ./frida-serve
 - `server stop` 是幂等清理入口，即使远端当前没有匹配进程也会返回成功。
 - `script.rpc.batch_max_bytes` 是通用 RPC batch 上限，不只作用于 dex dump。
 - `script.dextools.output_dir` 是 Python 侧接收 dex dump 的默认目录。
+- `frida-analykit-mcp` 当前只支持 stdio transport，默认只维护一个活动调试会话。
+- `frida-analykit-mcp` 支持可选的 `--config ./mcp.toml` 启动配置；未提供时使用内建默认值，`--idle-timeout` 仍可覆盖空闲回收时间。
+- `frida-analykit-mcp` 启动时会先做 quick-path preflight + warmup，再进入 stdio serve；如果 `prepared_cache_root` 不可写，或 MCP 进程 `PATH` 中缺少 `frida-compile` / `npm`，或 compile probe 失败，服务会直接非零退出。
+- 启动 banner 会在 `stderr` 打印 quick-path 状态块；`frida://service/config` 也会返回同一份结构化 `quick_path` readiness 摘要，适合先让 MCP client 确认 `quick_path.state == "ready"`。
+- `frida://service/config` 还会暴露 `config_path_raw`、resolved `config_path` 和配置好的 `session_root`；每个真实 MCP 会话都会在这个父目录下创建 `{yyyyMMdd-HHMMSS-shortid}` 形式的会话目录。
+- MCP 还会暴露 `frida://service/config`，以及 `frida://docs/mcp/index`、`frida://docs/mcp/config`、`frida://docs/mcp/quickstart`、`frida://docs/mcp/workflow`、`frida://docs/mcp/tools`、`frida://docs/mcp/recovery` 六个可查询 Markdown 资源，适合先给大模型读一遍再开会话。
+- MCP 推荐起手式是 `session_open_quick`：它会自动生成最小工作区、通过 MCP 进程 `PATH` 中预装的 `frida-compile` 构建 `_agent.js`、写出继承 startup config 的 `config.toml`，并复用相同参数签名的缓存结果。
+- 生成出来的 `index.ts` 就是 quick session 的实际编译入口，便于直接查看 MCP 最终使用的入口代码。
+- `session_open` 仍保留为底层显式入口，适用于你已经自定义维护好的 `config.toml` 或 legacy YAML 配置工作区。
+- quick path 只允许官方 `@zsa233/frida-analykit-agent` capability subpath / 模板名，不开放任意 npm 包，也不会接管 watch / hot reload。
+- `session_open_quick` 同时支持 `bootstrap_path` 与 `bootstrap_source`：前者适合直接复用仓库里的 `.ts` / `.js` 文件，后者适合一次性的内联初始化 hook；两者都不进入 snippet registry。
+- `session_root` 是当前 MCP 会话目录，包含 `session.json`、`events.jsonl`、`workspace/`、`snippets/`。
+- `session_workspace` 是当前会话运行时 workspace，查看输出文件时优先看这里。
+- `install_snippet` 成功后会把源码归档到当前会话目录，但这只是历史记录，不会在后续新会话中自动 replay。
+- `tail_logs` / `frida://session/logs` 可同时查看脚本日志和 `source="host"` 的 host 侧事件，例如 `[dex] begin/file/complete`。
 
 ## Agent 能力概览
 
@@ -216,7 +252,7 @@ npm install
 ```text
 my-agent/
 ├── README.md
-├── config.yml
+├── config.toml
 ├── index.ts
 ├── package.json
 └── tsconfig.json
@@ -264,15 +300,20 @@ setImmediate(() => {
 `--repl` 会进入 async `ptpython`，并注入 `config`、`device`、`pid`、`session`、`script` 这些对象。
 
 ```sh
-frida-analykit attach --config ./config.yml --build --repl
+frida-analykit attach --config ./config.toml --build --repl
 ```
 
 REPL 与 runtime 的关键行为包括：
 
 - `script.repl.globals` 会懒注入一组 JS seed handle，模板默认包括 `Process`、`Module`、`Memory`、`Java`、`ObjC`、`Swift`。
+- 普通 CLI / REPL 暴露的 `script` 默认就是 sync-first wrapper；async wrapper 只保留给 Promise-aware expert 场景和 MCP 内核。
 - 这些名字会在首次真实使用时 materialize 成 `script.jsh(name)` 对应句柄，而不是在进入 REPL 时立即 enumerate。
-- 常用路径包括 `script.eval("Process.arch")`、`await script.eval_async("Promise.resolve(Process.arch)")`、`handle.value_`、`handle.type_`、`await handle.resolve_async()`。
+- REPL 默认推荐用 `script.eval(...)` / `script.jsh(...)` 拿 sync handle 做对象浏览、getter 读取和长属性链；例如 `script.eval("DexTools").fileName.value_`。
+- async 路径主要用于 Promise-aware 场景，例如 `await script.eval_async("Promise.resolve(Process.arch)")`、`await handle.call_async(...)` 和 `await handle.resolve_async()`。
+- `script.eval("Promise.resolve(Process.arch)")` 会返回 Promise 句柄，不会自动 await；`await script.eval_async("Promise.resolve(Process.arch)")` 则会在 agent 侧先 await 一层 Promise，再返回 resolved value 的 async handle。
+- 当前 async handle 不提供和 sync handle 完全对称的属性链浏览；如果必须在 async handle 上访问子路径，应显式使用 `await handle.resolve_path_async("a.b.c")`。
 - 句柄元信息使用 `.value_` / `.type_`，不占用真实 JS 属性 `.value` / `.type`。
+- async RPC 路径会按当前已加载 script 的真实 capability 选择 native async 或 shim async；compat profile 只用于诊断与测试口径，不参与运行时分流。
 - 如果设备上加载的是旧 `_agent.js`，Python 侧会直接抛出 `RPC runtime mismatch`，提示重新打包当前 runtime 并 rebuild。
 
 ## 高级/开发用户：Dex Dump 与 Runtime Capability
@@ -286,7 +327,8 @@ import { DexTools } from "@zsa233/frida-analykit-agent/dex"
 setImmediate(() => {
   const loaders = DexTools.enumerateClassLoaderDexFiles()
   console.log("dex loaders =", loaders.length)
-  DexTools.dumpAllDex({ tag: "manual" })
+  const summary = DexTools.dumpAllDex({ tag: "manual" })
+  console.log("transfer =", summary.transferId)
 })
 ```
 
@@ -296,10 +338,11 @@ Dex dump 的当前行为包括：
 - `script.rpc.batch_max_bytes` 是通用 RPC batch 上限；agent 侧默认读取 `Config.BatchMaxBytes`，也可用 `dumpAllDex({ maxBatchBytes })` 按次覆盖。
 - Python 侧默认输出目录优先取 `script.dextools.output_dir`，未配置时回退到 `agent.datadir/dextools`。
 - 单个 dex 即使超过批量上限，也会单独成批发送，不继续做更细粒度切片。
+- `DexTools.dumpAllDex()` 返回 summary 后，不代表 host 侧已经完成全部文件落盘；若通过 MCP 使用，应拿返回的 `transferId` 轮询 `tail_logs` / `frida://session/logs`，直到看到 `source="host"` 且文本匹配 `[dex] complete <transferId>` 的日志再判定完成。
 
 ## 调试、真机测试、发布与仓库结构
 
-仓库内置了一组 Android 真机测试，不依赖外部示例工程。它们会在临时目录里生成最小 `_agent.js + config.yml`，覆盖 `frida-server` 生命周期、注入链路、REPL 核心路径和 runtime 安装回归。
+仓库内置了一组 Android 真机测试，不依赖外部示例工程。它们会在临时目录里生成最小 `_agent.js + config` 工作区，覆盖 `frida-server` 生命周期、注入链路、REPL 核心路径和 runtime 安装回归。
 
 运行前需要：
 

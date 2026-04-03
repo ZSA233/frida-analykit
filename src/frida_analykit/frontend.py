@@ -8,6 +8,7 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
+from collections.abc import Mapping
 
 from .config import AppConfig
 from .diagnostics import format_command, verbose_echo
@@ -111,10 +112,15 @@ def load_frontend_project(
     )
 
 
-def build_agent_bundle(project: FrontendProject, *, install: bool = False) -> Path:
+def build_agent_bundle(
+    project: FrontendProject,
+    *,
+    install: bool = False,
+    env: Mapping[str, str] | None = None,
+) -> Path:
     _validate_frontend_project(project, command="build")
-    _ensure_dependencies(project, install=install)
-    _run_command(["npm", "run", "build"], cwd=project.project_dir)
+    _ensure_dependencies(project, install=install, env=env)
+    _run_command(["npm", "run", "build"], cwd=project.project_dir, env=env)
     _ensure_bundle_exists(project)
     return project.bundle_path
 
@@ -160,14 +166,19 @@ def _validate_frontend_project(project: FrontendProject, *, command: str) -> Non
         )
 
 
-def _ensure_dependencies(project: FrontendProject, *, install: bool) -> None:
+def _ensure_dependencies(
+    project: FrontendProject,
+    *,
+    install: bool,
+    env: Mapping[str, str] | None = None,
+) -> None:
     if project.node_modules.is_dir():
         return
     if not install:
         raise FrontendError(
             f"`{project.project_dir}` is missing `node_modules`; run `npm install` there or rerun with `--install`"
         )
-    _run_command(["npm", "install"], cwd=project.project_dir)
+    _run_command(["npm", "install"], cwd=project.project_dir, env=env)
 
 
 def _ensure_bundle_exists(project: FrontendProject) -> None:
@@ -179,12 +190,13 @@ def _ensure_bundle_exists(project: FrontendProject) -> None:
     )
 
 
-def _run_command(command: list[str], *, cwd: Path) -> None:
+def _run_command(command: list[str], *, cwd: Path, env: Mapping[str, str] | None = None) -> None:
     verbose_echo(f"running in `{cwd}`: {format_command(command)}")
     try:
         result = subprocess.run(
             command,
             cwd=cwd,
+            env=dict(env) if env is not None else None,
             capture_output=True,
             text=True,
             check=False,

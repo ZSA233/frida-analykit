@@ -11,13 +11,13 @@ sync:
 	uv sync --extra repl --dev
 
 test:
-	uv run pytest -m "not smoke and not scaffold and not device"
+	uv run pytest -m "not smoke and not scaffold and not device" -v
 
 compat:
-	FRIDA_ANALYKIT_ENABLE_SMOKE=1 uv run pytest -m smoke
+	FRIDA_ANALYKIT_ENABLE_SMOKE=1 uv run pytest -m smoke -v
 
 scaffold:
-	FRIDA_ANALYKIT_ENABLE_NPM=1 uv run pytest -m scaffold
+	FRIDA_ANALYKIT_ENABLE_NPM=1 uv run pytest -m scaffold -v
 
 build:
 	uv build

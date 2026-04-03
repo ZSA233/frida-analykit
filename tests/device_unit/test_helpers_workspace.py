@@ -106,7 +106,12 @@ def test_device_helpers_pack_local_package_uses_workspace_local_npm_cache(
     pack_globals = DeviceHelpers.pack_local_package.__globals__
     monkeypatch.setitem(pack_globals, "shutil", SimpleNamespace(which=lambda name: "/usr/bin/npm"))
     monkeypatch.setitem(pack_globals, "subprocess", SimpleNamespace(run=fake_run))
-    monkeypatch.setitem(pack_globals, "DeviceTestLock", FakeLock)
+    def fake_acquire_workspace_build_lock(resources):
+        lock = FakeLock(resources.lock_path)
+        lock.acquire()
+        return lock
+
+    monkeypatch.setitem(pack_globals, "acquire_workspace_build_lock", fake_acquire_workspace_build_lock)
 
     tarball = helpers.pack_local_package(tmp_path, package_dir)
 
@@ -159,7 +164,16 @@ def test_device_helpers_build_workspace_uses_shared_repo_npm_cache_and_lock(
             lock_events.append(("release", self.path))
 
     monkeypatch.setattr(helpers, "run_cli_with_env", fake_run_cli_with_env)
-    monkeypatch.setitem(DeviceHelpers.build_workspace.__globals__, "DeviceTestLock", FakeLock)
+    def fake_acquire_workspace_build_lock(resources):
+        lock = FakeLock(resources.lock_path)
+        lock.acquire()
+        return lock
+
+    monkeypatch.setitem(
+        DeviceHelpers.build_workspace.__globals__,
+        "acquire_workspace_build_lock",
+        fake_acquire_workspace_build_lock,
+    )
 
     helpers.build_workspace(workspace, install=True, timeout=45)
 

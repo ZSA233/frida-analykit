@@ -17,7 +17,7 @@ def default_agent_package_spec(version: str = __version__) -> str:
 
 
 def _template_dir():
-    return files("frida_analykit.resources").joinpath("templates").joinpath("dev")
+    return files("frida_analykit.resources").joinpath("scaffold")
 
 
 def _render_template(name: str, variables: dict[str, str]) -> str:
@@ -41,7 +41,7 @@ def generate_dev_workspace(
     }
 
     created: list[Path] = []
-    for name in ("config.yml", "index.ts", "package.json", "tsconfig.json", "README.md"):
+    for name in ("config.toml", "index.ts", "package.json", "tsconfig.json", "README.md"):
         destination = target / name
         if destination.exists() and not force:
             continue

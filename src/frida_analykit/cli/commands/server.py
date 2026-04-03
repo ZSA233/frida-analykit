@@ -4,6 +4,7 @@ from pathlib import Path
 
 import click
 
+from ...config import DEFAULT_CONFIG_FILENAME
 from ...server import FridaServerManager, ServerManagerError, stop_server
 from ...server.helpers import require_host_port
 from .. import common as cli_common
@@ -47,11 +48,11 @@ def _render_server_boot_preamble(
 
 
 @server_group.command("boot")
-@click.option("-c", "--config", "config_path", default="config.yml", show_default=True)
+@click.option("-c", "--config", "config_path", default=DEFAULT_CONFIG_FILENAME, show_default=True)
 @click.option(
     "--force-restart",
     is_flag=True,
-    help="Kill an existing remote frida-server that matches config.server.servername before starting a new one.",
+    help="Kill an existing remote frida-server that matches config.server.path before starting a new one.",
 )
 @_verbose_option()
 def server_boot(config_path: str, force_restart: bool, verbose: bool) -> None:
@@ -78,7 +79,7 @@ def server_boot(config_path: str, force_restart: bool, verbose: bool) -> None:
 
 
 @server_group.command("stop")
-@click.option("-c", "--config", "config_path", default="config.yml", show_default=True)
+@click.option("-c", "--config", "config_path", default=DEFAULT_CONFIG_FILENAME, show_default=True)
 @_verbose_option()
 def server_stop(config_path: str, verbose: bool) -> None:
     cli_common._configure_verbose(verbose)
@@ -94,7 +95,7 @@ def server_stop(config_path: str, verbose: bool) -> None:
 
 
 @server_group.command("install")
-@click.option("-c", "--config", "config_path", default="config.yml", show_default=True)
+@click.option("-c", "--config", "config_path", default=DEFAULT_CONFIG_FILENAME, show_default=True)
 @click.option(
     "--version",
     "server_version",

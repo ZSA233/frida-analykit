@@ -43,20 +43,20 @@ class ServerBootController:
             self._installer.ensure_remote_forward(config, action="server boot")
             before_pids = self.list_remote_server_pids(config)
 
-            version_probe = self._adb.probe_remote_binary_version(config, config.server.servername)
+            version_probe = self._adb.probe_remote_binary_version(config, config.server.path)
             installed_version = _extract_version(
                 "\n".join(part for part in (version_probe.stdout, version_probe.stderr) if part)
             )
             if version_probe.returncode != 0:
                 raise ServerManagerError(
-                    f"failed to execute `{config.server.servername} --version` on the target device"
+                    f"failed to execute `{config.server.path} --version` on the target device"
                 )
             if installed_version is None:
                 verbose_echo(
-                    f"unable to parse a frida-server version from `{config.server.servername} --version`; continuing with boot"
+                    f"unable to parse a frida-server version from `{config.server.path} --version`; continuing with boot"
                 )
 
-            launch_command = self._build_boot_command(config.server.servername, port)
+            launch_command = self._build_boot_command(config.server.path, port)
             execution = self._start_boot_process(config, launch_command)
             command, process = execution.command, execution.process
             if execution.returncode is not None:
@@ -109,11 +109,11 @@ class ServerBootController:
 
     def list_remote_server_pids(self, config: AppConfig) -> set[int]:
         config = self._installer.resolve_target_config(config, action="remote server pid lookup")
-        basename = config.server.servername.rsplit("/", 1)[-1]
-        identifiers = (config.server.servername, basename)
+        basename = config.server.path.rsplit("/", 1)[-1]
+        identifiers = (config.server.path, basename)
 
-        pidof_candidates = [config.server.servername]
-        if basename != config.server.servername:
+        pidof_candidates = [config.server.path]
+        if basename != config.server.path:
             pidof_candidates.append(basename)
 
         for candidate in pidof_candidates:
@@ -256,7 +256,7 @@ class ServerBootController:
         stdout: str | None,
         stderr: str | None,
     ) -> str:
-        message = f"`{config.server.servername} -l 0.0.0.0:{port}` exited with code {returncode}"
+        message = f"`{config.server.path} -l 0.0.0.0:{port}` exited with code {returncode}"
         stderr_tail = _tail_text(stderr)
         stdout_tail = _tail_text(stdout)
         combined = "\n".join(part for part in (stderr_tail, stdout_tail) if part)

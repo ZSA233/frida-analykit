@@ -1,70 +1,70 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 from tests.support.paths import REPO_ROOT
 
+_EXPECTED_PUBLIC_EXPORTS = {
+    ".": "./dist/index.js",
+    "./config": "./dist/config/index.js",
+    "./bridges": "./dist/bridges/index.js",
+    "./helper": "./dist/helper/index.js",
+    "./process": "./dist/process/index.js",
+    "./jni": "./dist/jni/index.js",
+    "./ssl": "./dist/ssl/index.js",
+    "./elf": "./dist/elf/index.js",
+    "./elf/enhanced": "./dist/elf/enhanced/index.js",
+    "./dex": "./dist/dex/index.js",
+    "./native/libssl": "./dist/native/libssl/index.js",
+    "./native/libart": "./dist/native/libart/index.js",
+    "./native/libc": "./dist/native/libc/index.js",
+    "./rpc": "./dist/rpc/index.js",
+}
 
-def test_agent_package_exports_prebuilt_runtime() -> None:
-    repo_root = REPO_ROOT
-    root_entry = (repo_root / "packages/frida-analykit-agent/src/index.ts").read_text(encoding="utf-8")
-    package_json = json.loads(
-        (repo_root / "packages/frida-analykit-agent/package.json").read_text(encoding="utf-8")
-    )
+def test_agent_package_manifest_and_public_exports() -> None:
+    package_json = json.loads((REPO_ROOT / "packages/frida-analykit-agent/package.json").read_text(encoding="utf-8"))
+    package_readme = (REPO_ROOT / "packages/frida-analykit-agent/README.md").read_text(encoding="utf-8")
+    package_readme_en = (REPO_ROOT / "packages/frida-analykit-agent/README_EN.md").read_text(encoding="utf-8")
 
     assert package_json["main"] == "./dist/index.js"
     assert package_json["types"] == "./dist/index.d.ts"
-    assert "dist/**/*" in package_json["files"]
-    assert "README.md" in package_json["files"]
-    assert "README_EN.md" in package_json["files"]
-    assert package_json["homepage"] == (
-        "https://github.com/ZSA233/frida-analykit/blob/stable/packages/frida-analykit-agent/README.md"
-    )
-    package_readme = (repo_root / "packages/frida-analykit-agent/README.md").read_text(encoding="utf-8")
-    package_readme_en = (repo_root / "packages/frida-analykit-agent/README_EN.md").read_text(encoding="utf-8")
+    assert {"dist/**/*", "README.md", "README_EN.md"}.issubset(set(package_json["files"]))
+    assert package_json["homepage"] == "https://github.com/ZSA233/frida-analykit"
     assert "blob/main" not in package_readme
     assert "blob/main" not in package_readme_en
     assert "blob/stable/packages/frida-analykit-agent/README_EN.md" in package_readme
     assert "blob/stable/packages/frida-analykit-agent/README.md" in package_readme_en
-    assert package_json["exports"]["."]["default"] == "./dist/index.js"
     assert package_json["exports"]["."]["types"] == "./dist/index.d.ts"
-    assert package_json["exports"]["./config"]["default"] == "./dist/config/index.js"
-    assert package_json["exports"]["./bridges"]["default"] == "./dist/bridges/index.js"
-    assert package_json["exports"]["./helper"]["default"] == "./dist/helper/index.js"
-    assert package_json["exports"]["./process"]["default"] == "./dist/process/index.js"
-    assert package_json["exports"]["./jni"]["default"] == "./dist/jni/index.js"
-    assert package_json["exports"]["./ssl"]["default"] == "./dist/ssl/index.js"
-    assert package_json["exports"]["./elf"]["default"] == "./dist/elf/index.js"
-    assert package_json["exports"]["./elf/enhanced"]["default"] == "./dist/elf/enhanced/index.js"
-    assert package_json["exports"]["./dex"]["default"] == "./dist/dex/index.js"
-    assert package_json["exports"]["./native/libssl"]["default"] == "./dist/native/libssl/index.js"
-    assert package_json["exports"]["./native/libart"]["default"] == "./dist/native/libart/index.js"
-    assert package_json["exports"]["./native/libc"]["default"] == "./dist/native/libc/index.js"
-    assert package_json["exports"]["./rpc"]["default"] == "./dist/rpc/index.js"
     assert package_json["exports"]["./rpc"]["types"] == "./dist/rpc/index.d.ts"
+    assert "sideEffects" not in package_json
     assert "./libssl" not in package_json["exports"]
     assert "./*" not in package_json["exports"]
+
+    for export_name, export_path in _EXPECTED_PUBLIC_EXPORTS.items():
+        assert package_json["exports"][export_name]["default"] == export_path
+
+
+def test_agent_package_root_entry_remains_lightweight() -> None:
+    root_entry = (REPO_ROOT / "packages/frida-analykit-agent/src/index.ts").read_text(encoding="utf-8")
+
     assert 'export { Config, LogLevel, setGlobalProperties } from "./config/index.js"' in root_entry
-    assert 'export { help, NativePointerObject, BatchSender, ProgressNotify, LoggerState, FileHelper } from "./helper/index.js"' in root_entry
+    assert (
+        'export { help, NativePointerObject, BatchSender, ProgressNotify, LoggerState, FileHelper } '
+        'from "./helper/index.js"'
+    ) in root_entry
     assert 'export { proc } from "./process/index.js"' in root_entry
-    assert "JNIEnv" not in root_entry
-    assert "SSLTools" not in root_entry
-    assert "ElfTools" not in root_entry
-    assert "Libart" not in root_entry
-    assert "Libssl" not in root_entry
+
+    for heavy_symbol in ("JNIEnv", "SSLTools", "ElfTools", "DexTools", "Libart", "Libssl", "Libc"):
+        assert heavy_symbol not in root_entry
 
 
 def test_agent_package_build_uses_dedicated_build_config() -> None:
-    repo_root = REPO_ROOT
-    package_json = json.loads(
-        (repo_root / "packages/frida-analykit-agent/package.json").read_text(encoding="utf-8")
-    )
+    package_json = json.loads((REPO_ROOT / "packages/frida-analykit-agent/package.json").read_text(encoding="utf-8"))
     build_config = json.loads(
-        (repo_root / "packages/frida-analykit-agent/tsconfig.build.json").read_text(encoding="utf-8")
+        (REPO_ROOT / "packages/frida-analykit-agent/tsconfig.build.json").read_text(encoding="utf-8")
     )
     type_test_config = json.loads(
-        (repo_root / "packages/frida-analykit-agent/tsconfig.type-tests.json").read_text(encoding="utf-8")
+        (REPO_ROOT / "packages/frida-analykit-agent/tsconfig.type-tests.json").read_text(encoding="utf-8")
     )
 
     assert "tsconfig.build.json" in package_json["scripts"]["build"]

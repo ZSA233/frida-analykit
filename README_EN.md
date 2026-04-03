@@ -10,6 +10,7 @@
 ## Project Positioning
 
 - Python CLI: manages the `frida-server` lifecycle, device connectivity, build orchestration, attach/spawn flows, REPL, logs, and binary payload persistence.
+- The Python install also provides a standalone command, `frida-analykit-mcp`, which exposes the current Frida debugging flow as a stdio MCP server.
 - npm runtime: published as `@zsa233/frida-analykit-agent`, providing RPC, helper, JNI, ELF, SSL, Dex dump, and selected native bindings.
 - The main v2 workflow is: "you maintain an independent TypeScript agent workspace, and the CLI handles build, injection, and result archiving."
 
@@ -66,7 +67,7 @@ Check the current environment first:
 
 ```sh
 frida-analykit doctor
-frida-analykit doctor fix --config ./config.yml
+frida-analykit doctor fix --config ./config.toml
 frida-analykit doctor device-compat --all-devices
 ```
 
@@ -79,6 +80,8 @@ The recommended installation uses `uv`:
 ```sh
 uv tool install "git+https://github.com/ZSA233/frida-analykit@stable"
 ```
+
+The same installation provides both `frida-analykit` and `frida-analykit-mcp`.
 
 If you need to maintain multiple Frida-version environments, you can use the built-in environment manager:
 
@@ -93,7 +96,7 @@ frida-analykit env remove legacy-16
 
 ## Regular Users: Main Workflow
 
-The main workflow below assumes that you already have a runnable agent workspace, or that you obtained `config.yml` and `index.ts` from a template repository.
+The main workflow below assumes that you already have a runnable agent workspace, or that you obtained `config.toml` and `index.ts` from a template repository.
 
 1. Prepare the Python environment and target-device connection.
 2. Run `doctor` first to check the current Frida version, device connectivity, and `frida-server` status.
@@ -103,18 +106,28 @@ The main workflow below assumes that you already have a runnable agent workspace
 6. Add `--repl` when you need interactive debugging in async `ptpython`.
 
 ```sh
-frida-analykit doctor --config ./config.yml
-frida-analykit doctor fix --config ./config.yml
-frida-analykit server install --config ./config.yml
-frida-analykit server boot --config ./config.yml
-frida-analykit build --config ./config.yml
-frida-analykit spawn --config ./config.yml
-frida-analykit attach --config ./config.yml --build --repl
+frida-analykit doctor --config ./config.toml
+frida-analykit doctor fix --config ./config.toml
+frida-analykit server install --config ./config.toml
+frida-analykit server boot --config ./config.toml
+frida-analykit build --config ./config.toml
+frida-analykit spawn --config ./config.toml
+frida-analykit attach --config ./config.toml --build --repl
 ```
+
+If you want to hand the current device flow to an MCP client / LLM, run this in another terminal on the host:
+
+```sh
+frida-analykit-mcp --config ./mcp.toml
+```
+
+After connecting, it is recommended to read `frida://service/config`, `frida://docs/mcp/config`, `frida://docs/mcp/index`, `frida://docs/mcp/quickstart`, and `frida://docs/mcp/workflow` first, use `frida://service/config` to read the fixed defaults for the current MCP process, confirm that `quick_path.state` is already `ready`, then start with `session_open_quick` before deciding which `eval_js` and snippet-management steps are needed.
+
+`session_open(config_path, ...)` is still available for explicit workspaces, but it is a low-level session entrypoint after MCP has started successfully, not a startup-bypass path when quick warmup fails.
 
 ## Common Config And Commands
 
-Common top-level fields in `config.yml` are:
+Common top-level fields in `config.toml` are:
 
 - `app`: the target package name; required for `spawn`, and also usable as PID-resolution input for `attach`.
 - `jsfile`: the compiled `_agent.js` output path.
@@ -122,52 +135,60 @@ Common top-level fields in `config.yml` are:
 - `agent`: Python-side output paths for logs and binary payloads.
 - `script`: agent-side extension config; currently includes `rpc.batch_max_bytes`, `repl.globals`, `nettools.ssl_log_secret`, and `dextools.output_dir`.
 
-```yml
-app: com.example.demo
-jsfile: ./_agent.js
+```toml
+app = "com.example.demo"
+jsfile = "./_agent.js"
 
-server:
-  servername: /data/local/tmp/frida-server
-  host: 127.0.0.1:27042
-  device:
-  version:
+[server]
+path = "/data/local/tmp/frida-server"
+host = "127.0.0.1:27042"
 
-agent:
-  datadir: ./data
-  stdout: ./logs/stdout.log
-  stderr: ./logs/stderr.log
+[agent]
+datadir = "./data"
+stdout = "./logs/stdout.log"
+stderr = "./logs/stderr.log"
 
-script:
-  rpc:
-    batch_max_bytes: 8388608
-  repl:
-    globals:
-      - Process
-      - Module
-      - Memory
-      - Java
-      - ObjC
-      - Swift
-  nettools:
-    ssl_log_secret: ./data/nettools/sslkey
-  dextools:
-    output_dir: ./data/dextools
+[script.rpc]
+batch_max_bytes = 8388608
+
+[script.repl]
+globals = ["Process", "Module", "Memory", "Java", "ObjC", "Swift"]
+
+[script.nettools]
+ssl_log_secret = "./data/nettools/sslkey"
+
+[script.dextools]
+output_dir = "./data/dextools"
 ```
+
+Compatibility notes:
+
+- The mainline config filename is now `config.toml`.
+- Legacy `config.yml` / `config.yaml` files are still accepted.
+- `server.path` is the new primary field; the old `server.servername` key remains input-compatible.
 
 Common commands:
 
 ```sh
-frida-analykit build --config ./config.yml
-frida-analykit watch --config ./config.yml
-frida-analykit spawn --config ./config.yml
-frida-analykit attach --config ./config.yml --pid 12345
-frida-analykit attach --config ./config.yml --watch --repl
-frida-analykit doctor --config ./config.yml --verbose
-frida-analykit doctor fix --config ./config.yml
-frida-analykit server stop --config ./config.yml
-frida-analykit server install --config ./config.yml --version 17.8.2
-frida-analykit server install --config ./config.yml --local-server ./frida-server-17.8.2-android-arm64.xz
+frida-analykit build --config ./config.toml
+frida-analykit watch --config ./config.toml
+frida-analykit spawn --config ./config.toml
+frida-analykit attach --config ./config.toml --pid 12345
+frida-analykit attach --config ./config.toml --watch --repl
+frida-analykit doctor --config ./config.toml --verbose
+frida-analykit doctor fix --config ./config.toml
+frida-analykit server stop --config ./config.toml
+frida-analykit server install --config ./config.toml --version 17.8.2
+frida-analykit server install --config ./config.toml --local-server ./frida-server-17.8.2-android-arm64.xz
 ```
+
+If you want to hand the current device session to an MCP client, you can also start the standalone stdio server directly:
+
+```sh
+frida-analykit-mcp --config ./mcp.toml
+```
+
+After connecting, it is recommended to read `frida://service/config`, `frida://docs/mcp/config`, `frida://docs/mcp/index`, `frida://docs/mcp/quickstart`, and `frida://docs/mcp/workflow` first, use `frida://service/config` to read the fixed defaults for the current MCP process, confirm that `quick_path.state` is already `ready`, then start with `session_open_quick` before deciding which `eval_js` and snippet-management steps are needed.
 
 Keep these behaviors in mind:
 
@@ -183,6 +204,21 @@ Keep these behaviors in mind:
 - `server stop` is an idempotent cleanup entry and still succeeds when no matching remote process exists.
 - `script.rpc.batch_max_bytes` is a global RPC batch limit, not a dex-only setting.
 - `script.dextools.output_dir` is the default Python-side output directory for dex dumps.
+- `frida-analykit-mcp` currently supports stdio transport only and keeps exactly one active debug session at a time by default.
+- `frida-analykit-mcp` supports an optional startup config, `--config ./mcp.toml`; when omitted, built-in defaults are used, and `--idle-timeout` can still override the idle reclaim time.
+- `frida-analykit-mcp` now performs quick-path preflight + warmup before entering stdio serve; if `prepared_cache_root` is not writable, if `frida-compile` or `npm` is missing from the MCP process `PATH`, or if the compile probe fails, the service exits non-zero immediately.
+- The startup banner prints a quick-path status block on `stderr`, and `frida://service/config` exposes the same structured `quick_path` readiness summary. Prefer confirming `quick_path.state == "ready"` before opening a session.
+- `frida://service/config` also exposes `config_path_raw`, the resolved `config_path`, and the configured `session_root`; every real MCP session creates a `{yyyyMMdd-HHMMSS-shortid}` directory under that parent root.
+- MCP also exposes `frida://service/config`, plus six queryable Markdown resources: `frida://docs/mcp/index`, `frida://docs/mcp/config`, `frida://docs/mcp/quickstart`, `frida://docs/mcp/workflow`, `frida://docs/mcp/tools`, and `frida://docs/mcp/recovery`.
+- The recommended MCP starting point is `session_open_quick`: it generates a minimal workspace, builds `_agent.js` with the `frida-compile` already available in the MCP process `PATH`, writes `config.toml` inherited from the startup config, and reuses cached artifacts for the same signature.
+- The generated `index.ts` is the effective quick compile entry, so you can open it directly to inspect what MCP actually built.
+- `session_open` remains the low-level explicit entry for custom workspaces where you already maintain `config.toml` or a legacy YAML config together with `_agent.js`.
+- The quick path only allows official `@zsa233/frida-analykit-agent` capability subpaths / templates, and it does not take over watch / hot reload.
+- `session_open_quick` supports both `bootstrap_path` and `bootstrap_source`: the former is for reusing a repo-visible `.ts` / `.js` file, while the latter is for one-off inline initialization hooks. Neither becomes part of the snippet registry.
+- `session_root` is the current MCP session directory and includes `session.json`, `events.jsonl`, `workspace/`, and `snippets/`.
+- `session_workspace` is the runtime workspace for the current session, and it is the first place to inspect output files.
+- Successful `install_snippet` calls archive the snippet source into the current session directory, but that archive is historical only and is not auto-replayed into later sessions.
+- `tail_logs` / `frida://session/logs` can show both script logs and `source="host"` events such as `[dex] begin/file/complete`.
 
 ## Agent Capability Overview
 
@@ -216,7 +252,7 @@ Generated workspace layout:
 ```text
 my-agent/
 ├── README.md
-├── config.yml
+├── config.toml
 ├── index.ts
 ├── package.json
 └── tsconfig.json
@@ -264,15 +300,20 @@ Keep these development details in mind:
 `--repl` enters async `ptpython` and injects the `config`, `device`, `pid`, `session`, and `script` objects.
 
 ```sh
-frida-analykit attach --config ./config.yml --build --repl
+frida-analykit attach --config ./config.toml --build --repl
 ```
 
 Key REPL and runtime behaviors are:
 
 - `script.repl.globals` lazily exposes a set of JS seed handles, and the template defaults to `Process`, `Module`, `Memory`, `Java`, `ObjC`, and `Swift`.
+- The `script` object exposed in the regular CLI / REPL is intentionally the sync-first wrapper; the async wrapper is kept for Promise-aware expert cases and MCP internals.
 - These names materialize into `script.jsh(name)` handles only when first used, instead of being enumerated when the REPL opens.
-- Common paths include `script.eval("Process.arch")`, `await script.eval_async("Promise.resolve(Process.arch)")`, `handle.value_`, `handle.type_`, and `await handle.resolve_async()`.
+- In the REPL, the default recommendation is still to use `script.eval(...)` / `script.jsh(...)` and sync handles for object browsing, getter reads, and long property chains; for example `script.eval("DexTools").fileName.value_`.
+- The async path is mainly for Promise-aware cases, such as `await script.eval_async("Promise.resolve(Process.arch)")`, `await handle.call_async(...)`, and `await handle.resolve_async()`.
+- `script.eval("Promise.resolve(Process.arch)")` returns a Promise handle and does not auto-await it, while `await script.eval_async("Promise.resolve(Process.arch)")` awaits one Promise layer on the agent side before returning an async handle for the resolved value.
+- The current async handle API does not provide fully symmetric property-chain browsing compared with sync handles; if async path traversal is required, use `await handle.resolve_path_async("a.b.c")` explicitly.
 - Handle metadata uses `.value_` / `.type_` and does not consume the real JS property names `.value` / `.type`.
+- The async RPC path chooses native async or shim async based on the actual capability surface exposed by the loaded script; compat profiles remain diagnostic and testing labels only.
 - If the device is still running an old `_agent.js`, Python raises `RPC runtime mismatch` directly and tells you to rebuild with the current runtime.
 
 ## Advanced / Developer Users: Dex Dump And Runtime Capability
@@ -286,7 +327,8 @@ import { DexTools } from "@zsa233/frida-analykit-agent/dex"
 setImmediate(() => {
   const loaders = DexTools.enumerateClassLoaderDexFiles()
   console.log("dex loaders =", loaders.length)
-  DexTools.dumpAllDex({ tag: "manual" })
+  const summary = DexTools.dumpAllDex({ tag: "manual" })
+  console.log("transfer =", summary.transferId)
 })
 ```
 
@@ -296,10 +338,11 @@ Current dex-dump behavior includes:
 - `script.rpc.batch_max_bytes` is the global RPC batch limit; on the agent side the default comes from `Config.BatchMaxBytes`, and `dumpAllDex({ maxBatchBytes })` can override it per call.
 - On the Python side the output directory first prefers `script.dextools.output_dir`, then falls back to `agent.datadir/dextools`.
 - Even when a single dex exceeds the batch limit, it is still sent as one batch instead of being sliced more finely.
+- After `DexTools.dumpAllDex()` returns its summary, the host side may still be flushing files; when using MCP, read `tail_logs` / `frida://session/logs` and wait for a `source="host"` line matching `[dex] complete <transferId>` before declaring the dump finished.
 
 ## Debugging, Device Tests, Release, And Repository Layout
 
-The repository includes Android device tests that do not depend on any external example project. They generate a minimal `_agent.js + config.yml` in a temporary directory and cover the `frida-server` lifecycle, injection flow, REPL core paths, and runtime-install regressions.
+The repository includes Android device tests that do not depend on any external example project. They generate a minimal `_agent.js + config` workspace in a temporary directory and cover the `frida-server` lifecycle, injection flow, REPL core paths, and runtime-install regressions.
 
 Before running them, you need:
 

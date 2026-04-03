@@ -2,7 +2,16 @@ import io
 from pathlib import Path
 
 from frida_analykit.config import AppConfig
-from frida_analykit.rpc.message import RPCMessage, RPCMsgSaveFile, RPCMsgType, RPCPayload
+from frida_analykit.rpc.message import (
+    RPCMessage,
+    RPCMsgDexDumpBegin,
+    RPCMsgDexDumpEnd,
+    RPCMsgDumpDexFile,
+    RPCMsgDexDumpFileInfo,
+    RPCMsgSaveFile,
+    RPCMsgType,
+    RPCPayload,
+)
 from frida_analykit.rpc.registry import HandlerRegistry
 from frida_analykit.rpc.resolver import RPCResolver
 
@@ -78,6 +87,70 @@ def test_default_exception_handler_formats_script_errors(tmp_path: Path) -> None
     assert "[script-error] /__inject__.js:1:1" in output
     assert "[script-error] Unable to load module" in output
     assert "Error: Unable to load module" in output
+
+
+def test_registry_forwards_host_handler_logs_to_sink(tmp_path: Path) -> None:
+    emitted: list[tuple[str, str]] = []
+    registry = HandlerRegistry(
+        _config(tmp_path),
+        io.StringIO(),
+        io.StringIO(),
+        log_sink=lambda level, text: emitted.append((level, text)),
+    )
+
+    transfer_id = "dex-1"
+    registry.handle(
+        RPCPayload(
+            message=RPCMessage(
+                type=RPCMsgType.DEX_DUMP_BEGIN,
+                data=RPCMsgDexDumpBegin(
+                    transfer_id=transfer_id,
+                    tag="demo",
+                    dump_dir=str(tmp_path / "dex"),
+                    expected_count=1,
+                    total_bytes=3,
+                    max_batch_bytes=1024,
+                ),
+            )
+        )
+    )
+    registry.handle(
+        RPCPayload(
+            message=RPCMessage(
+                type=RPCMsgType.DUMP_DEX_FILE,
+                data=RPCMsgDumpDexFile(
+                    transfer_id=transfer_id,
+                    tag="demo",
+                    info=RPCMsgDexDumpFileInfo(
+                        name="classes00.dex",
+                        base="0x1000",
+                        size=3,
+                        loader="0x1",
+                        loader_class="dalvik.system.PathClassLoader",
+                        output_name="classes00.dex",
+                    ),
+                ),
+            ),
+            data=b"abc",
+        )
+    )
+    registry.handle(
+        RPCPayload(
+            message=RPCMessage(
+                type=RPCMsgType.DEX_DUMP_END,
+                data=RPCMsgDexDumpEnd(
+                    transfer_id=transfer_id,
+                    tag="demo",
+                    expected_count=1,
+                    received_count=1,
+                    total_bytes=3,
+                ),
+            )
+        )
+    )
+
+    assert any(level == "info" and text.startswith("[dex] begin dex-1") for level, text in emitted)
+    assert any(level == "info" and text.startswith("[dex] complete dex-1") for level, text in emitted)
 
 
 def test_resolver_dispatches_send_and_error_messages() -> None:

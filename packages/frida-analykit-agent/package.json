@@ -1,6 +1,6 @@
 {
   "name": "@zsa233/frida-analykit-agent",
-  "version": "2.1.1",
+  "version": "2.1.2",
   "description": "Frida agent runtime for frida-analykit",
   "license": "MIT",
   "keywords": [
@@ -9,7 +9,7 @@
     "instrumentation",
     "typescript"
   ],
-  "homepage": "https://github.com/ZSA233/frida-analykit/blob/stable/packages/frida-analykit-agent/README.md",
+  "homepage": "https://github.com/ZSA233/frida-analykit",
   "bugs": {
     "url": "https://github.com/ZSA233/frida-analykit/issues"
   },

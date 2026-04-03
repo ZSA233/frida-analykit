@@ -1,6 +1,13 @@
 import asyncio
 
-from frida_analykit.rpc.exports import ScriptExportsAsyncWrapper, ScriptExportsSyncWrapper, make_rpc_response
+import pytest
+
+from frida_analykit.rpc.exports import (
+    ScriptExportCapabilityError,
+    ScriptExportsAsyncWrapper,
+    ScriptExportsSyncWrapper,
+    make_rpc_response,
+)
 from frida_analykit.rpc.handle_ref import HANDLE_REF_MARKER, HandleRef
 from frida_analykit.rpc.message import RPCMsgEnumerateObjProps, RPCMsgType, RPCPayload
 from frida_analykit.rpc.serialization import serialize_rpc_argument
@@ -68,6 +75,26 @@ class _FakeScript:
 
     async def list_exports_async(self) -> list[str]:
         return ["ping", "scopeEvalAsync"]
+
+
+class _FakeShimOnlyScript:
+    def __init__(self) -> None:
+        self.exports_sync = _FakeSyncExports()
+
+    def list_exports_sync(self) -> list[str]:
+        return ["ping"]
+
+
+class _FakeIncompleteRPCScript:
+    def __init__(self) -> None:
+        self.exports_sync = _FakeSyncExports()
+        self.exports_async = _FakeAsyncExports()
+
+    def list_exports_sync(self) -> list[str]:
+        return ["ping"]
+
+    async def list_exports_async(self) -> list[str]:
+        return ["scopeEvalAsync"]
 
 
 def test_make_rpc_response_wraps_mapping_into_rpc_payload() -> None:
@@ -156,3 +183,27 @@ def test_public_async_exports_wrapper_leaves_non_rpc_binary_tuple_untouched() ->
     assert method == "binary_payload"
     assert args == ()
     assert kwargs == {}
+
+
+def test_async_exports_wrapper_falls_back_to_shim_when_native_async_surface_is_missing() -> None:
+    script = _FakeShimOnlyScript()
+    wrapper = ScriptExportsAsyncWrapper(script, response_adapter=make_rpc_response)
+
+    payload = asyncio.run(wrapper.ping())
+
+    assert isinstance(payload, RPCPayload)
+    assert wrapper.backend_mode == "shim"
+    assert script.exports_sync.calls == [("ping", (), {})]
+
+
+def test_async_exports_wrapper_reports_missing_sync_fallback_exports() -> None:
+    script = _FakeIncompleteRPCScript()
+    wrapper = ScriptExportsAsyncWrapper(
+        script,
+        required_native_exports=("scope_eval_async", "scope_call_async"),
+        required_sync_exports=("scope_eval", "scope_call"),
+        shim_name_map={"scope_eval_async": "scope_eval", "scope_call_async": "scope_call"},
+    )
+
+    with pytest.raises(ScriptExportCapabilityError, match="scope_eval, scope_call"):
+        asyncio.run(wrapper.scope_eval_async("Process.arch"))

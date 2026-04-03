@@ -5,13 +5,14 @@ from pathlib import Path
 import click
 
 from ...compat import FridaCompat
+from ...config import DEFAULT_CONFIG_FILENAME
 from ...frontend import FrontendError, build_agent_bundle, load_frontend_project, start_watch
 from .. import common as cli_common
 from ..common import _frontend_build_option, _frontend_install_option, _frontend_project_option, _frontend_watch_option, _verbose_option
 
 
 @click.command()
-@click.option("-c", "--config", "config_path", default="config.yml", show_default=True)
+@click.option("-c", "--config", "config_path", default=DEFAULT_CONFIG_FILENAME, show_default=True)
 @_frontend_project_option()
 @_frontend_install_option()
 @_verbose_option()
@@ -27,7 +28,7 @@ def build(config_path: str, project_dir: Path | None, install: bool, verbose: bo
 
 
 @click.command()
-@click.option("-c", "--config", "config_path", default="config.yml", show_default=True)
+@click.option("-c", "--config", "config_path", default=DEFAULT_CONFIG_FILENAME, show_default=True)
 @_frontend_project_option()
 @_frontend_install_option()
 @_verbose_option()
@@ -50,7 +51,7 @@ def watch(config_path: str, project_dir: Path | None, install: bool, verbose: bo
 
 
 @click.command()
-@click.option("-c", "--config", "config_path", default="config.yml", show_default=True)
+@click.option("-c", "--config", "config_path", default=DEFAULT_CONFIG_FILENAME, show_default=True)
 @click.option("--repl", is_flag=True, help="Open a ptpython REPL after the script loads.")
 @_frontend_build_option()
 @_frontend_watch_option()
@@ -111,7 +112,7 @@ def spawn(
 
 @click.command()
 @click.option("-p", "--pid", type=int, default=None)
-@click.option("-c", "--config", "config_path", default="config.yml", show_default=True)
+@click.option("-c", "--config", "config_path", default=DEFAULT_CONFIG_FILENAME, show_default=True)
 @click.option("--repl", is_flag=True, help="Open a ptpython REPL after the script loads.")
 @_frontend_build_option()
 @_frontend_watch_option()
