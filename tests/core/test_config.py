@@ -1,6 +1,6 @@
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
-from frida_analykit.config import AppConfig, DEFAULT_SCRIPT_REPL_GLOBALS
+from frida_analykit.config import AppConfig, DEFAULT_SCRIPT_REPL_GLOBALS, _serialize_config_value
 
 
 def test_config_paths_are_resolved_relative_to_source(tmp_path: Path) -> None:
@@ -88,3 +88,21 @@ server:
 
     assert config.server.path == "/data/local/tmp/frida-server"
     assert config.server.servername == "/data/local/tmp/frida-server"
+
+
+def test_config_serializer_normalizes_windows_paths_to_forward_slashes() -> None:
+    payload = {
+        "agent": {
+            "stdout": PureWindowsPath(r"logs\outerr.log"),
+            "stderr": PureWindowsPath(r"logs\outerr.log"),
+        },
+        "script": {
+            "dextools": {"output_dir": PureWindowsPath(r"data\dextools")},
+        },
+    }
+
+    serialized = _serialize_config_value(payload)
+
+    assert serialized["agent"]["stdout"] == "logs/outerr.log"
+    assert serialized["agent"]["stderr"] == "logs/outerr.log"
+    assert serialized["script"]["dextools"]["output_dir"] == "data/dextools"

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import tomllib
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import Any
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
@@ -176,7 +176,8 @@ class AppConfig(BaseModel):
         )
 
     def to_data(self, *, exclude_none: bool = True) -> dict[str, Any]:
-        return self.model_dump(mode="json", exclude={"source_path"}, exclude_none=exclude_none)
+        raw = self.model_dump(mode="python", exclude={"source_path"}, exclude_none=exclude_none)
+        return _serialize_config_value(raw)
 
     def to_toml_text(self) -> str:
         return _render_toml_document(self.to_data())
@@ -230,6 +231,16 @@ def _render_toml_value(value: Any) -> str:
     if isinstance(value, list):
         return "[" + ", ".join(_render_toml_value(item) for item in value) + "]"
     raise TypeError(f"unsupported TOML value: {value!r}")
+
+
+def _serialize_config_value(value: Any) -> Any:
+    if isinstance(value, PurePath):
+        return value.as_posix()
+    if isinstance(value, dict):
+        return {key: _serialize_config_value(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_serialize_config_value(item) for item in value]
+    return value
 
 
 def _quote_toml_string(value: str) -> str:
