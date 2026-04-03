@@ -16,13 +16,14 @@ When Frida detaches, the MCP session becomes `broken`.
 4. Continue validation in the recovered session.
 5. Call `session_close` when the validation branch is finished.
 
-The session archive directory does not change across recover. Use `session_status.session_workspace` to inspect the same on-disk record before and after recovery.
+The session root does not change across recover. Use `session_status.session_root` for the record directory and `session_status.session_workspace` for the runtime workspace before and after recovery.
 
 ## Crash and bad snippet behavior
 
 - A snippet may crash the target process after injection.
 - Treat every crash as evidence first; do not assume the device or host is the root cause without checking state.
 - Use `tail_logs` and the session resources before deciding to reopen or discard the attempt.
+- `tail_logs` may include both script logs and host-side processing logs. Host-side entries such as `[dex] ...` can confirm whether file transfers actually completed.
 
 ## Missing `/rpc`
 
@@ -39,7 +40,5 @@ If session open fails with an RPC runtime mismatch, the loaded `_agent.js` does 
 If MCP startup fails before the stdio server is ready, the MCP environment may not expose `frida-compile` or `npm` in `PATH`, or the compile sanity probe may have failed.
 
 - Quick path does not install `frida-compile` or `npm` for you.
-- `npm` is only optional when MCP can fully reuse an already-ready shared quick runtime toolchain cache.
 - Check the startup banner or `frida://service/config` from the next successful boot to inspect the structured `quick_path` summary.
 - Fix the MCP process environment first, then restart MCP and retry `session_open_quick`.
-- `session_open(config_path, ...)` is still available after a successful MCP boot for explicit workspaces, but it is not a bypass for startup fail-fast.

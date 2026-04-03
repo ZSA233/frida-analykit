@@ -76,7 +76,7 @@ def render_startup_banner(
     instance_id: str,
     config_path: Path | None,
     prepared_cache_root: Path,
-    session_history_root: Path,
+    session_root: Path,
     host: str,
     device: str | None,
     server_path: str,
@@ -100,7 +100,7 @@ def render_startup_banner(
         item("Device:", device or "<default>"),
         item("Server Path:", server_path),
         item("Prepared Cache:", _display_path(prepared_cache_root)),
-        item("Session History:", _display_path(session_history_root)),
+        item("Session Root:", _display_path(session_root)),
         item("Idle Timeout:", "disabled" if idle_timeout_seconds == 0 else f"{idle_timeout_seconds}s"),
         "",
         "Quick Path:",
@@ -198,7 +198,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             instance_id=startup_instance_id,
             config_path=startup_config.source_path,
             prepared_cache_root=prepared_workspace.cache_root,
-            session_history_root=startup_config.session_history_root(
+            session_root=startup_config.session_root(
                 prepared_cache_root=prepared_workspace.cache_root
             ),
             host=startup_config.server.host,

@@ -11,22 +11,18 @@
 
 1. Validates the target app, mode, template, and official capability list.
 2. Generates a minimal TypeScript workspace that always imports `@zsa233/frida-analykit-agent/rpc` first.
-3. Resolves `template` as a curated preset and `capabilities` as additive preload globals, then emits explicit original binding references for those imports in the generated `index.ts`.
-4. Either copies `bootstrap_path` as a separate imported file or inlines `bootstrap_source` directly into the generated `index.ts`.
-5. Reuses one shared lightweight runtime toolchain cache for the current agent package spec instead of running `npm install` for every signature workspace.
-6. Builds `_agent.js` with `frida-compile` from the current MCP environment `PATH`.
-7. Writes a matching `config.toml` from the fixed MCP startup config.
-8. Reuses the cached workspace on later calls with the same signature.
-9. Copies the effective workspace into a dedicated session-history directory named `{yyyyMMdd-HHMMSS-shortid}`.
-10. Opens or reuses the Frida session through the normal MCP session manager.
+3. Applies `template`, `capabilities`, `bootstrap_path`, and `bootstrap_source` to the generated `index.ts`.
+4. Builds `_agent.js` with `frida-compile` from the current MCP environment `PATH`.
+5. Writes a matching `config.toml` from the fixed MCP startup config.
+6. Reuses cached quick-session artifacts when the same signature is requested again.
+7. Creates a `session_root/{yyyyMMdd-HHMMSS-shortid}` directory for the live session.
+8. Opens or reuses the Frida session through the normal MCP session manager.
 
 Before the server even reaches this point, MCP startup already performs one host-side warmup:
 
 - verifies `prepared_cache_root` is writable
-- verifies `frida-compile` is available in the MCP process `PATH`
-- verifies `npm` when the shared runtime toolchain cache must be installed or repaired
-- prepares or reuses the shared runtime toolchain cache
-- runs one minimal compile sanity probe
+- verifies `frida-compile` and `npm` are available in the MCP process `PATH`
+- runs one quick build sanity check
 
 If startup warmup fails, MCP exits before serving stdio instead of exposing a degraded quick path.
 
@@ -45,9 +41,7 @@ If startup warmup fails, MCP exits before serving stdio instead of exposing a de
 
 - The generated `index.ts` is the effective quick compile entry. Open it when you need to confirm the exact imports and bootstrap code that MCP compiled.
 - Use `template + capabilities` when quick session itself should preload globals that later `eval_js`, `/rpc`, or a small bootstrap module will read directly.
-- Quick capability retention now comes from explicit original binding references in the generated `index.ts`, not from hidden agent-side retain helpers.
 - bootstrap_source is inlined directly into that generated `index.ts`.
-- bootstrap_path remains a separate import, but quick path only copies that one file into the prepared workspace.
 - Keep quick bootstrap_path files self-contained. If they need sibling relative imports or a larger local dependency graph, use `session_open(config_path, ...)` instead.
 - If `bootstrap_path` is the main script you want to maintain in your repo, prefer `template="minimal"` and keep the real imports in that file.
 - If you maintain `bootstrap_path` or your own workspace, prefer explicit imports plus an explicit reference such as `void DexTools` instead of relying on a bare import to survive bundler pruning.
@@ -71,8 +65,14 @@ Use `template="dex_probe"` when the task is dex enumeration or dumping.
 
 ```js
 DexTools.enumerateClassLoaderDexFiles().length
-DexTools.dumpAllDex("case-001")
+const summary = DexTools.dumpAllDex("case-001")
+summary.transferId
 ```
+
+- `DexTools.dumpAllDex()` returns after the agent has finished streaming RPC payloads, not after the host has definitely flushed every file to disk.
+- Use the returned `transferId` with `tail_logs` or `frida://session/logs`.
+- Wait for a `source="host"` log entry that matches `[dex] complete <transferId>` before treating the dump as finished.
+- Treat `[dex] incomplete transfer ...` or `size mismatch` messages as failures.
 
 ### Process and helper probes
 
@@ -125,12 +125,8 @@ Libssl.$getModule().name
 ## Cache behavior
 
 - Quick-session artifacts are stored under the MCP prepared cache directory and keyed by a deterministic signature.
-- Quick path keeps a shared lightweight `node_modules` cache for runtime dependencies under `prepared_cache_root/_toolchains/<digest>` and reuses `prepared_cache_root/npm-cache` as the npm cache root.
-- This sharing is keyed by prepared cache root plus agent package spec, not by Python virtual environment.
-- Quick path does not install `frida-compile`, `frida`, or `@types/node` inside each prepared workspace.
-- The signature includes the bootstrap mode, bootstrap file content hash when `bootstrap_path` is used, and the effective startup-config defaults that affect generated files.
-- Same signature means the same generated workspace and compiled `_agent.js`.
-- Prepared cache is internal. The live MCP session still gets its own copied archive directory under `session_history_root`, and that copied `workspace/` tree is the one users should browse later.
+- Prepared cache is internal.
+- Use `session_root` for the current session record and `session_workspace` for the runtime workspace and output files of the current session.
 - Use `prepared_session_inspect` to inspect generated imports, config summary, and the last build outcome.
 - Use `prepared_session_prune` to remove old or unused cached workspaces.
 

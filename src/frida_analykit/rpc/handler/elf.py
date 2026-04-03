@@ -3,7 +3,7 @@ from __future__ import annotations
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TextIO
+from typing import Callable, TextIO
 
 from ...config import AppConfig
 from ..message import (
@@ -42,10 +42,16 @@ class ElfSnapshotState:
 
 
 class ElfSnapshotHandler:
-    def __init__(self, config: AppConfig, stdout: TextIO, stderr: TextIO) -> None:
+    def __init__(
+        self,
+        config: AppConfig,
+        *,
+        emit_info: Callable[[str], None],
+        emit_error: Callable[[str], None],
+    ) -> None:
         self._config = config
-        self._stdout = stdout
-        self._stderr = stderr
+        self._emit_info = emit_info
+        self._emit_error = emit_error
         self._states: dict[str, ElfSnapshotState] = {}
 
     def handle_begin(self, payload: RPCPayload) -> None:
@@ -64,12 +70,9 @@ class ElfSnapshotHandler:
             total_bytes=data.total_bytes,
         )
         self._states[data.snapshot_id] = state
-        print(
-            (
-                f"[elf] begin {data.snapshot_id} -> {directory} "
-                f"(module={data.module_name}, bytes={data.total_bytes})"
-            ),
-            file=self._stdout,
+        self._emit_info(
+            f"[elf] begin {data.snapshot_id} -> {directory} "
+            f"(module={data.module_name}, bytes={data.total_bytes})"
         )
 
     def handle_chunk(self, payload: RPCPayload) -> None:
@@ -83,12 +86,9 @@ class ElfSnapshotHandler:
         state.received_bytes += len(chunk)
         state.received_chunks += 1
         state.written_files.add(target.name)
-        print(
-            (
-                f"[elf] chunk {state.snapshot_id}: {target.name} "
-                f"artifact={data.artifact} chunk={data.chunk_index} size={len(chunk)}"
-            ),
-            file=self._stdout,
+        self._emit_info(
+            f"[elf] chunk {state.snapshot_id}: {target.name} "
+            f"artifact={data.artifact} chunk={data.chunk_index} size={len(chunk)}"
         )
 
     def handle_end(self, payload: RPCPayload) -> None:
@@ -96,28 +96,22 @@ class ElfSnapshotHandler:
         assert isinstance(data, RPCMsgElfSnapshotEnd)
         state = self._states.pop(data.snapshot_id, None)
         if state is None:
-            print(f"[elf] missing snapshot state for {data.snapshot_id}", file=self._stderr)
+            self._emit_error(f"[elf] missing snapshot state for {data.snapshot_id}")
             return
 
         missing = [name for name in data.expected_files if name not in state.written_files]
         if missing or state.received_bytes != data.received_bytes or state.total_bytes != data.total_bytes:
-            print(
-                (
-                    f"[elf] incomplete snapshot {data.snapshot_id}: "
-                    f"missing={missing}, bytes={state.received_bytes}/{state.total_bytes}/{data.received_bytes}/{data.total_bytes}, "
-                    f"dir={state.directory}"
-                ),
-                file=self._stderr,
+            self._emit_error(
+                f"[elf] incomplete snapshot {data.snapshot_id}: "
+                f"missing={missing}, bytes={state.received_bytes}/{state.total_bytes}/{data.received_bytes}/{data.total_bytes}, "
+                f"dir={state.directory}"
             )
             return
 
-        print(
-            (
-                f"[elf] complete {data.snapshot_id}: "
-                f"files={len(state.written_files)}, chunks={state.received_chunks}, "
-                f"bytes={state.received_bytes}, dir={state.directory}"
-            ),
-            file=self._stdout,
+        self._emit_info(
+            f"[elf] complete {data.snapshot_id}: "
+            f"files={len(state.written_files)}, chunks={state.received_chunks}, "
+            f"bytes={state.received_bytes}, dir={state.directory}"
         )
 
     def handle_batch(self, payload: RPCPayload) -> None:
@@ -153,9 +147,9 @@ class ElfSnapshotHandler:
 
 
 class ElfSymbolLogWriter:
-    def __init__(self, config: AppConfig, stdout: TextIO) -> None:
+    def __init__(self, config: AppConfig, emit_info: Callable[[str], None]) -> None:
         self._config = config
-        self._stdout = stdout
+        self._emit_info = emit_info
         self._log_handles: dict[str, TextIO] = {}
 
     def handle(self, payload: RPCPayload) -> None:
@@ -167,7 +161,7 @@ class ElfSymbolLogWriter:
         if fields:
             line = f"{line} {fields}"
         print(line, file=handle)
-        print(line, file=self._stdout)
+        self._emit_info(line)
 
     def _log_file(self, tag: str) -> TextIO:
         safe_tag = _safe_name(tag)
@@ -188,9 +182,15 @@ class ElfSymbolLogWriter:
 
 
 class ElfHandler:
-    def __init__(self, config: AppConfig, stdout: TextIO, stderr: TextIO) -> None:
-        self.snapshot = ElfSnapshotHandler(config, stdout, stderr)
-        self.symbol_log = ElfSymbolLogWriter(config, stdout)
+    def __init__(
+        self,
+        config: AppConfig,
+        *,
+        emit_info: Callable[[str], None],
+        emit_error: Callable[[str], None],
+    ) -> None:
+        self.snapshot = ElfSnapshotHandler(config, emit_info=emit_info, emit_error=emit_error)
+        self.symbol_log = ElfSymbolLogWriter(config, emit_info=emit_info)
 
     def handle_snapshot_begin(self, payload: RPCPayload) -> None:
         self.snapshot.handle_begin(payload)

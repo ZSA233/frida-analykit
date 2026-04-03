@@ -148,9 +148,13 @@ class FakeSessionWrapper:
         self.handlers: dict[str, object] = {}
         self.created_source: str | None = None
         self.is_detached = False
+        self.host_log_handler = None
 
     def on(self, signal: str, callback) -> None:
         self.handlers[signal] = callback
+
+    def set_host_log_handler(self, handler) -> None:
+        self.host_log_handler = handler
 
     def create_script_async(self, source: str, name=None, snapshot=None, runtime=None, env=None) -> FakeScriptWrapper:
         del name, snapshot, runtime, env
@@ -159,6 +163,10 @@ class FakeSessionWrapper:
 
     def detach(self) -> None:
         self.is_detached = True
+
+    def emit_host_log(self, level: str, text: str) -> None:
+        if self.host_log_handler is not None:
+            self.host_log_handler(level, text)
 
 
 class FakeDevice:
@@ -312,7 +320,7 @@ def _mcp_startup_config(tmp_path: Path) -> MCPStartupConfig:
         {
             "mcp": {
                 "prepared_cache_root": str(tmp_path / "prepared-cache"),
-                "session_history_root": str(tmp_path / "session-history"),
+                "session_root": str(tmp_path / "session-root"),
             }
         }
     )
@@ -360,9 +368,11 @@ def test_session_open_reuses_same_target_and_force_replace_reopens(tmp_path: Pat
         assert second.state == "live"
         assert first.session_id is not None
         assert first.session_label is not None
+        assert first.session_root is not None and first.session_root.is_dir()
         assert first.session_workspace is not None and first.session_workspace.is_dir()
-        assert (first.session_workspace / "workspace" / "config.yml").is_file()
-        assert (first.session_workspace / "workspace" / "_agent.js").is_file()
+        assert first.session_workspace == first.session_root / "workspace"
+        assert (first.session_workspace / "config.yml").is_file()
+        assert (first.session_workspace / "_agent.js").is_file()
         assert second.session_id == first.session_id
         assert device.attach_calls == [321]
 
@@ -430,6 +440,8 @@ def test_snippet_lifecycle_and_log_ring(tmp_path: Path) -> None:
 
         await manager.session_open(config_path=str(config.source_path), mode="attach", pid=111)
         script.emit_log("info", "hook-ready")
+        assert device.last_session is not None
+        device.last_session.emit_host_log("info", "[dex] complete dex-1")
         await asyncio.sleep(0)
 
         eval_result = await manager.eval_js(source="eval:arch")
@@ -444,13 +456,15 @@ def test_snippet_lifecycle_and_log_ring(tmp_path: Path) -> None:
         assert installed.snippet.has_dispose is True
         assert "dispose" in inspected.snippet.root.props
         assert called.result.preview == "pong:7"
-        assert any(entry.text == "hook-ready" for entry in logs.entries)
+        assert any(entry.source == "script" and entry.text == "hook-ready" for entry in logs.entries)
+        assert any(entry.source == "host" and entry.text == "[dex] complete dex-1" for entry in logs.entries)
         assert installed.session.session_id == logs.session.session_id
         assert removed.snippet.name == "demo"
         assert installed.session.session_workspace is not None
-        snippet_files = sorted((installed.session.session_workspace / "snippets" / "demo").glob("*.js"))
+        assert installed.session.session_root is not None
+        snippet_files = sorted((installed.session.session_root / "snippets" / "demo").glob("*.js"))
         assert len(snippet_files) == 1
-        manifest = json.loads((installed.session.session_workspace / "session.json").read_text(encoding="utf-8"))
+        manifest = json.loads((installed.session.session_root / "session.json").read_text(encoding="utf-8"))
         assert manifest["snippets"]["demo"]["state"] == "removed"
         assert listed.snippets == []
         assert root_handle.release_calls == 1
@@ -534,7 +548,9 @@ def test_broken_session_requires_explicit_recover_and_keeps_snippet_metadata(tmp
         broken = await manager.session_status()
         assert broken.state == "broken"
         assert broken.snippets[0].state == "inactive"
+        assert broken.session_root is not None
         assert broken.session_workspace is not None
+        assert broken.session_workspace == broken.session_root / "workspace"
         with pytest.raises(MCPManagerError, match="broken"):
             await manager.call_snippet(name="demo", method="ping", args=[1])
 
@@ -543,9 +559,10 @@ def test_broken_session_requires_explicit_recover_and_keeps_snippet_metadata(tmp
 
         assert recovered.state == "live"
         assert recovered.session_workspace == broken.session_workspace
+        assert recovered.session_root == broken.session_root
         assert device.attach_calls == [222, 222]
         assert listed.snippets[0].state == "inactive"
-        events = (broken.session_workspace / "events.jsonl").read_text(encoding="utf-8")
+        events = (broken.session_root / "events.jsonl").read_text(encoding="utf-8")
         assert '"event":"session_broken"' in events
         assert '"event":"session_recovered"' in events
         await manager.aclose()
@@ -611,7 +628,7 @@ def test_session_open_does_not_inherit_mcp_startup_config_for_explicit_config_pa
                 {
                     "mcp": {
                         "prepared_cache_root": str(tmp_path / "prepared-cache"),
-                        "session_history_root": str(tmp_path / "session-history"),
+                        "session_root": str(tmp_path / "session-root"),
                     },
                     "server": {
                         "host": "usb",
@@ -676,10 +693,10 @@ def test_session_open_quick_reuses_cached_workspace_and_exposes_prepared_resourc
         device = FakeDevice(lambda: FakeSessionWrapper(script))
         startup_config = MCPStartupConfig.model_validate(
             {
-                "mcp": {
-                    "prepared_cache_root": str(tmp_path / "prepared-cache"),
-                    "session_history_root": str(tmp_path / "session-history"),
-                },
+                    "mcp": {
+                        "prepared_cache_root": str(tmp_path / "prepared-cache"),
+                        "session_root": str(tmp_path / "session-root"),
+                    },
                 "server": {
                     "host": "local",
                     "path": "/data/local/tmp/frida-server",
@@ -743,11 +760,15 @@ def test_session_open_quick_reuses_cached_workspace_and_exposes_prepared_resourc
         assert '"service_instance_id"' in service_config_resource
         assert '"host": "local"' in service_config_resource
         assert '"quick_path"' in service_config_resource
-        assert '"session_history_root"' in service_config_resource
+        assert '"session_root"' in service_config_resource
         assert '"state": "ready"' in service_config_resource
         assert first.prepared_signature in prepared_resource
-        assert (first.session_workspace / "workspace" / "index.ts").is_file()
-        assert (first.session_workspace / "workspace" / "_agent.js").is_file()
+        assert first.session_root is not None
+        assert first.session_workspace == first.session_root / "workspace"
+        assert (first.session_workspace / "index.ts").is_file()
+        assert (first.session_workspace / "_agent.js").is_file()
+        assert first.target is not None
+        assert first.target.config_path == first.session_workspace / "config.toml"
         await manager.aclose()
 
     _run_async(scenario())
@@ -762,7 +783,7 @@ def test_session_open_quick_rejects_non_global_quick_capability(tmp_path: Path) 
                 mode="attach",
                 capabilities=["elf_enhanced"],
             )
-        session_dirs = sorted((tmp_path / "session-history").iterdir())
+        session_dirs = sorted((tmp_path / "session-root").iterdir())
         assert len(session_dirs) == 1
         manifest = json.loads((session_dirs[0] / "session.json").read_text(encoding="utf-8"))
         assert manifest["state"] == "failed"

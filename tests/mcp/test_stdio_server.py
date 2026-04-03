@@ -132,7 +132,7 @@ def test_entrypoint_exposes_expected_tools_and_resources_over_stdio(tmp_path: Pa
         summary = json.loads(service_config.contents[0].text)
         assert len(summary["service_instance_id"]) == 12
         assert "service_started_at" in summary
-        assert "session_history_root" in summary
+        assert "session_root" in summary
         assert summary["quick_path"]["state"] == "ready"
 
     _run_async(scenario())
@@ -379,7 +379,14 @@ def test_stdio_server_returns_structured_payloads_and_surfaces_runtime_mismatch(
                 async def tail_logs(self, *, limit=50):
                     return TailLogsResult(
                         session=_closed_status(),
-                        entries=[TailLogsEntry(timestamp="2026-04-01T00:00:00Z", level="info", text=str(limit))],
+                        entries=[
+                            TailLogsEntry(
+                                timestamp="2026-04-01T00:00:00Z",
+                                source="host",
+                                level="info",
+                                text=str(limit),
+                            )
+                        ],
                     )
 
                 async def prepared_session_inspect(self, *, signature=None):
@@ -396,7 +403,7 @@ def test_stdio_server_returns_structured_payloads_and_surfaces_runtime_mismatch(
                     return '{"state":"closed"}'
 
                 async def resource_service_config_json(self):
-                    return '{"server":{"host":"127.0.0.1:27042"}}'
+                    return '{"server":{"host":"127.0.0.1:27042"},"config_path_raw":"./mcp.toml","session_root":"/tmp/mcp-sessions"}'
 
                 async def resource_prepared_json(self):
                     return '{"prepared":false}'

@@ -200,7 +200,7 @@ frida-analykit-mcp --config ./mcp.toml
 - MCP tools 当前统一走 `AsyncScriptWrapper` / `AsyncJsHandle` 这条 Promise-aware agent/RPC 语义，不提供 REPL 里那套以 sync handle 为主的对象浏览体验。
 - 因此在 MCP 中如果要访问 `a.b.c` 这类长路径，推荐直接把路径写进 `eval_js` / snippet 源码，或封装成 snippet method 返回结构化值，而不是依赖交互式属性链浏览。
 - MCP 启动 TOML 当前固定覆盖这些服务级静态字段：
-  - `[mcp]`：`idle_timeout_seconds`、`prepared_cache_root`
+  - `[mcp]`：`idle_timeout_seconds`、`prepared_cache_root`、`session_root`
   - `[server]`：`host`、`device`、`path`
   - `[agent]`：`datadir`、`stdout`、`stderr`
   - `[script.dextools]`：`output_dir`
@@ -231,7 +231,7 @@ frida-analykit-mcp --config ./mcp.toml
   - `frida://session/prepared`
   - `frida://session/snippets`
   - `frida://session/logs`
-- `frida://service/config` 现在除了固定 startup config 外，还会返回结构化的 `quick_path` readiness / warmup 摘要，至少覆盖 cache root、`npm`、`frida-compile`、shared toolchain 和 compile probe，并暴露实际生效的 `session_history_root`。
+- `frida://service/config` 现在除了固定 startup config 外，还会返回结构化的 `quick_path` readiness / warmup 摘要，至少覆盖 cache root、`npm`、`frida-compile`、shared toolchain 和 compile probe，并暴露 `config_path_raw`、resolved `config_path` 和实际生效的 `session_root`。
 - 当前还会额外暴露六个可查询 Markdown 文档 resource：
   - `frida://docs/mcp/index`
   - `frida://docs/mcp/config`
@@ -243,19 +243,20 @@ frida-analykit-mcp --config ./mcp.toml
 - MCP server 不会复用 CLI 的 session banner / 普通 stdout 输出路径，避免污染 stdio 协议通道。
 - `eval_js` 只做一次性求值；`install_snippet(name, source)` 会保留返回的根 handle，并按名称管理它，同时把源码归档到当前会话目录下的 `snippets/` 中。
 - 如果 snippet 根对象暴露 `dispose` 方法，则 `remove_snippet` 会先尝试调用它，再释放对应 handle。
-- `session_open_quick` 会在 MCP 专用缓存目录里自动生成最小 TS workspace，复用一份共享的轻量 runtime 依赖缓存，并通过 MCP 进程 `PATH` 中预装的 `frida-compile` 构建 `_agent.js`；相同参数签名会复用缓存结果。
-- 每个真实 MCP 会话都会在 `session_history_root` 下分配独立目录，目录名固定为 `{yyyyMMdd-HHMMSS-shortid}`；这个目录会保存 copied `workspace/`、`session.json`、`events.jsonl` 和 snippet 历史源码。
-- quick generator 现在会在生成的 `index.ts` 里对 capability 做显式本地 binding 引用，以避免只 import 但未引用时被 bundler 裁剪；这属于 generated workspace 语义，不再依赖 agent runtime 内部 retain helper。
+- `session_open_quick` 会在 MCP 专用缓存目录里自动生成最小 TS workspace，并通过 MCP 进程 `PATH` 中预装的 `frida-compile` 构建 `_agent.js`；相同参数签名会复用缓存结果。
+- 每个真实 MCP 会话都会在 `session_root` 下分配独立目录，目录名固定为 `{yyyyMMdd-HHMMSS-shortid}`。
+- `session_status.session_root` 表示当前会话目录，`session_status.session_workspace` 表示当前会话运行时 `workspace/` 子目录。
+- 这个会话目录会保存 `workspace/`、`session.json`、`events.jsonl` 和 snippet 历史源码。
 - `session_open_quick` 同时支持 `bootstrap_path` 和 `bootstrap_source`：前者会复制本地 `.ts` / `.js` 文件到 prepared workspace 并导入，后者则生成一段内联 bootstrap 文件；它们都不进入 snippet registry。
 - quick path 只允许官方 `@zsa233/frida-analykit-agent` capability subpath / 模板名，不开放任意 npm 包和任意 import 文本。
 - quick path 不会在每个 prepared workspace 里安装 `frida-compile`、`frida` 或 `@types/node`；MCP 会在启动时先检查 `PATH` 里的 `frida-compile` 和 `npm`，并预热一份 shared runtime toolchain 与 compile probe。只要这一步失败，服务就不会启动。
-- quick path 的共享粒度不是“按 Python 虚拟环境”，而是“按 `prepared_cache_root` + agent package spec”：`npm_config_cache` 指向 `prepared_cache_root/npm-cache`，shared toolchain 位于 `prepared_cache_root/_toolchains/<digest>`。普通 workspace `npm install` / `build` 仍然是另一条链路。
-- `prepared_cache_root` 继续只承担内部 quick build/cache 角色；给用户看的会话记录和持久化 snippet 不放在 signature cache 目录里，而是放到 `session_history_root`。
-- `session_open(config_path, ...)` 仍然保留给显式 workspace，但它是 MCP 成功启动后的低层会话入口，不是 quick warmup 失败时的启动绕过路径。
+- `prepared_cache_root` 继续只承担内部 quick build/cache 角色；给用户看的会话记录和持久化 snippet 不放在 signature cache 目录里，而是放到 `session_root` 这套会话目录树下。
+- `session_open(config_path, ...)` 仍然保留给显式 workspace，适用于用户已经自定义维护好的工作区。
 - 当前不会替 MCP 接管 watch / hot reload；`session_open_quick` 只负责一次性 prepare + build，`session_open` 仍要求 `config.jsfile` 已经是可注入的 bundle。
 - 当前要求加载到设备上的 `_agent.js` 已导入 `@zsa233/frida-analykit-agent/rpc`；如果 bundle 仍缺 `/rpc`，MCP 会直接返回 `RPC runtime mismatch` 类错误，提示用户 rebuild 本地 runtime。
 - `install_snippet` 仍只用于会话已打开后的受管 controller 生命周期，不扩展成 pre-open bootstrap 机制。
 - snippet 持久化只是归档，不会自动在后续新会话里 replay；`frida://session/snippets` 仍然只表示当前 live session 的内存状态。
+- `tail_logs` / `frida://session/logs` 会同时返回 `source="script"` 的脚本日志和 `source="host"` 的 MCP host handler 日志，例如 `[dex] begin/file/complete`。
 - MCP 不负责运行时切换 Frida / frida-server 版本，也不负责自动安装；这部分环境由用户在启动 MCP 前预先准备。
 - 如果会话因为 detach / crash 进入 broken，MCP 不会自动 reattach，也不会自动 replay 已安装 snippet；需要显式调用 `session_recover`，并在恢复后按需重新安装 snippet。
 - 给 MCP client / 大模型的推荐顺序是：
@@ -319,6 +320,7 @@ Python 侧目前已经有一套 RPC message / handler 体系。
 - `DexTools.dumpAllDex()` 会按最大批量字节数流式发送 dex 文件
 - 默认最大批量上限为 `8 MiB`
 - Python 侧默认输出目录优先取 `script.dextools.output_dir`，否则回退到 `agent.datadir/dextools`
+- `DexTools.dumpAllDex()` 返回 summary 后，不等于 host 侧已经完成全部落盘；MCP client 应使用返回的 `transferId` 轮询 `tail_logs`，并等待 `source="host"` 且文本匹配 `[dex] complete <transferId>` 的日志再判定完成
 
 - ART 相关 native 符号绑定已抽到共享 `@zsa233/frida-analykit-agent/native/libart`
 

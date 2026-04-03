@@ -17,7 +17,7 @@ from .rpc.client import AsyncRPCClient, SyncRPCClient
 from .rpc.exports import ScriptExportsAsyncWrapper, ScriptExportsSyncWrapper
 from .rpc.handler.js_handle import AsyncJsHandle, SyncJsHandle
 from .rpc.message import RPCMessage, RPCMsgInitConfig
-from .rpc.registry import HandlerRegistry
+from .rpc.registry import HandlerRegistry, HostLogHandler
 from .rpc.resolver import RPCResolver
 
 RPC_ENV_INJECT_SCRIPT_TEMPLATE: Final[str] = """
@@ -69,6 +69,7 @@ SESSION_BANNER_LOGO: Final[str] = r"""
 class SessionRuntime:
     config: AppConfig
     loggers: LoggerBundle
+    registry: HandlerRegistry
     resolver: RPCResolver
     interactive: bool = False
 
@@ -249,7 +250,13 @@ class SessionWrapper:
         loggers = build_loggers(config.agent)
         registry = HandlerRegistry(config, loggers.stdout, loggers.stderr)
         resolver = RPCResolver(registry)
-        self._runtime = SessionRuntime(config=config, loggers=loggers, resolver=resolver, interactive=interactive)
+        self._runtime = SessionRuntime(
+            config=config,
+            loggers=loggers,
+            registry=registry,
+            resolver=resolver,
+            interactive=interactive,
+        )
 
     @property
     def is_detached(self) -> bool:
@@ -352,6 +359,9 @@ class SessionWrapper:
             interactive=self._runtime.interactive,
         )
         return script, script_runtime
+
+    def set_host_log_handler(self, handler: HostLogHandler | None) -> None:
+        self._runtime.registry.set_log_sink(handler)
 
     def _read_script_source(self, jsfile: str, *, emit_banner: bool) -> str:
         path = Path(jsfile)

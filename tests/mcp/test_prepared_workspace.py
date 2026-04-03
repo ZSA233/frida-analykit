@@ -106,6 +106,7 @@ def _pack_local_runtime(tmp_path: Path, *, npm_env: dict[str, str]) -> Path:
 
 
 def _startup_config(tmp_path: Path) -> MCPStartupConfig:
+    del tmp_path
     return MCPStartupConfig.model_validate(
         {
             "server": {
@@ -114,13 +115,13 @@ def _startup_config(tmp_path: Path) -> MCPStartupConfig:
                 "path": "/data/local/tmp/frida-server",
             },
             "agent": {
-                "datadir": str(tmp_path / "artifacts" / "data"),
-                "stdout": str(tmp_path / "artifacts" / "logs" / "outerr.log"),
+                "datadir": "./data",
+                "stdout": "./logs/outerr.log",
             },
             "script": {
-                "dextools": {"output_dir": str(tmp_path / "artifacts" / "dex")},
-                "elftools": {"output_dir": str(tmp_path / "artifacts" / "elf")},
-                "nettools": {"ssl_log_secret": str(tmp_path / "artifacts" / "ssl")},
+                "dextools": {"output_dir": "./data/dextools"},
+                "elftools": {"output_dir": "./data/elftools"},
+                "nettools": {"ssl_log_secret": "./data/nettools/sslkey"},
             },
         }
     )
@@ -494,17 +495,24 @@ def test_prepared_workspace_projects_startup_config_into_generated_config(
     result = manager.prepare(PreparedSessionOpenRequest(app="com.example.demo", mode="attach"))
 
     config = AppConfig.from_file(result.manifest.config_path)
+    config_text = result.manifest.config_path.read_text(encoding="utf-8")
 
     assert config.app == "com.example.demo"
     assert config.server.host == "usb"
     assert config.server.device == "SERIAL123"
     assert config.server.path == "/data/local/tmp/frida-server"
-    assert config.agent.datadir == (tmp_path / "artifacts" / "data").resolve()
-    assert config.agent.stdout == (tmp_path / "artifacts" / "logs" / "outerr.log").resolve()
-    assert config.agent.stderr == (tmp_path / "artifacts" / "logs" / "outerr.log").resolve()
-    assert config.script.dextools.output_dir == (tmp_path / "artifacts" / "dex").resolve()
-    assert config.script.elftools.output_dir == (tmp_path / "artifacts" / "elf").resolve()
-    assert config.script.nettools.ssl_log_secret == (tmp_path / "artifacts" / "ssl").resolve()
+    assert 'datadir = "data"' in config_text
+    assert 'stdout = "logs/outerr.log"' in config_text
+    assert 'output_dir = "data/dextools"' in config_text
+    assert 'ssl_log_secret = "data/nettools/sslkey"' in config_text
+    assert config.agent.datadir == (result.manifest.workspace_root / "data").resolve()
+    assert config.agent.stdout == (result.manifest.workspace_root / "logs" / "outerr.log").resolve()
+    assert config.agent.stderr == (result.manifest.workspace_root / "logs" / "outerr.log").resolve()
+    assert config.script.dextools.output_dir == (result.manifest.workspace_root / "data" / "dextools").resolve()
+    assert config.script.elftools.output_dir == (result.manifest.workspace_root / "data" / "elftools").resolve()
+    assert config.script.nettools.ssl_log_secret == (
+        result.manifest.workspace_root / "data" / "nettools" / "sslkey"
+    ).resolve()
     assert config.jsfile == result.manifest.bundle_path
     assert result.manifest.config_path.name == "config.toml"
 

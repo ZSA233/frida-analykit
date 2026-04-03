@@ -107,7 +107,8 @@ class SessionHistoryManager:
     ) -> None:
         now = self._now_fn()
         manifest = self._load_manifest(record.manifest_path)
-        self._snapshot_workspace(record, config=config, prepared_artifact=prepared_artifact)
+        if not self._uses_runtime_workspace(record, config):
+            self._snapshot_workspace(record, config=config, prepared_artifact=prepared_artifact)
         updated = manifest.model_copy(
             update={
                 "updated_at": now,
@@ -147,7 +148,7 @@ class SessionHistoryManager:
         manifest = self._load_manifest(record.manifest_path)
         if manifest.state == "failed" and manifest.last_error == message:
             return
-        if config is not None:
+        if config is not None and not self._uses_runtime_workspace(record, config):
             self._snapshot_workspace(record, config=config, prepared_artifact=prepared_artifact)
         updated = manifest.model_copy(
             update={
@@ -243,6 +244,27 @@ class SessionHistoryManager:
         self._write_manifest(record.manifest_path, updated)
         event: HistoryEventType = "session_idle_timeout_closed" if reason == "idle timeout" else "session_closed"
         self._append_event(record, event=event, timestamp=now, detail={"reason": reason})
+
+    def materialize_prepared_workspace(
+        self,
+        record: SessionHistoryRecord,
+        *,
+        prepared_artifact: PreparedArtifactManifest,
+    ) -> Path:
+        self._copy_prepared_workspace(record, prepared_artifact=prepared_artifact)
+        runtime_config_path = record.workspace_root / prepared_artifact.config_path.name
+        now = self._now_fn()
+        manifest = self._load_manifest(record.manifest_path)
+        updated = manifest.model_copy(
+            update={
+                "updated_at": now,
+                "config_path": runtime_config_path,
+                "prepared_signature": prepared_artifact.signature,
+                "prepared_workspace": prepared_artifact.workspace_root,
+            }
+        )
+        self._write_manifest(record.manifest_path, updated)
+        return runtime_config_path
 
     def persist_snippet(
         self,
@@ -379,15 +401,7 @@ class SessionHistoryManager:
     ) -> None:
         self._reset_directory(record.workspace_root)
         if prepared_artifact is not None:
-            source_root = prepared_artifact.workspace_root
-            filenames = {
-                prepared_artifact.config_path.name,
-                prepared_artifact.bundle_path.name,
-                *_WORKSPACE_OPTIONAL_FILENAMES,
-                _PREPARED_MANIFEST_FILENAME,
-            }
-            for filename in sorted(filenames):
-                self._copy_if_exists(source_root / filename, record.workspace_root / filename)
+            self._copy_prepared_workspace(record, prepared_artifact=prepared_artifact, reset_destination=False)
             return
 
         if config.source_path is not None:
@@ -398,6 +412,36 @@ class SessionHistoryManager:
         self._copy_if_exists(config.jsfile, record.workspace_root / config.jsfile.name)
         for filename in _WORKSPACE_OPTIONAL_FILENAMES[:3]:
             self._copy_if_exists(source_root / filename, record.workspace_root / filename)
+
+    def _copy_prepared_workspace(
+        self,
+        record: SessionHistoryRecord,
+        *,
+        prepared_artifact: PreparedArtifactManifest,
+        reset_destination: bool = True,
+    ) -> None:
+        if reset_destination:
+            self._reset_directory(record.workspace_root)
+        source_root = prepared_artifact.workspace_root
+        filenames = {
+            prepared_artifact.config_path.name,
+            prepared_artifact.bundle_path.name,
+            *_WORKSPACE_OPTIONAL_FILENAMES,
+            _PREPARED_MANIFEST_FILENAME,
+        }
+        for filename in sorted(filenames):
+            self._copy_if_exists(source_root / filename, record.workspace_root / filename)
+
+    @staticmethod
+    def _uses_runtime_workspace(record: SessionHistoryRecord, config: AppConfig) -> bool:
+        source_path = config.source_path
+        if source_path is None:
+            return False
+        try:
+            source_path.resolve().relative_to(record.workspace_root.resolve())
+        except ValueError:
+            return False
+        return True
 
     @staticmethod
     def _reset_directory(path: Path) -> None:

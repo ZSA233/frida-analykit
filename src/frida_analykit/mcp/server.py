@@ -125,7 +125,7 @@ def build_mcp_server(
     docs = docs_provider or MCPDocsProvider()
 
     @mcp.tool(
-        description="Open or reuse the current Frida debug session from an explicit workspace config. A real open creates a user-visible session archive directory for later inspection.",
+        description="Open or reuse the current Frida debug session from an explicit workspace config. A real open creates a user-visible session root containing `session.json`, `events.jsonl`, `workspace/`, and `snippets/` for later inspection.",
         structured_output=True,
     )
     async def session_open(
@@ -149,7 +149,7 @@ def build_mcp_server(
         return await manager.session_status()
 
     @mcp.tool(
-        description="Recommended MCP entrypoint. Prepare or reuse a cached minimal agent workspace, always install `/rpc`, preload the template preset plus additive global capabilities, optionally import a copied self-contained `bootstrap_path` file or inline `bootstrap_source` into the generated `index.ts`, build with `frida-compile` from the MCP PATH plus a shared lightweight runtime cache, then open or reuse the session. That generated `index.ts` is the effective quick compile entry. A real open also creates a user-visible session archive directory. Prefer `template=\"minimal\"` when the bootstrap file already owns the real imports. Read `frida://service/config` first and confirm `quick_path.state == \"ready\"` before calling this tool.",
+        description="Recommended MCP entrypoint. Prepare or reuse a cached minimal agent workspace, always install `/rpc`, preload the template preset plus additive global capabilities, optionally import a copied self-contained `bootstrap_path` file or inline `bootstrap_source` into the generated `index.ts`, build with `frida-compile` from the MCP PATH plus a shared lightweight runtime cache, copy the prepared files into a per-session `workspace/`, then open or reuse the session from that runtime workspace. That generated `index.ts` is the effective quick compile entry. A real open also creates a user-visible session root containing `session.json`, `events.jsonl`, `workspace/`, and `snippets/`. Prefer `template=\"minimal\"` when the bootstrap file already owns the real imports. Read `frida://service/config` first and confirm `quick_path.state == \"ready\"` before calling this tool.",
         structured_output=True,
     )
     async def session_open_quick(
@@ -230,7 +230,7 @@ def build_mcp_server(
         return await manager.list_snippets()
 
     @mcp.tool(
-        description="Read recent session log entries captured from the Frida script. Use this after risky injections or detach events.",
+        description="Read recent session log entries from both the Frida script logger and host-side MCP handlers. Use this after risky injections, detach events, or file-transfer flows such as dex dump.",
         structured_output=True,
     )
     async def tail_logs(limit: int = 50) -> TailLogsResult:

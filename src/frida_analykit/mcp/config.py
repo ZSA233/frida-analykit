@@ -32,7 +32,17 @@ class MCPConfigSection(BaseModel):
 
     idle_timeout_seconds: int = 1200
     prepared_cache_root: Path | None = None
-    session_history_root: Path | None = None
+    session_root: Path | None = Field(
+        default=None,
+        validation_alias=AliasChoices("session_root", "session_history_root"),
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_duplicate_session_root_keys(cls, data: object) -> object:
+        if isinstance(data, dict) and "session_root" in data and "session_history_root" in data:
+            raise ValueError("mcp config cannot specify both `session_root` and legacy `session_history_root`; use `session_root`")
+        return data
 
 
 class MCPServerSection(BaseModel):
@@ -95,10 +105,12 @@ class MCPStartupConfig(BaseModel):
     server: MCPServerSection = Field(default_factory=MCPServerSection)
     agent: MCPAgentSection = Field(default_factory=MCPAgentSection)
     script: MCPScriptSection = Field(default_factory=MCPScriptSection)
+    source_path_raw: str | None = Field(default=None, exclude=True, repr=False)
     source_path: Path | None = Field(default=None, exclude=True, repr=False)
 
     @classmethod
     def from_toml(cls, filepath: str | Path) -> "MCPStartupConfig":
+        raw_path = str(filepath)
         path = Path(filepath).expanduser().resolve()
         try:
             payload = tomllib.loads(path.read_text(encoding="utf-8"))
@@ -113,15 +125,16 @@ class MCPStartupConfig(BaseModel):
             config = cls.model_validate(payload)
         except Exception as exc:
             raise MCPStartupConfigError(f"invalid MCP startup config `{path}`: {exc}") from exc
-        return config.resolve_paths(path.parent, source_path=path)
+        return config.resolve_paths(path.parent, source_path=path, source_path_raw=raw_path)
 
     def resolve_paths(
         self,
         base_dir: Path,
         *,
         source_path: Path | None = None,
+        source_path_raw: str | None = None,
     ) -> "MCPStartupConfig":
-        def resolve(value: Path | None) -> Path | None:
+        def resolve_service_path(value: Path | None) -> Path | None:
             if value is None:
                 return None
             expanded = Path(value).expanduser()
@@ -129,34 +142,43 @@ class MCPStartupConfig(BaseModel):
                 return expanded
             return (base_dir / expanded).resolve()
 
+        def preserve_workspace_relative_path(value: Path | None) -> Path | None:
+            if value is None:
+                return None
+            expanded = Path(value).expanduser()
+            if expanded.is_absolute():
+                return expanded
+            return expanded
+
         return self.model_copy(
             update={
                 "mcp": self.mcp.model_copy(
                     update={
-                        "prepared_cache_root": resolve(self.mcp.prepared_cache_root),
-                        "session_history_root": resolve(self.mcp.session_history_root),
+                        "prepared_cache_root": resolve_service_path(self.mcp.prepared_cache_root),
+                        "session_root": resolve_service_path(self.mcp.session_root),
                     }
                 ),
                 "agent": self.agent.model_copy(
                     update={
-                        "datadir": resolve(self.agent.datadir),
-                        "stdout": resolve(self.agent.stdout),
-                        "stderr": resolve(self.agent.stderr),
+                        "datadir": preserve_workspace_relative_path(self.agent.datadir),
+                        "stdout": preserve_workspace_relative_path(self.agent.stdout),
+                        "stderr": preserve_workspace_relative_path(self.agent.stderr),
                     }
                 ),
                 "script": self.script.model_copy(
                     update={
                         "dextools": self.script.dextools.model_copy(
-                            update={"output_dir": resolve(self.script.dextools.output_dir)}
+                            update={"output_dir": preserve_workspace_relative_path(self.script.dextools.output_dir)}
                         ),
                         "elftools": self.script.elftools.model_copy(
-                            update={"output_dir": resolve(self.script.elftools.output_dir)}
+                            update={"output_dir": preserve_workspace_relative_path(self.script.elftools.output_dir)}
                         ),
                         "nettools": self.script.nettools.model_copy(
-                            update={"ssl_log_secret": resolve(self.script.nettools.ssl_log_secret)}
+                            update={"ssl_log_secret": preserve_workspace_relative_path(self.script.nettools.ssl_log_secret)}
                         ),
                     }
                 ),
+                "source_path_raw": source_path_raw,
                 "source_path": source_path,
             }
         )
@@ -175,11 +197,14 @@ class MCPStartupConfig(BaseModel):
             "ssl_log_secret": self.script.nettools.ssl_log_secret or DEFAULT_WORKSPACE_SSL_LOG_SECRET,
         }
 
-    def session_history_root(self, *, prepared_cache_root: Path) -> Path:
-        configured = self.mcp.session_history_root
+    def session_root(self, *, prepared_cache_root: Path) -> Path:
+        configured = self.mcp.session_root
         if configured is not None:
             return configured
         return (prepared_cache_root / "sessions").resolve()
+
+    def session_history_root(self, *, prepared_cache_root: Path) -> Path:
+        return self.session_root(prepared_cache_root=prepared_cache_root)
 
     def to_summary(
         self,
@@ -187,7 +212,7 @@ class MCPStartupConfig(BaseModel):
         service_instance_id: str,
         service_started_at: datetime,
         prepared_cache_root: Path,
-        session_history_root: Path,
+        session_root: Path,
         idle_timeout_seconds: int,
         quick_path: QuickPathReadinessSummary,
     ) -> ServiceConfigSummary:
@@ -195,10 +220,11 @@ class MCPStartupConfig(BaseModel):
         return ServiceConfigSummary(
             service_instance_id=service_instance_id,
             service_started_at=service_started_at,
+            config_path_raw=self.source_path_raw,
             config_path=self.source_path,
             idle_timeout_seconds=idle_timeout_seconds,
             prepared_cache_root=prepared_cache_root,
-            session_history_root=session_history_root,
+            session_root=session_root,
             server=ServiceServerConfigSummary(
                 host=self.server.host,
                 device=self.server.device,

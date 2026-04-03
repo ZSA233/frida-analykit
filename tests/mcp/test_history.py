@@ -3,7 +3,9 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from frida_analykit.config import AppConfig
 from frida_analykit.mcp.history import SessionHistoryManager
+from frida_analykit.mcp.prepared.models import PreparedArtifactConfig, PreparedArtifactManifest
 
 
 def test_session_history_allocates_timestamped_labels_with_short_ids(tmp_path: Path) -> None:
@@ -110,3 +112,110 @@ def test_session_history_disambiguates_colliding_safe_names(tmp_path: Path) -> N
     assert second.read_text(encoding="utf-8") == "console.log('underscore')\n"
     assert manifest is not None
     assert manifest.snippets["a/b"].safe_name != manifest.snippets["a_b"].safe_name
+
+
+def test_session_history_materializes_prepared_workspace_into_runtime_workspace(tmp_path: Path) -> None:
+    manager = SessionHistoryManager(tmp_path / "sessions")
+    prepared_root = tmp_path / "prepared" / "sig"
+    prepared_root.mkdir(parents=True)
+    (prepared_root / "config.toml").write_text(
+        """
+app = "com.example.demo"
+jsfile = "./_agent.js"
+
+[server]
+host = "127.0.0.1:27042"
+path = "/data/local/tmp/frida-server"
+""".strip(),
+        encoding="utf-8",
+    )
+    (prepared_root / "_agent.js").write_text("// bundle\n", encoding="utf-8")
+    (prepared_root / "index.ts").write_text('console.log("prepared")\n', encoding="utf-8")
+    (prepared_root / "package.json").write_text('{"name":"demo"}\n', encoding="utf-8")
+    (prepared_root / "tsconfig.json").write_text('{"compilerOptions":{}}\n', encoding="utf-8")
+    (prepared_root / "prepared.json").write_text('{"prepared":true}\n', encoding="utf-8")
+    prepared = PreparedArtifactManifest(
+        signature="sig",
+        template="minimal",
+        capabilities=[],
+        imports=["@zsa233/frida-analykit-agent/rpc"],
+        agent_package_spec="@zsa233/frida-analykit-agent@1.0.0",
+        workspace_root=prepared_root,
+        config_path=prepared_root / "config.toml",
+        bundle_path=prepared_root / "_agent.js",
+        config=PreparedArtifactConfig(
+            app="com.example.demo",
+            host="127.0.0.1:27042",
+            path="/data/local/tmp/frida-server",
+            jsfile="./_agent.js",
+        ),
+    )
+
+    record = manager.begin_session(
+        open_kind="quick",
+        requested_mode="attach",
+        requested_pid=123,
+        app="com.example.demo",
+        config_path=None,
+        prepared_artifact=prepared,
+    )
+
+    runtime_config_path = manager.materialize_prepared_workspace(record, prepared_artifact=prepared)
+
+    assert runtime_config_path == record.workspace_root / "config.toml"
+    assert runtime_config_path.is_file()
+    assert (record.workspace_root / "_agent.js").read_text(encoding="utf-8") == "// bundle\n"
+    assert (record.workspace_root / "index.ts").read_text(encoding="utf-8") == 'console.log("prepared")\n'
+    assert (record.workspace_root / "prepared.json").read_text(encoding="utf-8") == '{"prepared":true}\n'
+
+
+def test_session_history_does_not_reset_runtime_workspace_after_quick_materialization(tmp_path: Path) -> None:
+    manager = SessionHistoryManager(tmp_path / "sessions")
+    prepared_root = tmp_path / "prepared" / "sig"
+    prepared_root.mkdir(parents=True)
+    config_path = prepared_root / "config.toml"
+    config_path.write_text(
+        """
+app = "com.example.demo"
+jsfile = "./_agent.js"
+
+[server]
+host = "127.0.0.1:27042"
+path = "/data/local/tmp/frida-server"
+""".strip(),
+        encoding="utf-8",
+    )
+    (prepared_root / "_agent.js").write_text("// bundle\n", encoding="utf-8")
+    prepared = PreparedArtifactManifest(
+        signature="sig",
+        template="minimal",
+        capabilities=[],
+        imports=["@zsa233/frida-analykit-agent/rpc"],
+        agent_package_spec="@zsa233/frida-analykit-agent@1.0.0",
+        workspace_root=prepared_root,
+        config_path=config_path,
+        bundle_path=prepared_root / "_agent.js",
+        config=PreparedArtifactConfig(
+            app="com.example.demo",
+            host="127.0.0.1:27042",
+            path="/data/local/tmp/frida-server",
+            jsfile="./_agent.js",
+        ),
+    )
+
+    record = manager.begin_session(
+        open_kind="quick",
+        requested_mode="attach",
+        requested_pid=123,
+        app="com.example.demo",
+        config_path=None,
+        prepared_artifact=prepared,
+    )
+    runtime_config_path = manager.materialize_prepared_workspace(record, prepared_artifact=prepared)
+    marker_path = record.workspace_root / "user-note.txt"
+    marker_path.write_text("keep me\n", encoding="utf-8")
+    runtime_config = AppConfig.from_file(runtime_config_path)
+
+    manager.record_open_success(record, config=runtime_config, attached_pid=321, prepared_artifact=prepared)
+
+    assert marker_path.read_text(encoding="utf-8") == "keep me\n"

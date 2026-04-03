@@ -208,16 +208,17 @@ Keep these behaviors in mind:
 - `frida-analykit-mcp` supports an optional startup config, `--config ./mcp.toml`; when omitted, built-in defaults are used, and `--idle-timeout` can still override the idle reclaim time.
 - `frida-analykit-mcp` now performs quick-path preflight + warmup before entering stdio serve; if `prepared_cache_root` is not writable, if `frida-compile` or `npm` is missing from the MCP process `PATH`, or if the compile probe fails, the service exits non-zero immediately.
 - The startup banner prints a quick-path status block on `stderr`, and `frida://service/config` exposes the same structured `quick_path` readiness summary. Prefer confirming `quick_path.state == "ready"` before opening a session.
-- `frida://service/config` also exposes the effective `session_history_root`; every real MCP session creates an archive directory there using the form `{yyyyMMdd-HHMMSS-shortid}`.
+- `frida://service/config` also exposes `config_path_raw`, the resolved `config_path`, and the configured `session_root`; every real MCP session creates a `{yyyyMMdd-HHMMSS-shortid}` directory under that parent root.
 - MCP also exposes `frida://service/config`, plus six queryable Markdown resources: `frida://docs/mcp/index`, `frida://docs/mcp/config`, `frida://docs/mcp/quickstart`, `frida://docs/mcp/workflow`, `frida://docs/mcp/tools`, and `frida://docs/mcp/recovery`.
-- The recommended MCP starting point is `session_open_quick`: it generates a minimal workspace inside the MCP cache, reuses a shared lightweight runtime dependency cache, builds `_agent.js` with the `frida-compile` already available in the MCP process `PATH`, writes `config.toml` inherited from the startup config, and reuses cached artifacts for the same signature.
-- The quick generator now keeps capability preloads alive through explicit local references in the generated `index.ts`; if you maintain `bootstrap_path` or a custom workspace yourself, prefer explicit imports plus explicit references instead of assuming a bare import will survive bundler pruning.
+- The recommended MCP starting point is `session_open_quick`: it generates a minimal workspace, builds `_agent.js` with the `frida-compile` already available in the MCP process `PATH`, writes `config.toml` inherited from the startup config, and reuses cached artifacts for the same signature.
+- The generated `index.ts` is the effective quick compile entry, so you can open it directly to inspect what MCP actually built.
 - `session_open` remains the low-level explicit entry for custom workspaces where you already maintain `config.toml` or a legacy YAML config together with `_agent.js`.
 - The quick path only allows official `@zsa233/frida-analykit-agent` capability subpaths / templates, and it does not take over watch / hot reload.
-- The quick path does not install `frida-compile`, `frida`, or `@types/node` into each prepared workspace; it reuses `prepared_cache_root/npm-cache` and `prepared_cache_root/_toolchains/<digest>` as a shared cache instead of creating a separate npm cache per Python virtual environment.
 - `session_open_quick` supports both `bootstrap_path` and `bootstrap_source`: the former is for reusing a repo-visible `.ts` / `.js` file, while the latter is for one-off inline initialization hooks. Neither becomes part of the snippet registry.
-- `prepared_cache_root` remains an internal quick-cache area; the effective workspace copy, `session.json`, `events.jsonl`, and archived snippet source files that users inspect later all live under `session_history_root`.
+- `session_root` is the current MCP session directory and includes `session.json`, `events.jsonl`, `workspace/`, and `snippets/`.
+- `session_workspace` is the runtime workspace for the current session, and it is the first place to inspect output files.
 - Successful `install_snippet` calls archive the snippet source into the current session directory, but that archive is historical only and is not auto-replayed into later sessions.
+- `tail_logs` / `frida://session/logs` can show both script logs and `source="host"` events such as `[dex] begin/file/complete`.
 
 ## Agent Capability Overview
 
@@ -326,7 +327,8 @@ import { DexTools } from "@zsa233/frida-analykit-agent/dex"
 setImmediate(() => {
   const loaders = DexTools.enumerateClassLoaderDexFiles()
   console.log("dex loaders =", loaders.length)
-  DexTools.dumpAllDex({ tag: "manual" })
+  const summary = DexTools.dumpAllDex({ tag: "manual" })
+  console.log("transfer =", summary.transferId)
 })
 ```
 
@@ -336,6 +338,7 @@ Current dex-dump behavior includes:
 - `script.rpc.batch_max_bytes` is the global RPC batch limit; on the agent side the default comes from `Config.BatchMaxBytes`, and `dumpAllDex({ maxBatchBytes })` can override it per call.
 - On the Python side the output directory first prefers `script.dextools.output_dir`, then falls back to `agent.datadir/dextools`.
 - Even when a single dex exceeds the batch limit, it is still sent as one batch instead of being sliced more finely.
+- After `DexTools.dumpAllDex()` returns its summary, the host side may still be flushing files; when using MCP, read `tail_logs` / `frida://session/logs` and wait for a `source="host"` line matching `[dex] complete <transferId>` before declaring the dump finished.
 
 ## Debugging, Device Tests, Release, And Repository Layout
 

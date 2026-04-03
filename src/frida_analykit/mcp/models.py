@@ -60,6 +60,7 @@ class SessionStatus(BaseModel):
     target: SessionTargetStatus | None = None
     session_id: str | None = None
     session_label: str | None = None
+    session_root: Path | None = None
     session_workspace: Path | None = None
     idle_timeout_seconds: int
     last_activity_at: datetime | None = None
@@ -144,10 +145,11 @@ class ServiceConfigSummary(BaseModel):
 
     service_instance_id: str
     service_started_at: datetime
+    config_path_raw: str | None = None
     config_path: Path | None = None
     idle_timeout_seconds: int
     prepared_cache_root: Path
-    session_history_root: Path
+    session_root: Path
     server: ServiceServerConfigSummary
     agent: ServiceAgentConfigSummary
     script: ServiceScriptConfigSummary
@@ -179,6 +181,7 @@ class TailLogsEntry(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     timestamp: datetime
+    source: Literal["script", "host"] = "script"
     level: str
     text: str
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TextIO
+from typing import Callable
 
 from ...config import AppConfig
 from ..message import (
@@ -29,10 +29,16 @@ class DexDumpTransferState:
 
 
 class DexDumpHandler:
-    def __init__(self, config: AppConfig, stdout: TextIO, stderr: TextIO) -> None:
+    def __init__(
+        self,
+        config: AppConfig,
+        *,
+        emit_info: Callable[[str], None],
+        emit_error: Callable[[str], None],
+    ) -> None:
         self._config = config
-        self._stdout = stdout
-        self._stderr = stderr
+        self._emit_info = emit_info
+        self._emit_error = emit_error
         self._states: dict[str, DexDumpTransferState] = {}
 
     def handle_begin(self, payload: RPCPayload) -> None:
@@ -48,12 +54,9 @@ class DexDumpHandler:
             tag=data.tag,
         )
         self._states[data.transfer_id] = state
-        print(
-            (
-                f"[dex] begin {data.transfer_id} -> {directory} "
-                f"(expected={data.expected_count}, bytes={data.total_bytes}, max_batch={data.max_batch_bytes})"
-            ),
-            file=self._stdout,
+        self._emit_info(
+            f"[dex] begin {data.transfer_id} -> {directory} "
+            f"(expected={data.expected_count}, bytes={data.total_bytes}, max_batch={data.max_batch_bytes})"
         )
 
     def handle_file(self, payload: RPCPayload) -> None:
@@ -70,22 +73,16 @@ class DexDumpHandler:
         state.received_bytes += payload_size
         if payload_size != data.info.size:
             state.mismatched_files.append(output_name)
-            print(
-                (
-                    f"[dex] size mismatch {state.transfer_id}: {output_name} "
-                    f"payload={payload_size}, declared={data.info.size}"
-                ),
-                file=self._stderr,
+            self._emit_error(
+                f"[dex] size mismatch {state.transfer_id}: {output_name} "
+                f"payload={payload_size}, declared={data.info.size}"
             )
         state.manifest.append({**data.info.model_dump(mode="json"), "output_name": output_name})
         self._write_manifest(state)
-        print(
-            (
-                f"[dex] file {state.transfer_id}: {output_name} "
-                f"size={payload_size} declared={data.info.size} "
-                f"name={data.info.name} loader={data.info.loader_class}"
-            ),
-            file=self._stdout,
+        self._emit_info(
+            f"[dex] file {state.transfer_id}: {output_name} "
+            f"size={payload_size} declared={data.info.size} "
+            f"name={data.info.name} loader={data.info.loader_class}"
         )
 
     def handle_end(self, payload: RPCPayload) -> None:
@@ -93,7 +90,7 @@ class DexDumpHandler:
         assert isinstance(data, RPCMsgDexDumpEnd)
         state = self._states.pop(data.transfer_id, None)
         if state is None:
-            print(f"[dex] missing transfer state for {data.transfer_id}", file=self._stderr)
+            self._emit_error(f"[dex] missing transfer state for {data.transfer_id}")
             return
 
         self._write_manifest(state)
@@ -104,23 +101,17 @@ class DexDumpHandler:
             and not state.mismatched_files
         )
         if not is_complete:
-            print(
-                (
-                    f"[dex] incomplete transfer {data.transfer_id}: "
-                    f"expected={state.expected_count}/{data.expected_count}, "
-                    f"sender={data.received_count}, received={state.received_count}, "
-                    f"bytes={state.received_bytes}/{state.total_bytes}/{data.total_bytes}, "
-                    f"mismatched={state.mismatched_files}"
-                ),
-                file=self._stderr,
+            self._emit_error(
+                f"[dex] incomplete transfer {data.transfer_id}: "
+                f"expected={state.expected_count}/{data.expected_count}, "
+                f"sender={data.received_count}, received={state.received_count}, "
+                f"bytes={state.received_bytes}/{state.total_bytes}/{data.total_bytes}, "
+                f"mismatched={state.mismatched_files}"
             )
             return
-        print(
-            (
-                f"[dex] complete {data.transfer_id}: "
-                f"files={state.received_count}, bytes={state.received_bytes}, dir={state.directory}"
-            ),
-            file=self._stdout,
+        self._emit_info(
+            f"[dex] complete {data.transfer_id}: "
+            f"files={state.received_count}, bytes={state.received_bytes}, dir={state.directory}"
         )
 
     def handle_batch(self, payload: RPCPayload) -> None:

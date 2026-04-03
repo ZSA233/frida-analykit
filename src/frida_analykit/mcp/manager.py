@@ -174,6 +174,13 @@ class SessionHistoryProtocol(Protocol):
 
     def record_snippet_removed(self, record: SessionHistoryRecord, *, name: str) -> None: ...
 
+    def materialize_prepared_workspace(
+        self,
+        record: SessionHistoryRecord,
+        *,
+        prepared_artifact: PreparedArtifactManifest,
+    ) -> Path: ...
+
 
 SessionFactory = Callable[..., SessionWrapper]
 ConfigLoader = Callable[[str | Path], AppConfig]
@@ -240,6 +247,7 @@ class OpenSessionSpec:
 @dataclass(slots=True)
 class LogEntryRecord:
     timestamp: datetime
+    source: str
     level: str
     text: str
 
@@ -357,8 +365,8 @@ class ActiveDebugSession:
     closed_reason: str | None = None
     closing: bool = False
 
-    def append_log(self, *, level: str, text: str, timestamp: datetime) -> None:
-        self.logs.append(LogEntryRecord(timestamp=timestamp, level=level, text=text))
+    def append_log(self, *, source: str, level: str, text: str, timestamp: datetime) -> None:
+        self.logs.append(LogEntryRecord(timestamp=timestamp, source=source, level=level, text=text))
 
     def mark_activity(self, *, timestamp: datetime) -> None:
         self.last_activity_at = timestamp
@@ -395,7 +403,8 @@ class ActiveDebugSession:
             target=target,
             session_id=self.history.session_id,
             session_label=self.history.session_label,
-            session_workspace=self.history.root,
+            session_root=self.history.root,
+            session_workspace=self.history.workspace_root,
             idle_timeout_seconds=idle_timeout_seconds,
             last_activity_at=self.last_activity_at,
             broken_reason=self.broken_reason,
@@ -441,7 +450,7 @@ class DebugSessionManager:
         self._now_fn = now_fn or (lambda: datetime.now(timezone.utc))
         self._prepared_workspace = prepared_workspace or PreparedWorkspaceManager(startup_config=self._startup_config)
         self._session_history = session_history or SessionHistoryManager(
-            self._startup_config.session_history_root(prepared_cache_root=self._prepared_workspace.cache_root),
+            self._startup_config.session_root(prepared_cache_root=self._prepared_workspace.cache_root),
             now_fn=self._now_fn,
         )
         self._startup_instance_id = startup_instance_id or uuid4().hex[:12]
@@ -557,13 +566,16 @@ class DebugSessionManager:
                 except SessionHistoryError:
                     pass
                 raise MCPManagerError(str(exc)) from exc
-            spec = OpenSessionSpec(
-                config_path=prepared.manifest.config_path.expanduser().resolve(),
-                mode=mode,
-                requested_pid=pid,
-            )
             current = self._current
-            if current is not None and current.spec.matches(spec) and not force_replace:
+            if (
+                current is not None
+                and current.prepared_artifact is not None
+                and current.prepared_artifact.signature == prepared.manifest.signature
+                and current.spec.mode == mode
+                and current.spec.requested_pid == pid
+                and current.config.app == app
+                and not force_replace
+            ):
                 current.prepared_artifact = prepared.manifest
                 self._touch_locked(current)
                 return current.to_status(idle_timeout_seconds=self._idle_timeout_seconds)
@@ -578,14 +590,23 @@ class DebugSessionManager:
                     requested_mode=mode,
                     requested_pid=pid,
                     app=app,
-                    config_path=spec.config_path,
+                    config_path=None,
                     prepared_artifact=prepared.manifest,
                 )
             except SessionHistoryError as exc:
                 raise MCPManagerError(str(exc)) from exc
             try:
+                runtime_config_path = self._session_history.materialize_prepared_workspace(
+                    history_record,
+                    prepared_artifact=prepared.manifest,
+                )
+                runtime_spec = OpenSessionSpec(
+                    config_path=runtime_config_path.expanduser().resolve(),
+                    mode=mode,
+                    requested_pid=pid,
+                )
                 return await self._open_or_reuse_locked(
-                    spec,
+                    runtime_spec,
                     force_replace=force_replace,
                     prepared_artifact=prepared.manifest,
                     history_record=history_record,
@@ -766,6 +787,7 @@ class DebugSessionManager:
                 current.snippets[name] = record
                 installed = True
                 current.append_log(
+                    source="host",
                     level="info",
                     text=f"[mcp] {'replaced' if replaced else 'installed'} snippet `{name}`",
                     timestamp=self._now_fn(),
@@ -881,7 +903,7 @@ class DebugSessionManager:
             if current.state == "live":
                 self._touch_locked(current)
             entries = [
-                TailLogsEntry(timestamp=item.timestamp, level=item.level, text=item.text)
+                TailLogsEntry(timestamp=item.timestamp, source=item.source, level=item.level, text=item.text)
                 for item in list(current.logs)[-max(limit, 0) :]
             ]
             return TailLogsResult(
@@ -1008,7 +1030,8 @@ class DebugSessionManager:
                 last_activity_at=self._now_fn(),
             )
             session.on("detached", self._build_detached_handler(active))
-            script.set_logger(extra_handler=lambda level, text: self._append_log(active, level=level, text=text))
+            session.set_host_log_handler(lambda level, text: self._append_log(active, source="host", level=level, text=text))
+            script.set_logger(extra_handler=lambda level, text: self._append_log(active, source="script", level=level, text=text))
             await _to_thread(script.load)
             await script.ensure_runtime_compatible_async()
             if resume_after_load:
@@ -1070,6 +1093,7 @@ class DebugSessionManager:
                     await self._remove_snippet_locked(current, name=name)
                 except Exception as exc:
                     current.append_log(
+                        source="host",
                         level="error",
                         text=f"[mcp] failed to remove snippet `{name}` during close: {exc}",
                         timestamp=self._now_fn(),
@@ -1080,6 +1104,7 @@ class DebugSessionManager:
                 await current.script.clear_scope_async()
             except Exception as exc:
                 current.append_log(
+                    source="host",
                     level="error",
                     text=f"[mcp] failed to clear the remote scope during close: {exc}",
                     timestamp=self._now_fn(),
@@ -1093,6 +1118,7 @@ class DebugSessionManager:
             self._session_history.record_closed(current.history, reason=reason)
         except SessionHistoryError as exc:
             current.append_log(
+                source="host",
                 level="error",
                 text=f"[mcp] failed to record session close history: {exc}",
                 timestamp=self._now_fn(),
@@ -1125,6 +1151,7 @@ class DebugSessionManager:
         if reason != "replace":
             self._session_history.record_snippet_removed(current.history, name=name)
             current.append_log(
+                source="host",
                 level="info",
                 text=f"[mcp] removed snippet `{name}`",
                 timestamp=self._now_fn(),
@@ -1229,16 +1256,16 @@ class DebugSessionManager:
         async with self._lock:
             self._apply_detached_locked(active, reason, crash)
 
-    def _append_log(self, active: ActiveDebugSession, *, level: str, text: str) -> None:
+    def _append_log(self, active: ActiveDebugSession, *, source: str, level: str, text: str) -> None:
         loop = self._home_loop
         if loop is None or loop.is_closed():
             return
-        loop.call_soon_threadsafe(self._append_log_on_loop, active, level, text)
+        loop.call_soon_threadsafe(self._append_log_on_loop, active, source, level, text)
 
-    def _append_log_on_loop(self, active: ActiveDebugSession, level: str, text: str) -> None:
+    def _append_log_on_loop(self, active: ActiveDebugSession, source: str, level: str, text: str) -> None:
         if self._current is not active:
             return
-        active.append_log(level=level, text=text, timestamp=self._now_fn())
+        active.append_log(source=source, level=level, text=text, timestamp=self._now_fn())
 
     def _touch_locked(self, active: ActiveDebugSession) -> None:
         active.mark_activity(timestamp=self._now_fn())
@@ -1288,18 +1315,21 @@ class DebugSessionManager:
             )
         except SessionHistoryError as exc:
             active.append_log(
+                source="host",
                 level="error",
                 text=f"[mcp] failed to record broken session history: {exc}",
                 timestamp=self._now_fn(),
             )
         detail = reason.strip() or "detached"
         active.append_log(
+            source="host",
             level="error",
             text=f"[mcp] session detached: {detail}",
             timestamp=self._now_fn(),
         )
         if crash_report:
             active.append_log(
+                source="host",
                 level="error",
                 text=crash_report,
                 timestamp=self._now_fn(),
@@ -1464,7 +1494,7 @@ class DebugSessionManager:
             service_instance_id=self._startup_instance_id,
             service_started_at=self._startup_started_at,
             prepared_cache_root=self._prepared_workspace.cache_root,
-            session_history_root=self._session_history.root,
+            session_root=self._session_history.root,
             idle_timeout_seconds=self._idle_timeout_seconds,
             quick_path=self._startup_quick_path_summary,
         )

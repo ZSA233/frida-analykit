@@ -94,7 +94,7 @@ def test_load_mcp_startup_config_uses_defaults_without_file() -> None:
     assert config.mcp.idle_timeout_seconds == 1200
     assert config.server.host == "127.0.0.1:27042"
     assert config.server.path == "frida-server"
-    assert config.session_history_root(prepared_cache_root=Path("/tmp/prepared-cache")) == (
+    assert config.session_root(prepared_cache_root=Path("/tmp/prepared-cache")) == (
         Path("/tmp/prepared-cache") / "sessions"
     ).resolve()
 
@@ -105,7 +105,7 @@ def test_load_mcp_startup_config_resolves_relative_paths_against_toml(tmp_path: 
         """
 [mcp]
 prepared_cache_root = "./cache"
-session_history_root = "./history"
+session_root = "./root"
 
 [server]
 host = "usb"
@@ -132,14 +132,30 @@ ssl_log_secret = "./ssl"
     config = load_mcp_startup_config(config_path)
 
     assert config.source_path == config_path.resolve()
+    assert config.source_path_raw == str(config_path)
     assert config.mcp.prepared_cache_root == (tmp_path / "cache").resolve()
-    assert config.mcp.session_history_root == (tmp_path / "history").resolve()
-    assert config.agent.datadir == (tmp_path / "agent-data").resolve()
-    assert config.agent.stdout == (tmp_path / "logs" / "out.log").resolve()
-    assert config.agent.stderr == (tmp_path / "logs" / "err.log").resolve()
-    assert config.script.dextools.output_dir == (tmp_path / "dex").resolve()
-    assert config.script.elftools.output_dir == (tmp_path / "elf").resolve()
-    assert config.script.nettools.ssl_log_secret == (tmp_path / "ssl").resolve()
+    assert config.mcp.session_root == (tmp_path / "root").resolve()
+    assert config.agent.datadir == Path("agent-data")
+    assert config.agent.stdout == Path("logs/out.log")
+    assert config.agent.stderr == Path("logs/err.log")
+    assert config.script.dextools.output_dir == Path("dex")
+    assert config.script.elftools.output_dir == Path("elf")
+    assert config.script.nettools.ssl_log_secret == Path("ssl")
+
+
+def test_load_mcp_startup_config_rejects_duplicate_session_root_keys(tmp_path: Path) -> None:
+    config_path = tmp_path / "bad.toml"
+    config_path.write_text(
+        """
+[mcp]
+session_root = "./root"
+session_history_root = "./legacy"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(MCPStartupConfigError, match="session_root"):
+        load_mcp_startup_config(config_path)
 
 
 def test_load_mcp_startup_config_rejects_unknown_fields(tmp_path: Path) -> None:
@@ -216,7 +232,7 @@ host = "local"
     assert len(manager_kwargs["startup_instance_id"]) == 12
     assert manager_kwargs["startup_quick_path_summary"].state == "ready"
     assert prepared_workspace.cache_root == (tmp_path / "prepared").resolve()
-    assert startup_config.session_history_root(prepared_cache_root=prepared_workspace.cache_root) == (
+    assert startup_config.session_root(prepared_cache_root=prepared_workspace.cache_root) == (
         tmp_path / "prepared" / "sessions"
     ).resolve()
     assert startup_config.server.host == "local"
@@ -229,7 +245,7 @@ host = "local"
         "frida-analykit-mcp",
         "demo-mcp",
         "Instance ID:",
-        "Session History:",
+        "Session Root:",
         "Quick Path:",
         "✓ ready",
         "● cache hit",
@@ -322,7 +338,7 @@ def test_render_startup_banner_only_uses_ansi_when_enabled(tmp_path: Path) -> No
         instance_id="123456789abc",
         config_path=None,
         prepared_cache_root=tmp_path / "prepared-cache",
-        session_history_root=tmp_path / "prepared-cache" / "sessions",
+        session_root=tmp_path / "prepared-cache" / "sessions",
         host="127.0.0.1:27042",
         device=None,
         server_path="frida-server",
@@ -336,7 +352,7 @@ def test_render_startup_banner_only_uses_ansi_when_enabled(tmp_path: Path) -> No
         instance_id="123456789abc",
         config_path=None,
         prepared_cache_root=tmp_path / "prepared-cache",
-        session_history_root=tmp_path / "prepared-cache" / "sessions",
+        session_root=tmp_path / "prepared-cache" / "sessions",
         host="127.0.0.1:27042",
         device=None,
         server_path="frida-server",

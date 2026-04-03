@@ -30,15 +30,15 @@
 ## Important limits
 
 - The server keeps one active debug session only.
-- The MCP public surface is async-core only; the old sync compatibility manager is not part of the supported API anymore.
 - MCP tools always use the async, Promise-aware RPC path instead of the REPL-style sync handle browsing path.
 - `session_open` is still available as the low-level explicit path when you already prepared your own workspace.
 - `session_open_quick` inherits server and output defaults from the fixed startup TOML loaded at process start.
 - In quick session, `template` is the preset and `capabilities` are additive preload globals, not a general import injector.
 - Quick-session cache entries stay on disk until `prepared_session_prune` removes them.
 - MCP quick session does not become a general package manager; it only imports official `@zsa233/frida-analykit-agent` subpaths.
-- Quick path reuses one shared lightweight runtime cache instead of running a full frontend toolchain install per workspace.
 - MCP startup now performs quick-path preflight + warmup before serving stdio; if readiness fails, the server exits instead of exposing a degraded quick path.
+- `tail_logs` and `frida://session/logs` include both `source="script"` and `source="host"` entries.
+- For dex dump flows, wait for the host log `[dex] complete <transferId>` before treating the output files under `session_workspace` as finished.
 - It does not watch or hot reload the TypeScript workspace.
 - It does not auto-recover a broken session.
 - It does not auto-reinstall snippets after `session_recover`.

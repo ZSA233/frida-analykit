@@ -60,7 +60,7 @@ frida-analykit-mcp --config ./mcp.toml
 - 远端 `frida-server` 路径
 - 日志和输出目录
 - quick session 的缓存目录
-- 会话归档目录
+- 会话根目录
 - 空闲回收时间
 
 最小示例：
@@ -68,7 +68,7 @@ frida-analykit-mcp --config ./mcp.toml
 ```toml
 [mcp]
 idle_timeout_seconds = 1200
-session_history_root = "./session-history"
+session_root = "./sessions"
 
 [server]
 host = "127.0.0.1:27042"
@@ -97,9 +97,9 @@ ssl_log_secret = "./data/nettools/sslkey"
 - `--idle-timeout` 可以覆盖 `mcp.toml` 里的空闲回收时间
 - 如果不传 `--config`，MCP 会使用内建默认值启动
 - 启动时固定先做 `startup preflight -> startup warmup -> stdio serve`
-- 预热会验证 `prepared_cache_root` 可写、`frida-compile` 与 `npm` 可用、shared runtime toolchain 可复用或可安装、以及一次最小 compile sanity probe
+- 预热会验证 `prepared_cache_root` 可写、`frida-compile` 与 `npm` 可用，以及一次最小 compile sanity probe
 - 如果以上任一环节失败，MCP 不会进入 serve，而是打印带状态符号的 banner 后直接非零退出
-- `frida://service/config` 也会暴露实际生效的 `session_history_root`
+- `frida://service/config` 会同时暴露 `config_path_raw`、resolved `config_path` 和实际生效的 `session_root`
 
 ## 如何接入 MCP Client
 
@@ -146,25 +146,22 @@ ssl_log_secret = "./data/nettools/sslkey"
 - 生成最小 TypeScript 工作区
 - 自动导入 `@zsa233/frida-analykit-agent/rpc`
 - 按 capability 导入官方 subpath
-- 在生成的 `index.ts` 里直接保留这些 capability 的原始 binding 引用，避免只 import 但未引用时被 bundler 裁剪
 - 让生成出来的 `index.ts` 尽量直接表现 MCP 最终实际编译的入口代码
-- 复用共享的轻量 runtime `node_modules` 缓存
+- 复用 prepared cache 中的 quick session 产物
 - 通过 MCP 进程 `PATH` 中的 `frida-compile` 编译 `_agent.js`
 - 生成一份继承 `mcp.toml` 默认值的 `config.toml`
 - 复用同参数签名下的缓存结果
+- 在真实打开前，把 prepared artifact 复制到当前 `session_root/{yyyyMMdd-HHMMSS-shortid}/workspace`
+- 最终使用这个 `session_workspace/config.toml` 打开会话
 
-这里的共享语义需要特别说明：
+这里有两个目录概念需要区分：
 
-- quick path 的 `npm_config_cache` 固定落在 `prepared_cache_root/npm-cache`
-- shared toolchain 固定落在 `prepared_cache_root/_toolchains/<digest>`
-- 因此共享粒度是“同一个 prepared cache root + 同一个 agent package spec”，不是“每个 Python 虚拟环境各自一份”
-- 普通工作区里的 `npm install` / `frida-analykit build` 仍然主要使用工作区自己的 `node_modules`，不自动并入 MCP 这套 shared cache
-- `prepared_cache_root` 继续只承担内部 quick build/cache 角色，不是给用户直接查阅会话历史的主目录
-- 每个真实 MCP 会话都会在 `session_history_root` 下创建一个 `{yyyyMMdd-HHMMSS-shortid}` 目录，里面保存 copied `workspace/`、`session.json`、`events.jsonl` 和 snippet 历史源码
+- `session_root`：当前 MCP 会话目录，包含 `session.json`、`events.jsonl`、`workspace/`、`snippets/`
+- `session_workspace`：当前会话运行时 workspace，查看输出文件时优先看这里
+
+`prepared_cache_root` 仍然只承担内部 quick cache 角色，不是给用户直接查阅当前会话结果的主目录。
 
 只有在你已经自己维护好了工作区，并且明确想让 MCP 直接消费现成 `config.toml` 或 legacy YAML 时，才建议使用低层的 `session_open(...)`。
-
-还要注意一点：`session_open(...)` 不是 quick-path 启动失败时的绕过通道。`frida-analykit-mcp` 进程本身仍然要求 quick warmup 达到可用状态才会启动；如果启动阶段已经 fail-fast，需要先修 MCP 环境并重启服务。
 
 ## Quick Session 能做什么
 
@@ -213,15 +210,12 @@ ssl_log_secret = "./data/nettools/sslkey"
 
 也就是说，`session_open_quick(...)` 里的 `template` 和 `capabilities` 不是通用 import 注入接口。
 
-它们更适合“先把一些会挂到 `globalThis` 或能直接被 `/rpc` 看到的能力预加载起来”，然后再让 bootstrap 或后续 `eval_js(...)` 直接使用。
-
-当前 quick path 会在生成的 `index.ts` 里对这些 capability 做显式本地引用，以避免只 import 不引用时被 `frida-compile` 裁剪。这个 retain 语义现在属于 generated workspace，而不是 agent runtime 内部的隐式契约。
+它们更适合“先把一些后续 `eval_js(...)`、snippet 或 bootstrap 会直接使用的能力准备好”。
 
 另外，generated quick `index.ts` 本身就是当前 quick session 的最终编译入口：
 
-- capability preload 会直接以真实 import + `void Xxx` 的形式出现在里面
+- 你可以直接打开它，看到 MCP 最终编译时使用的入口代码
 - `bootstrap_source` 会直接内联进这个 `index.ts`
-- `bootstrap_path` 仍保持为单独文件 import，但 quick path 只会复制这一个文件进入 prepared workspace
 
 也就是说，quick `bootstrap_path` 应该视为 self-contained 文件：
 
@@ -232,9 +226,7 @@ ssl_log_secret = "./data/nettools/sslkey"
 
 - 用 `template="minimal"`
 - 把需要的 import 直接写进 `bootstrap_path`
-- 并对关键 binding 做一次显式引用，而不是依赖 bare import 一定会被保留
-
-这样脚本本身的依赖关系会更直观，也更适合让用户和模型一起维护。
+- 在脚本里直接完成你真正需要的初始化逻辑
 
 像 `@zsa233/frida-analykit-agent/elf/enhanced` 这种不会注册全局能力的模块，就不应该作为 quick capability 使用，而应该放在 `bootstrap_path`、`bootstrap_source` 或自定义 workspace 里自己 import。
 
@@ -293,10 +285,22 @@ Java.performNow(() => Java.use("android.app.ActivityThread").currentPackageName(
 
 ```js
 DexTools.enumerateClassLoaderDexFiles().length
-DexTools.dumpAllDex("case-001")
+const summary = DexTools.dumpAllDex("case-001")
+summary.transferId
 ```
 
 如果目的是把目标 app 的 dex 全部导出，这通常就是推荐起手式。
+
+这里要注意完成态判断：
+
+- `DexTools.dumpAllDex(...)` 返回时，只能说明 agent 侧流式发送已经结束
+- Python host 侧可能还在继续写 dex 文件和 `classes.json`
+- MCP 现在把 host 侧 `[dex] begin/file/complete` 事件也并入了 `tail_logs(...)` / `frida://session/logs`
+- 更稳妥的判定方式是：
+  - 记录 `summary.transferId`
+  - 轮询 `tail_logs(...)`
+  - 等到出现 `source="host"` 且文本形如 `[dex] complete <transferId>` 的日志，再把这次 dump 当成成功
+- 如果看到 `incomplete transfer` 或 `size mismatch`，应直接视为失败
 
 ### `ssl_probe`
 
@@ -352,6 +356,17 @@ Libssl.$getModule().name
 - 这只是历史记录，不会在新的会话里自动 replay
 - `frida://session/snippets` 仍然只表示当前 live session 的内存状态
 
+## `tail_logs` 现在是什么
+
+`tail_logs(...)` 和 `frida://session/logs` 都可以用来查看当前会话最近的日志。
+
+它们会同时包含：
+
+- `source="script"`：来自 agent 脚本的日志
+- `source="host"`：来自 MCP host handler 的日志，例如 dex/elf 文件落盘、progress、异常摘要
+
+像 dex dump 这种需要确认 host 侧是否已经完成落盘的流程，优先看 `source="host"` 的完成事件。
+
 ## 主要能力概览
 
 从用户角度，可以把 MCP 的能力简单理解成四组：
@@ -378,7 +393,6 @@ Libssl.$getModule().name
 - 当前一个 MCP 进程只维护一个活动调试会话
 - quick session 不是通用 npm 包管理器，只允许官方 capability subpath
 - quick session 依赖 MCP 运行环境中预装的 `frida-compile`
-- quick session 不会在每个 prepared workspace 里安装 `frida-compile`、`frida` 或 `@types/node`
 - quick session 不接管 watch / hot reload
 - broken session 不会自动 recover
 - recover 后不会自动重装 snippet
