@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import select
 import signal
 import subprocess
 import sys
@@ -9,11 +11,13 @@ import textwrap
 import time
 from pathlib import Path
 
+import pytest
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from frida_analykit.mcp.server import build_mcp_server
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+_SIGINT_READY_MARKER = "__SIGINT_READY__"
 
 EXPECTED_TOOL_NAMES = [
     "session_open",
@@ -49,6 +53,26 @@ EXPECTED_RESOURCE_URIS = [
 
 def _run_async(coro):
     return asyncio.run(coro)
+
+
+def _wait_for_stderr_marker(process: subprocess.Popen[bytes], marker: str, *, timeout: float) -> bytes:
+    assert process.stderr is not None
+    deadline = time.monotonic() + timeout
+    chunks = bytearray()
+    marker_bytes = marker.encode("utf-8")
+    stderr_fd = process.stderr.fileno()
+    while time.monotonic() < deadline:
+        remaining = deadline - time.monotonic()
+        ready, _, _ = select.select([stderr_fd], [], [], remaining)
+        if not ready:
+            break
+        chunk = os.read(stderr_fd, 4096)
+        if not chunk:
+            break
+        chunks.extend(chunk)
+        if marker_bytes in chunks:
+            return bytes(chunks)
+    raise AssertionError(f"did not observe {marker!r} on stderr before timeout")
 
 
 def test_entrypoint_exposes_expected_tools_and_resources_over_stdio(tmp_path: Path) -> None:
@@ -210,15 +234,21 @@ def test_cli_exits_before_stdio_serve_when_startup_warmup_fails(tmp_path: Path) 
     assert "frida-compile" in result.stderr
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="subprocess SIGINT delivery is not isolated enough for stable Windows CI coverage",
+)
 def test_cli_exits_promptly_after_single_sigint(tmp_path: Path) -> None:
     server_script = tmp_path / "mcp_sigint.py"
     server_script.write_text(
         textwrap.dedent(
             """
+            import sys
             from datetime import datetime, timezone
             from pathlib import Path
 
             from frida_analykit.mcp import cli
+            from frida_analykit.mcp import stdio as mcp_stdio
             from frida_analykit.mcp.models import (
                 QuickPathCheckSummary,
                 QuickPathCompileProbeSummary,
@@ -263,6 +293,15 @@ def test_cli_exits_promptly_after_single_sigint(tmp_path: Path) -> None:
                 )
 
 
+            _original_bind_shutdown_target = mcp_stdio._InterruptState.bind_shutdown_target
+
+
+            def _bind_shutdown_target_and_report_ready(self, *, loop, task, wake_reader):
+                _original_bind_shutdown_target(self, loop=loop, task=task, wake_reader=wake_reader)
+                print("__SIGINT_READY__", file=sys.stderr, flush=True)
+
+
+            mcp_stdio._InterruptState.bind_shutdown_target = _bind_shutdown_target_and_report_ready
             cli.PreparedWorkspaceManager.startup_warmup = lambda self: _quick_ready(self.cache_root)
             raise SystemExit(cli.main(["--idle-timeout", "1"]))
             """
@@ -276,18 +315,19 @@ def test_cli_exits_promptly_after_single_sigint(tmp_path: Path) -> None:
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        text=True,
+        text=False,
     )
     try:
-        time.sleep(0.5)
+        ready_stderr = _wait_for_stderr_marker(process, _SIGINT_READY_MARKER, timeout=5.0)
         process.send_signal(signal.SIGINT)
         return_code = process.wait(timeout=5)
-        _, stderr = process.communicate(timeout=1)
+        _, remaining_stderr = process.communicate(timeout=1)
     finally:
         if process.poll() is None:
             process.kill()
             process.wait(timeout=5)
 
+    stderr = (ready_stderr + remaining_stderr).decode("utf-8", errors="replace")
     assert return_code == 130
     assert "received Ctrl+C, shutting down" in stderr
     assert "KeyboardInterrupt" not in stderr
