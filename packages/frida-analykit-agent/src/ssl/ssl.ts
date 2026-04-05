@@ -258,11 +258,11 @@ export class BoringSSL {
 class SSLTools extends NativePointerObject {
     private static _libssl_hook: boolean = false
 
-    static newConsumer(tag: string = 'sslkey.log'): SSLSecretCallbackConsumer {
+    static newConsumer(tag: string = ''): SSLSecretCallbackConsumer {
         return new SSLSecretCallbackConsumer(tag)
     }
 
-    static attachLibsslKeylogFunc(tag: string = 'sslkey.log'){
+    static attachLibsslKeylogFunc(tag: string = ''){
         if (this._libssl_hook) {
             return true
         }
@@ -301,8 +301,8 @@ class SSLTools extends NativePointerObject {
         return true
     }
 
-    static attachBoringsslKeylogFunc(options: { mod?: ElfModuleX | Module, libname?: string }){
-        let { mod, libname } = options
+    static attachBoringsslKeylogFunc(options: { mod?: ElfModuleX | Module, libname?: string, tag?: string }){
+        let { mod, libname, tag } = options
         if(!mod && !libname) {
             throw new Error(`[attachBoringssl] mod和libname必须要指定一个`)
         }
@@ -315,8 +315,8 @@ class SSLTools extends NativePointerObject {
         if(guessList.length != 1) {
             throw new Error(`[attachBoringssl] 扫到的目标不存在或多个[${guessList.length}], 不执行attach。`)
         }
-        Interceptor.attach(guessList[0], SSLTools.newConsumer('sslkey.log').Handler())
-        prog.log(mod!.name, `ssl_log_secret: ${guessList[0].sub(mod!.base)}`)
+        Interceptor.attach(guessList[0], SSLTools.newConsumer(tag ?? '').Handler())
+        prog.log(mod!.name, `ssl_keylog_func: ${guessList[0].sub(mod!.base)}`)
     }
 
 

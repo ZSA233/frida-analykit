@@ -41,7 +41,7 @@ def generate_dev_workspace(
     }
 
     created: list[Path] = []
-    for name in ("config.toml", "index.ts", "package.json", "tsconfig.json", "README.md"):
+    for name in ("config.toml", "index.ts", "package.json", "tsconfig.json", "README.md", "README_EN.md"):
         destination = target / name
         if destination.exists() and not force:
             continue

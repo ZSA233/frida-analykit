@@ -2,7 +2,7 @@ from frida_analykit.rpc.message import (
     RPCMessage,
     RPCMsgBatch,
     RPCMsgDexDumpBegin,
-    RPCMsgElfSnapshotBegin,
+    RPCMsgElfModuleDumpBegin,
     RPCMsgElfSymbolCallLog,
     RPCMsgSaveFile,
     RPCMsgScopeCall,
@@ -57,6 +57,7 @@ def test_rpc_message_from_mapping_parses_dex_dump_begin() -> None:
             "data": {
                 "transfer_id": "dex-1",
                 "tag": "demo",
+                "dump_dir": "./requested",
                 "expected_count": 2,
                 "total_bytes": 10,
                 "max_batch_bytes": 4096,
@@ -66,31 +67,37 @@ def test_rpc_message_from_mapping_parses_dex_dump_begin() -> None:
 
     assert isinstance(message.data, RPCMsgDexDumpBegin)
     assert message.data.transfer_id == "dex-1"
+    assert message.data.dump_dir == "./requested"
     assert message.data.expected_count == 2
     assert message.data.max_batch_bytes == 4096
 
 
-def test_rpc_message_from_mapping_parses_elf_snapshot_begin() -> None:
+def test_rpc_message_from_mapping_parses_elf_module_dump_begin() -> None:
     message = RPCMessage.from_mapping(
         {
-            "type": RPCMsgType.ELF_SNAPSHOT_BEGIN.value,
+            "type": RPCMsgType.ELF_MODULE_DUMP_BEGIN.value,
             "data": {
-                "snapshot_id": "elf-1",
+                "dump_id": "elf-1",
                 "tag": "demo",
+                "output_dir": "./requested-elf",
+                "relative_dump_dir": "demo",
                 "module_name": "libc.so",
                 "module_path": "/apex/libc.so",
                 "module_base": "0x1000",
+                "module_end": "0x1040",
                 "module_size": 64,
-                "expected_files": ["libc.so", "symbols.json"],
+                "expected_files": ["libc.raw.so", "libc.fixed.so", "fixups.json", "manifest.json"],
                 "total_bytes": 128,
             },
         }
     )
 
-    assert isinstance(message.data, RPCMsgElfSnapshotBegin)
-    assert message.data.snapshot_id == "elf-1"
+    assert isinstance(message.data, RPCMsgElfModuleDumpBegin)
+    assert message.data.dump_id == "elf-1"
+    assert message.data.output_dir == "./requested-elf"
+    assert message.data.relative_dump_dir == "demo"
     assert message.data.module_name == "libc.so"
-    assert message.data.expected_files == ["libc.so", "symbols.json"]
+    assert message.data.expected_files == ["libc.raw.so", "libc.fixed.so", "fixups.json", "manifest.json"]
 
 
 def test_rpc_message_from_mapping_parses_elf_symbol_call_log() -> None:

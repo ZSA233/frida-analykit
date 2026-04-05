@@ -1,4 +1,3 @@
-
 import { Ehdr, Phdr, Dyn, Shdr, Soinfo, Sym, Rela } from './struct.js'
 import { nativeFunctionOptions } from "../internal/frida/native-function.js"
 import { SYM_INFO_BIND, SYM_INFO_TYPE, SYM_SHNDX } from "./constants.js"
@@ -7,9 +6,9 @@ import {
     DyntabTag
 } from './struct.js'
 import { help, downAlign, upAlign, page_end, page_start } from "../helper/index.js"
-import { ArrayPointer } from "../internal/binary/array_pointer.js"
 import { setGlobalProperties } from "../config/index.js"
 import { saveFileSource } from "../internal/rpc/messages.js"
+import type { ElfModuleMetadataPatcher } from "./internal/metadata_patcher.js"
 
 
 interface ElfModuleX extends BaseModule {}
@@ -22,11 +21,6 @@ declare global {
         size: number
 
     }
-}
-
-
-export interface ElfModuleFixer {
-    fixShdrs(modx: ElfModuleX): boolean
 }
 
 
@@ -48,7 +42,7 @@ class ElfModuleX {
     private readonly _symbolScanLimit: number
     private _fullDynSymbols: Sym[] | null | undefined = undefined
 
-    constructor(module: BaseModule, fixers?: ElfModuleFixer[], { symbolScanLimit=1000 }: {symbolScanLimit?: number } = {}) {
+    constructor(module: BaseModule, metadataPatchers?: ElfModuleMetadataPatcher[], { symbolScanLimit=1000 }: {symbolScanLimit?: number } = {}) {
         this.name = module.name
         this.base = module.base
         this.size = module.size
@@ -64,9 +58,9 @@ class ElfModuleX {
         try {
             this.shdrs = this.readShdrs()
         }catch(e){
-            if(fixers) {
-                for(let fixer of fixers) {
-                    if(fixer.fixShdrs(this)) {
+            if(metadataPatchers) {
+                for(let metadataPatcher of metadataPatchers) {
+                    if(metadataPatcher.patch(this)) {
                         break 
                     }
                 }
@@ -557,248 +551,3 @@ class ElfModuleX {
 
 
 export { ElfModuleX }
-
-
-export class ElfFileFixer implements ElfModuleFixer {
-    path: string
-
-    private modx?: ElfModuleX
-    private fileBytes?: ArrayBuffer
-    private ehdr?: Ehdr
-    private phdrs?: Phdr[]
-    private shdrs?: Shdr[]
-    private strtab?: { [key: number]: string }
-
-    private shstrtabShdr?: Shdr
-
-    constructor(path: string) {
-        this.path = path
-    }
-
-    getFilePtr(): ArrayPointer {
-        if(!this.fileBytes) {
-            this.fileBytes = help.fs.read(this.path)
-        }
-        return new ArrayPointer(0, this.fileBytes!)
-    }
-    
-    ensureEhdr() {
-        if(!this.ehdr) {
-            this.ehdr = this.readEhdr()
-        }
-        help.runtime.assert(this.ehdr)
-    }
-
-    ensurePhdrs() {
-        if (!this.phdrs) {
-            this.phdrs = this.readPhdrs()
-        }
-        help.runtime.assert(this.phdrs)
-    }
-
-    ensureShdrs(){
-        if (!this.shdrs) {
-            this.shdrs = this.readShdrs()
-        }
-        help.runtime.assert(this.shdrs)
-    }
-
-    ensureStrtab() {
-        if (!this.strtab) {
-            this.strtab = this.readStrtab()
-        }
-        help.runtime.assert(this.shdrs)
-    }
-
-    readEhdr() {
-        const base = this.getFilePtr()
-        const magic = Array.from(new Uint8Array(Elf_Ehdr.EI_Magic(base)))
-        const FIXED_MAGIC = [0x7f, 0x45, 0x4c, 0x46]
-        if (!FIXED_MAGIC.every((v, i) => v == magic[i])) {
-            throw new Error(`error magic[${magic}]`)
-        }
-        const ei_class = Elf_Ehdr.EI_CLASS(base)
-        const structOf = ei_class === 1 ? Elf_Ehdr.B32 : Elf_Ehdr.B64
-        return {
-            ei_class: ei_class,
-            e_type: structOf.E_Type(base),
-            e_phoff: structOf.E_Phoff(base),
-            e_shoff: structOf.E_Shoff(base),
-            e_phnum: structOf.E_Phnum(base),
-            e_shnum: structOf.E_Shnum(base),
-            e_shstrndx: structOf.E_Shstrndx(base),
-        }
-    }
-
-    readPhdrs(): Phdr[] {
-        this.ensureEhdr()
-
-        const fileBase = this.getFilePtr()
-        const ehdr = this.ehdr!
-        const base = fileBase.add(ehdr.e_phoff)
-        const structOf = ehdr.ei_class === 1 ? Elf_Phdr.B32 : Elf_Phdr.B64
-        const tables: Phdr[] = []
-        for (let i = 0; i < ehdr.e_phnum; i++) {
-            const cellBase = base.add(i * structOf.SIZE)
-            tables.push({
-                p_type: structOf.P_Type(cellBase),
-                p_offset: structOf.P_Offset(cellBase),
-                p_vaddr: structOf.P_Vaddr(cellBase),
-                p_paddr: structOf.P_Paddr(cellBase),
-                p_filesz: structOf.P_Filesz(cellBase),
-                p_memsz: structOf.P_Memsz(cellBase),
-                p_align: structOf.P_Align(cellBase),
-            })
-        }
-        return tables
-    }
-
-    readShdrs() {
-        this.ensureEhdr()
-        this.ensurePhdrs()
-
-        const fileBase = this.getFilePtr()
-        const ehdr = this.ehdr!
-        const base = fileBase.add(ehdr.e_shoff)
-
-        const structOf = ehdr.ei_class === 1 ? Elf_Shdr.B32 : Elf_Shdr.B64
-        const tables: Shdr[] = []
-        for (let i = 0; i < ehdr.e_shnum; i++) {
-            const cellBase = base.add(i * structOf.SIZE)
-            const sh_addr = structOf.Sh_Addr(cellBase)
-            const sh_size = structOf.Sh_Size(cellBase)
-            tables.push({
-                name: null,
-                base: this.modx!.base.add(sh_addr),
-                size: sh_size,
-                
-                sh_name: structOf.Sh_Name(cellBase),
-                sh_type: structOf.Sh_Type(cellBase),
-                sh_addr: structOf.Sh_Addr(cellBase),
-                sh_offset: structOf.Sh_Offset(cellBase),
-                sh_size: structOf.Sh_Size(cellBase),
-                sh_link: structOf.Sh_Link(cellBase),
-                sh_info: structOf.Sh_Info(cellBase),
-                sh_addralign: structOf.Sh_Addralign(cellBase),
-                sh_entsize: structOf.Sh_Entsize(cellBase),
-            })
-        }
-        this.shdrs = tables
-        // fill name
-        for(let v of tables) {
-            v.name = this.getShstrtabString(v.sh_name)
-        }
-
-        return tables
-    }
-
-    readStrtab(): { [key: number]: string } | undefined {
-        this.ensureEhdr()
-        this.ensurePhdrs()
-        this.ensureShdrs()
-
-        const shdr = this.shdrs!.find(shdr => this.getShstrtabString(shdr.sh_name) === '.strtab')
-        if (!shdr) {
-            return
-        }
-        const fileBase = this.getFilePtr()
-        const strbase = fileBase.add(shdr.sh_offset)
-        const strend = strbase.add(shdr.sh_size)
-        const strtabs: { [key: number]: string } = {}
-        let next = strbase
-        while (next < strend) {
-            const off = Number(next.sub(strbase)) 
-            const cstr = next.readCString()
-            next = next.add(cstr.length + 1)
-            strtabs[off] = cstr
-        }
-        return strtabs
-    }
-
-    getShstrtabString(nameOff: number): string {
-        if (!this.shstrtabShdr) {
-            const shdr = this.shdrs![this.ehdr!.e_shstrndx]
-            this.shstrtabShdr = shdr
-        }
-        const fileBase = this.getFilePtr()
-        return fileBase.add(this.shstrtabShdr.sh_offset).add(nameOff).readCString()
-    }
-
-    getSymString(nameIDX: number): string {
-        return this.strtab![nameIDX]
-    }
-    
-
-    readSymtab(): Sym[] | null{
-        this.ensureEhdr()
-        this.ensurePhdrs()
-        this.ensureShdrs()
-        this.ensureStrtab()
-
-        const shdr = this.shdrs!.find(shdr => this.getShstrtabString(shdr.sh_name) === '.symtab')
-        if(!shdr) {
-            return null
-        }
-        const fileBase = this.getFilePtr()
-        const ehdr = this.ehdr!
-        const structOf = ehdr.ei_class === 1 ? Elf_Sym.B32 : Elf_Sym.B64
-
-        const base = fileBase.add(shdr.sh_offset)
-        const num = shdr.sh_size / structOf.SIZE
-        const symbols: Sym[] = []
-        for (let i = 0; i < num; i++) {
-            const cellBase = base.add(i * structOf.SIZE)
-            const nameIDX = structOf.St_Name(cellBase)
-            const name = this.getSymString(nameIDX)
-            let implPtr = ptr(structOf.St_Value(cellBase))
-            const st_info = structOf.St_Info(cellBase)
-            const st_shndx = structOf.St_Shndx(cellBase)
-            const st_other = structOf.St_Other(cellBase)
-
-            if ([SYM_SHNDX.SHN_UNDEF, SYM_SHNDX.SHN_ABS].indexOf(st_shndx) === -1) {
-                if ([SYM_INFO_TYPE.STT_FUNC, SYM_INFO_TYPE.STT_OBJECT].indexOf(st_info & 0xF) !== -1) {
-                    if (!this.modx?.isMyAddr(implPtr)) {
-                        implPtr = this.modx!.module.base.add(implPtr)
-                    }
-                }
-            }
-            const sym: Sym = {
-                name: name,
-                relocPtr: null,
-                hook: null,
-                implPtr: implPtr,
-                linked: true,
-
-                st_name: nameIDX,
-                st_info: st_info,
-                st_other: st_other,
-                st_shndx: st_shndx,
-                st_value: implPtr,
-                st_size: structOf.St_Size(cellBase),
-            }
-            symbols.push(sym)
-        }
-        return symbols
-    }
-
-    fixShdrs(modx: ElfModuleX): boolean {
-        this.modx = modx
-        try {
-            const shdrs = this.readShdrs()
-            if(shdrs){
-                this.strtab = this.readStrtab()  
-                const symtab = this.readSymtab()
-                
-                modx.shdrs = shdrs
-                modx.strtab = this.strtab || null
-                modx.symtab = symtab
-                return true
-            }
-        }catch(e) {
-            console.error(`[ElfFileFixer]fixShdrs name[${modx.name}] e[${e}]`)
-        }
-
-        return false
-    }
-
-}

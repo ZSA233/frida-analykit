@@ -46,6 +46,7 @@
   - `rpc`
 - 每个能力域自己的 `index.ts` 应尽量薄，只负责导出该域的正式入口。
 - 领域内部复杂实现继续留在领域目录内部；跨能力共享的低层工具放进 `internal/*`，而不是反向泄漏到公共入口。
+- 像 ELF 这类既有 live parser 又有 dump/fix workflow 的能力域，共享的低层 ABI 描述应收敛为单一内部事实源；不要在 pointer-reader 与 buffer-fixer 两侧各自维护一套 offset/size/constants。
 - 高层 capability 与低层 binding 继续保持分层：
   - `ssl` 提供高层 hook / workflow
   - `native/libssl` 提供低层符号绑定
@@ -60,6 +61,7 @@
 - 某个 capability 是否会出现在 RPC eval context，应由用户是否显式 import 对应模块决定，而不是由隐式副作用决定。
 - 新增全局注册时，应先确认它是否真的是跨脚本常用能力；否则优先保留为普通模块导出。
 - 如果某个全局注册行为比较隐蔽、对 bundle 体积或 eval context 有明显影响，应在代码附近加注释说明注册目的。
+- 领域内部的 native binding、`Module.load(...)`、`NativeFunction(...)`、`CModule(...)` 也应遵循同样原则：不要在 import-time 直接触发，优先在首次实际调用时懒加载。
 
 ## API 风格 / API Style
 
@@ -72,6 +74,9 @@
   - `help.runtime.*`
 - 历史 flat alias 只保留必要兼容，不应再把新能力继续做成新的平铺别名。
 - JNI 相关接口延续“显式 `sig`、不做 name-only lookup、不做 overload 猜测”的风格。
+- ELF dump 主线使用显式 `dumpModule(...)` workflow，默认导出 `raw`、`fixed`、`fixups.json` 与 `manifest.json`，不再把这类文件导出能力命名成中性的 `snapshot`。
+- `fixups.json` 应由真实修复阶段直接产出，采用稳定的 stage 顺序和可解释 patch 语义，而不是在最终 `raw/fixed` 之间再做一层全局 diff 猜测改动来源。
+- ELF module metadata 补齐主线使用 `augmentMetadata` 语义，表示 best-effort 的 file-backed metadata augmentation，而不是笼统的 `tryFix` / `fixer` 命名。
 - capability API 尽量返回结构清晰、类型可表达的结果；如果类型契约重要，应同步补上 type-tests。
 - 公共 capability、内部实现文件和私有测试能力必须明确分层；仓库内测试专用内容不应误入正式 public package surface。
 

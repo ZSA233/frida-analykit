@@ -6,7 +6,7 @@
 
 - Fixed service defaults that should not be chosen by the LLM at session-open time.
 - Server connection fields such as `host`, `device`, and `path`.
-- Quick-session output paths such as `agent.stdout`, `agent.stderr`, `script.dextools.output_dir`, and `script.nettools.ssl_log_secret`.
+- Quick-session output paths such as `agent.stdout`, `agent.stderr`, `script.dextools.output_dir`, and `script.nettools.output_dir`.
 - MCP process defaults such as `idle_timeout_seconds`, `prepared_cache_root`, and `session_root`.
 
 ## Recommended flow
@@ -33,7 +33,7 @@ stdout = "./logs/outerr.log"
 stderr = "./logs/outerr.log"
 
 [script.nettools]
-ssl_log_secret = "./data/nettools/sslkey"
+output_dir = "./data/nettools"
 ```
 
 ## Important limits

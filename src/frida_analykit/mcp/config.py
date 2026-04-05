@@ -11,7 +11,7 @@ from ..workspace import (
     DEFAULT_WORKSPACE_DATADIR,
     DEFAULT_WORKSPACE_DEXTOOLS_OUTPUT_DIR,
     DEFAULT_WORKSPACE_ELFTOOLS_OUTPUT_DIR,
-    DEFAULT_WORKSPACE_SSL_LOG_SECRET,
+    DEFAULT_WORKSPACE_NETTOOLS_OUTPUT_DIR,
     DEFAULT_WORKSPACE_STDOUT,
 )
 from .models import (
@@ -87,7 +87,7 @@ class MCPScriptElfToolsSection(BaseModel):
 class MCPScriptNetToolsSection(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    ssl_log_secret: Path | None = None
+    output_dir: Path | None = None
 
 
 class MCPScriptSection(BaseModel):
@@ -174,7 +174,7 @@ class MCPStartupConfig(BaseModel):
                             update={"output_dir": preserve_workspace_relative_path(self.script.elftools.output_dir)}
                         ),
                         "nettools": self.script.nettools.model_copy(
-                            update={"ssl_log_secret": preserve_workspace_relative_path(self.script.nettools.ssl_log_secret)}
+                            update={"output_dir": preserve_workspace_relative_path(self.script.nettools.output_dir)}
                         ),
                     }
                 ),
@@ -194,7 +194,7 @@ class MCPStartupConfig(BaseModel):
             "stderr": self.agent.stderr or stdout,
             "dextools_output_dir": self.script.dextools.output_dir or DEFAULT_WORKSPACE_DEXTOOLS_OUTPUT_DIR,
             "elftools_output_dir": self.script.elftools.output_dir or DEFAULT_WORKSPACE_ELFTOOLS_OUTPUT_DIR,
-            "ssl_log_secret": self.script.nettools.ssl_log_secret or DEFAULT_WORKSPACE_SSL_LOG_SECRET,
+            "nettools_output_dir": self.script.nettools.output_dir or DEFAULT_WORKSPACE_NETTOOLS_OUTPUT_DIR,
         }
 
     def session_root(self, *, prepared_cache_root: Path) -> Path:
@@ -238,7 +238,7 @@ class MCPStartupConfig(BaseModel):
             script=ServiceScriptConfigSummary(
                 dextools_output_dir=workspace["dextools_output_dir"],
                 elftools_output_dir=workspace["elftools_output_dir"],
-                ssl_log_secret=workspace["ssl_log_secret"],
+                nettools_output_dir=workspace["nettools_output_dir"],
             ),
             quick_path=quick_path,
         )

@@ -1,19 +1,19 @@
-app = ""
-jsfile = "_agent.js"
+app = "" # target package name; required for spawn, and attach can also use it to resolve a pid
+jsfile = "_agent.js" # built agent output path; keep it aligned with npm run build/watch
 
 [server]
-path = "/data/local/tmp/frida-server"
-host = "127.0.0.1:27042"
-# device = ""
-# version = ""
+path = "/data/local/tmp/frida-server" # remote frida-server path on the device
+host = "127.0.0.1:27042" # transport target: adb-forward host:port, usb, or local
+# device = "" # optional device serial pin when multiple devices are connected
+# version = "" # optional frida-server version for doctor fix / server install
 
 [agent]
-datadir = "./data/"
-stdout = "./logs/outerr.log"
-stderr = "./logs/outerr.log"
+datadir = "./data/" # host-side root for dumps, exports, and other artifacts
+stdout = "./logs/outerr.log" # top-level agent stdout log
+stderr = "./logs/outerr.log" # top-level agent stderr log
 
 [script.rpc]
-batch_max_bytes = 8388608
+batch_max_bytes = 8388608 # global RPC batch limit for large binary payloads
 
 [script.repl]
 globals = [
@@ -23,13 +23,13 @@ globals = [
   "Java",
   "ObjC",
   "Swift",
-]
+] # lazy seed handles exposed in --repl
 
 [script.dextools]
-output_dir = "./data/dextools/"
+output_dir = "./data/dextools/" # host-side default output dir for Dex dumps
 
 [script.elftools]
-output_dir = "./data/elftools/"
+output_dir = "./data/elftools/" # host-side default output dir for ELF dumps
 
 [script.nettools]
-ssl_log_secret = "./data/nettools/sslkey/"
+output_dir = "./data/nettools/" # host-side output root for SSL key logs

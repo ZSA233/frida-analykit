@@ -10,3 +10,6 @@ cmodule-includes/
 *.tgz
 dist-apk-check
 dist-release-test
+
+.env
+.tmp

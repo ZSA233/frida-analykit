@@ -1,10 +1,11 @@
-
 import {
     readByteArray,
     binaryReadU8, binaryReadU16,
     binaryReadU32, binaryReadS32,
     binaryReadU64, binaryReadS64,
 } from "../internal/binary/readers.js"
+import { ELF_ABI_LAYOUTS, ELF_IDENT_OFFSETS, DyntabTag, type ElfAbiLayout } from "./internal/abi.js"
+export { DyntabTag } from "./internal/abi.js"
 
 
 
@@ -91,180 +92,121 @@ export type Sym = {
     st_size: number
 }
 
+function createEhdrReaders(layout: ElfAbiLayout) {
+    const fields = layout.ehdr.fields
+    return {
+        E_Type: binaryReadU16(fields.eType),
+        E_Phoff: layout.is32 ? binaryReadU32(fields.ePhoff) : binaryReadU64(fields.ePhoff),
+        E_Shoff: layout.is32 ? binaryReadU32(fields.eShoff) : binaryReadU64(fields.eShoff),
+        E_Phnum: binaryReadU16(fields.ePhnum),
+        E_Shnum: binaryReadU16(fields.eShnum),
+        E_Shstrndx: binaryReadU16(fields.eShstrndx),
+        SIZE: layout.ehdr.size,
+    }
+}
+
+function createPhdrReaders(layout: ElfAbiLayout) {
+    const fields = layout.phdr.fields
+    return {
+        P_Type: binaryReadU32(fields.pType),
+        E_Flags: binaryReadU32(fields.pFlags),
+        P_Offset: layout.is32 ? binaryReadU32(fields.pOffset) : binaryReadU64(fields.pOffset),
+        P_Vaddr: layout.is32 ? binaryReadU32(fields.pVaddr) : binaryReadU64(fields.pVaddr),
+        P_Paddr: layout.is32 ? binaryReadU32(fields.pPaddr) : binaryReadU64(fields.pPaddr),
+        P_Filesz: layout.is32 ? binaryReadU32(fields.pFilesz) : binaryReadU64(fields.pFilesz),
+        P_Memsz: layout.is32 ? binaryReadU32(fields.pMemsz) : binaryReadU64(fields.pMemsz),
+        P_Align: layout.is32 ? binaryReadU32(fields.pAlign) : binaryReadU64(fields.pAlign),
+        SIZE: layout.phdr.size,
+    }
+}
+
+function createShdrReaders(layout: ElfAbiLayout) {
+    const fields = layout.shdr.fields
+    return {
+        Sh_Name: binaryReadU32(fields.shName),
+        Sh_Type: binaryReadU32(fields.shType),
+        Sh_Flags: layout.is32 ? binaryReadU32(fields.shFlags) : binaryReadU64(fields.shFlags),
+        Sh_Addr: layout.is32 ? binaryReadU32(fields.shAddr) : binaryReadU64(fields.shAddr),
+        Sh_Offset: layout.is32 ? binaryReadU32(fields.shOffset) : binaryReadU64(fields.shOffset),
+        Sh_Size: layout.is32 ? binaryReadU32(fields.shSize) : binaryReadU64(fields.shSize),
+        Sh_Link: binaryReadU32(fields.shLink),
+        Sh_Info: binaryReadU32(fields.shInfo),
+        Sh_Addralign: layout.is32 ? binaryReadU32(fields.shAddralign) : binaryReadU64(fields.shAddralign),
+        Sh_Entsize: layout.is32 ? binaryReadU32(fields.shEntsize) : binaryReadU64(fields.shEntsize),
+        SIZE: layout.shdr.size,
+    }
+}
+
+function createDynReaders(layout: ElfAbiLayout) {
+    const fields = layout.dyn.fields
+    return {
+        D_Tag: layout.is32 ? binaryReadU32(fields.dTag) : binaryReadU64(fields.dTag),
+        D_Un: layout.is32 ? binaryReadU32(fields.dUn) : binaryReadU64(fields.dUn),
+        SIZE: layout.dyn.size,
+    }
+}
+
+function createSymReaders(layout: ElfAbiLayout) {
+    const fields = layout.sym.fields
+    return {
+        St_Name: binaryReadU32(fields.stName),
+        St_Info: binaryReadU8(fields.stInfo),
+        St_Other: binaryReadU8(fields.stOther),
+        St_Shndx: binaryReadU16(fields.stShndx),
+        St_Value: layout.is32 ? binaryReadU32(fields.stValue) : binaryReadU64(fields.stValue),
+        St_Size: layout.is32 ? binaryReadU32(fields.stSize) : binaryReadU64(fields.stSize),
+        SIZE: layout.sym.size,
+    }
+}
+
+function createRelaReaders(layout: ElfAbiLayout) {
+    const fields = layout.rela.fields
+    return {
+        R_Offset: layout.is32 ? binaryReadU32(fields.rOffset) : binaryReadU64(fields.rOffset),
+        R_Info: layout.is32 ? binaryReadU32(fields.rInfo) : binaryReadU64(fields.rInfo),
+        R_Addend: layout.is32 ? binaryReadS32(fields.rAddend) : binaryReadS64(fields.rAddend),
+        SIZE: layout.rela.size,
+        INFO_SYM: layout.rela.infoSymShift,
+        INFO_TYPE: layout.rela.infoTypeMask,
+        Reloc: layout.is32 ? binaryReadU32(layout.rela.relocValueOffset) : binaryReadU64(layout.rela.relocValueOffset),
+    }
+}
+
+const ELF_ABI_32 = ELF_ABI_LAYOUTS[1]
+const ELF_ABI_64 = ELF_ABI_LAYOUTS[2]
+
 
 export const Elf_Ehdr = {
-    EI_Magic: readByteArray(0, 4),
-    EI_CLASS: binaryReadU8(4),
-    B64: {
-        E_Type: binaryReadU16(16),
-        E_Phoff: binaryReadU64(32),
-        E_Shoff: binaryReadU64(40),
-        E_Phnum: binaryReadU16(56),
-        E_Shnum: binaryReadU16(60),
-        E_Shstrndx: binaryReadU16(62),
-        SIZE: 64,
-    },
-    B32: {
-        E_Type: binaryReadU16(16),
-        E_Phoff: binaryReadU32(28),
-        E_Shoff: binaryReadU32(32),
-        E_Phnum: binaryReadU16(44),
-        E_Shnum: binaryReadU16(48),
-        E_Shstrndx: binaryReadU16(50),
-        SIZE: 52,
-    },
+    EI_Magic: readByteArray(ELF_IDENT_OFFSETS.magic, 4),
+    EI_CLASS: binaryReadU8(ELF_IDENT_OFFSETS.eiClass),
+    B64: createEhdrReaders(ELF_ABI_64),
+    B32: createEhdrReaders(ELF_ABI_32),
 }
 
 
 export const Elf_Phdr = {
-    B64: {
-        P_Type: binaryReadU32(0),
-        E_Flags: binaryReadU32(4),
-        P_Offset: binaryReadU64(8),
-        P_Vaddr: binaryReadU64(16),
-        P_Paddr: binaryReadU64(24),
-        P_Filesz: binaryReadU64(32),
-        P_Memsz: binaryReadU64(40),
-        P_Align: binaryReadU64(48),
-        SIZE: 56,
-    },
-    B32: {
-        P_Type: binaryReadU32(0),
-        E_Flags: binaryReadU32(4),
-        P_Offset: binaryReadU32(8),
-        P_Vaddr: binaryReadU32(12),
-        P_Paddr: binaryReadU32(16),
-        P_Filesz: binaryReadU32(20),
-        P_Memsz: binaryReadU32(24),
-        P_Align: binaryReadU32(28),
-        SIZE: 32,
-    },
+    B64: createPhdrReaders(ELF_ABI_64),
+    B32: createPhdrReaders(ELF_ABI_32),
 }
 
 
 export const Elf_Shdr = {
-    B64: {
-        Sh_Name: binaryReadU32(0),
-        Sh_Type: binaryReadU32(4),
-        Sh_Flags: binaryReadU64(8),
-        Sh_Addr: binaryReadU64(16),
-        Sh_Offset: binaryReadU64(24),
-        Sh_Size: binaryReadU64(32),
-        Sh_Link: binaryReadU32(40),
-        Sh_Info: binaryReadU32(44),
-        Sh_Addralign: binaryReadU64(48),
-        Sh_Entsize: binaryReadU64(56),
-        SIZE: 64,
-    },
-    B32: {
-        Sh_Name: binaryReadU32(0),
-        Sh_Type: binaryReadU32(4),
-        Sh_Flags: binaryReadU32(8),
-        Sh_Addr: binaryReadU32(12),
-        Sh_Offset: binaryReadU32(16),
-        Sh_Size: binaryReadU32(20),
-        Sh_Link: binaryReadU32(24),
-        Sh_Info: binaryReadU32(28),
-        Sh_Addralign: binaryReadU32(32),
-        Sh_Entsize: binaryReadU32(36),
-        SIZE: 40,
-    },
+    B64: createShdrReaders(ELF_ABI_64),
+    B32: createShdrReaders(ELF_ABI_32),
 }
 
 export const Elf_Dyn = {
-    B64: {
-        D_Tag: binaryReadU64(0),
-        D_Un: binaryReadU64(8),
-        SIZE: 16,
-    },
-    B32: {
-        D_Tag: binaryReadU32(0),
-        D_Un: binaryReadU32(4),
-        SIZE: 8,
-    },
+    B64: createDynReaders(ELF_ABI_64),
+    B32: createDynReaders(ELF_ABI_32),
 }
 
 
 export const Elf_Sym = {
-    B64: {
-        St_Name: binaryReadU32(0),
-        St_Info: binaryReadU8(4),
-        St_Other: binaryReadU8(5),
-        St_Shndx: binaryReadU16(6),
-        St_Value: binaryReadU64(8),
-        St_Size: binaryReadU64(16),
-        SIZE: 24,
-    },
-    B32: {
-        St_Name: binaryReadU32(0),
-        St_Info: binaryReadU8(4),
-        St_Other: binaryReadU8(5),
-        St_Shndx: binaryReadU16(6),
-        St_Value: binaryReadU32(8),
-        St_Size: binaryReadU32(12),
-        SIZE: 16,
-    }
+    B64: createSymReaders(ELF_ABI_64),
+    B32: createSymReaders(ELF_ABI_32),
 }
 
 export const Elf_Rela = {
-    B64: {
-        R_Offset: binaryReadU64(0),
-        R_Info: binaryReadU64(8),
-        R_Addend: binaryReadS64(16),
-        SIZE: 24,
-        INFO_SYM: 32n,
-        INFO_TYPE: 0xffffffffn,
-        Reloc: binaryReadU64(0),
-    },
-    B32: {
-        R_Offset: binaryReadU32(0),
-        R_Info: binaryReadU32(4),
-        R_Addend: binaryReadS32(8),
-        SIZE: 12,
-        INFO_SYM: 16n,
-        INFO_TYPE: 0xffffn,
-        Reloc: binaryReadU32(0),
-    },
-}
-
-
-export enum DyntabTag {
-    DT_NULL = 0,
-    DT_NEEDED = 1,
-    DT_PLTRELSZ = 2,
-    DT_PLTGOT = 3,
-    DT_HASH = 4,
-    DT_STRTAB = 5,
-    DT_SYMTAB = 6,
-    DT_RELA = 7,
-    DT_RELASZ = 8,
-    DT_RELAENT = 9,
-    DT_STRSZ = 10,
-    DT_SYMENT = 11,
-    DT_INIT = 12,
-    DT_FINI = 13,
-    DT_SONAME = 14,
-    DT_RPATH = 15,
-    DT_SYMBOLIC = 16,
-    DT_REL = 17,
-    DT_RELSZ = 18,
-    DT_RELENT = 19,
-    DT_PLTREL = 20,
-    DT_DEBUG = 21,
-    DT_TEXTREL = 22,
-    DT_JMPREL = 23,
-    DT_ENCODING = 32,
-
-    DT_BIND_NOW = 24,
-    DT_INIT_ARRAY = 25,
-    DT_FINI_ARRAY = 26,
-    DT_INIT_ARRAYSZ = 27,
-    DT_FINI_ARRAYSZ = 28,
-    DT_RUNPATH = 29,
-    DT_FLAGS = 30,
-    
-    DT_RELR = 0x6fffe000,
-    DT_RELRSZ = 0x6fffe001,
-    DT_RELRENT = 0x6fffe003,
-    DT_RELRCOUNT = 0x6fffe005,
+    B64: createRelaReaders(ELF_ABI_64),
+    B32: createRelaReaders(ELF_ABI_32),
 }

@@ -1,5 +1,6 @@
 import { setGlobalProperties } from "../../config/index.js"
-import { ElfFileFixer, ElfModuleX } from "../../elf/module.js"
+import { ElfModuleX } from "../../elf/module.js"
+import { ElfFileMetadataPatcher } from "../../elf/internal/file_metadata_patcher.js"
 import { nativeFunctionOptions } from "../../internal/frida/native-function.js"
 
 export class Libart {
@@ -10,7 +11,7 @@ export class Libart {
             const libartModule = Process.findModuleByName("libart.so") || Module.load("libart.so")
             this.$modx = new ElfModuleX(
                 libartModule,
-                [new ElfFileFixer(libartModule.path)],
+                [new ElfFileMetadataPatcher(libartModule.path)],
                 { symbolScanLimit: 50000 },
             )
         }

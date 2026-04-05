@@ -2,7 +2,7 @@ import { CMemoryScanRes } from "../../internal/binary/scan.js"
 import { nativeFunctionOptions } from "../../internal/frida/native-function.js"
 
 
-const CM = new CModule(`
+const SCAN_ADRP_SOURCE = `
 #include <glib.h>
 #include <gum/gummemory.h>
 #include <gum/gumdefs.h>
@@ -85,16 +85,43 @@ gpointer scan(const GumAddress base_address,
     return scan_res->results;
 }
 
-`)
+`
 
 
 export class ScanAdrpCMod {
-    static readonly cm: CModule = CM
+    private static cm: CModule | null = null
+    private static $scanFn: NativeFunction<any, any> | null = null
+    private static $disposeFn: NativeFunction<any, any> | null = null
 
-    static readonly $scan = new NativeFunction(this.cm.scan, 'pointer', ['pointer', 'size_t', 'pointer', 'pointer'], nativeFunctionOptions)
+    private static ensureCompiled(): {
+        cm: CModule
+        scan: NativeFunction<any, any>
+        dispose: NativeFunction<any, any>
+    } {
+        if (this.cm === null) {
+            this.cm = new CModule(SCAN_ADRP_SOURCE)
+        }
+        if (this.$scanFn === null) {
+            this.$scanFn = new NativeFunction(
+                this.cm.scan,
+                "pointer",
+                ["pointer", "size_t", "pointer", "pointer"],
+                nativeFunctionOptions,
+            )
+        }
+        if (this.$disposeFn === null) {
+            this.$disposeFn = new NativeFunction(this.cm._dispose, "void", ["pointer"], nativeFunctionOptions)
+        }
+        return {
+            cm: this.cm,
+            scan: this.$scanFn,
+            dispose: this.$disposeFn,
+        }
+    }
 
     static scan(scanRange: { base: NativePointer, size: number }, pattern: string, targetAddr: NativePointer, alignOffset: number) {
         let matcheResults: NativePointer[] = []
+        const { scan, dispose } = this.ensureCompiled()
         
         const userData = Memory.alloc(8 + 4)
         userData.writePointer(targetAddr)
@@ -102,15 +129,13 @@ export class ScanAdrpCMod {
         
         const scanRes = new CMemoryScanRes(userData)
         const { base, size } = scanRange
-        this.$scan(
+        scan(
             base, size, Memory.allocUtf8String(pattern), scanRes.$handle,
         )
         if (scanRes.data.length > 0) {
             matcheResults = scanRes.data.toArray().map(v => v.readPointer())
         }
-        this.$dispose(scanRes.$handle)
+        dispose(scanRes.$handle)
         return matcheResults
     }
-
-    static readonly $dispose = new NativeFunction(this.cm._dispose, 'void', ['pointer'], nativeFunctionOptions)
 }

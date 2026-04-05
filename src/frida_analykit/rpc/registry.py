@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import time
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, TextIO
@@ -9,6 +11,7 @@ import colorama
 
 from ..config import AppConfig
 from ..utils import ensure_filepath
+from .handler.output_paths import resolve_configured_output_root, resolve_output_leaf
 from .handler.dex import DexDumpHandler
 from .handler.elf import ElfHandler
 from .message import RPCBatchSource, RPCMsgBatch, RPCMsgProgressing, RPCMsgSSLSecret, RPCMsgType, RPCPayload, unpack_batch_payload
@@ -17,6 +20,16 @@ from .message import RPCBatchSource, RPCMsgBatch, RPCMsgProgressing, RPCMsgSSLSe
 MessageHandler = Callable[[RPCPayload], None]
 ExceptionHandler = Callable[[dict, bytes | None], None]
 HostLogHandler = Callable[[str, str], None]
+
+
+@dataclass(slots=True)
+class SSLSecretOutputState:
+    directory: Path
+    logger: TextIO
+    tag: str
+    effective_tag: str
+    actual_relative_dir: str
+    configured_output_root: str
 
 
 class HandlerRegistry:
@@ -34,7 +47,7 @@ class HandlerRegistry:
         self._message_handlers: dict[str, MessageHandler] = {}
         self._batch_handlers: dict[str, MessageHandler] = {}
         self._exception_handler: ExceptionHandler = self._default_exception_handler
-        self._ssl_secret_loggers: dict[str, TextIO] = {}
+        self._ssl_secret_outputs: dict[str, SSLSecretOutputState] = {}
         self._dex_handler = DexDumpHandler(config, emit_info=self._emit_info, emit_error=self._emit_error)
         self._elf_handler = ElfHandler(config, emit_info=self._emit_info, emit_error=self._emit_error)
         self._register_defaults()
@@ -88,11 +101,11 @@ class HandlerRegistry:
         self.on_message(RPCMsgType.DUMP_DEX_FILE, self._dex_handler.handle_file)
         self.on_message(RPCMsgType.DEX_DUMP_END, self._dex_handler.handle_end)
         self.on_batch(RPCBatchSource.DEX_DUMP_FILES, self._dex_handler.handle_batch)
-        self.on_message(RPCMsgType.ELF_SNAPSHOT_BEGIN, self._elf_handler.handle_snapshot_begin)
-        self.on_message(RPCMsgType.ELF_SNAPSHOT_CHUNK, self._elf_handler.handle_snapshot_chunk)
-        self.on_message(RPCMsgType.ELF_SNAPSHOT_END, self._elf_handler.handle_snapshot_end)
+        self.on_message(RPCMsgType.ELF_MODULE_DUMP_BEGIN, self._elf_handler.handle_dump_begin)
+        self.on_message(RPCMsgType.ELF_MODULE_DUMP_CHUNK, self._elf_handler.handle_dump_chunk)
+        self.on_message(RPCMsgType.ELF_MODULE_DUMP_END, self._elf_handler.handle_dump_end)
         self.on_message(RPCMsgType.ELF_SYMBOL_CALL_LOG, self._elf_handler.handle_symbol_log)
-        self.on_batch(RPCBatchSource.ELF_SNAPSHOT_CHUNKS, self._elf_handler.handle_snapshot_batch)
+        self.on_batch(RPCBatchSource.ELF_MODULE_DUMP_CHUNKS, self._elf_handler.handle_dump_batch)
 
     def _default_exception_handler(self, message: dict, data: bytes | None) -> None:
         del data
@@ -151,21 +164,56 @@ class HandlerRegistry:
         intro = data.extra.get("intro", ",".join(data.extra.keys()))
         self._emit_info(f"[~] | {data.tag} | {data.step} => {intro}")
 
-    def _ssl_secret_logger(self, tag: str) -> TextIO:
-        safe_tag = Path(tag or "sslkey.log").name
-        if safe_tag not in self._ssl_secret_loggers:
-            base_dir = self._config.script.nettools.ssl_log_secret
-            if base_dir is None:
-                raise RuntimeError("script.nettools.ssl_log_secret is required for SSL_SECRET handling")
-            path = ensure_filepath(base_dir / safe_tag)
-            self._ssl_secret_loggers[safe_tag] = open(path, "a", buffering=1, encoding="utf-8")
-        return self._ssl_secret_loggers[safe_tag]
+    def _ssl_secret_output(self, tag: str) -> SSLSecretOutputState:
+        root = resolve_configured_output_root(
+            configured_root=self._config.script.nettools.output_dir,
+            agent_datadir=self._config.agent.datadir,
+            fallback_child="nettools",
+            missing_message="script.nettools.output_dir or agent.datadir is required for SSL_SECRET handling",
+        )
+        output_leaf = resolve_output_leaf(root, tag)
+        key = output_leaf.relative_dir or "__root__"
+        if key not in self._ssl_secret_outputs:
+            output_leaf.directory.mkdir(parents=True, exist_ok=True)
+            log_path = output_leaf.directory / "sslkey.log"
+            logger = open(log_path, "a", buffering=1, encoding="utf-8")
+            state = SSLSecretOutputState(
+                directory=output_leaf.directory,
+                logger=logger,
+                tag=output_leaf.tag,
+                effective_tag=output_leaf.effective_tag,
+                actual_relative_dir=output_leaf.relative_dir,
+                configured_output_root=str(output_leaf.root),
+            )
+            self._write_ssl_secret_manifest(state)
+            self._ssl_secret_outputs[key] = state
+        return self._ssl_secret_outputs[key]
+
+    @staticmethod
+    def _write_ssl_secret_manifest(state: SSLSecretOutputState) -> None:
+        manifest_path = state.directory / "manifest.json"
+        manifest_path.write_text(
+            json.dumps(
+                {
+                    "created_at_ms": int(time.time() * 1000),
+                    "mode": "rpc",
+                    "tag": state.tag,
+                    "effective_tag": state.effective_tag,
+                    "configured_output_root": state.configured_output_root,
+                    "actual_relative_dir": state.actual_relative_dir,
+                    "output_name": "sslkey.log",
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
 
     def _handle_ssl_secret(self, payload: RPCPayload) -> None:
         data = payload.message.data
         assert isinstance(data, RPCMsgSSLSecret)
-        logger = self._ssl_secret_logger(data.tag)
-        print(f"{data.label} {data.client_random} {data.secret}", file=logger)
+        output = self._ssl_secret_output(data.tag)
+        print(f"{data.label} {data.client_random} {data.secret}", file=output.logger)
 
     def _emit(self, level: str, text: str, stream: TextIO) -> None:
         print(text, file=stream)

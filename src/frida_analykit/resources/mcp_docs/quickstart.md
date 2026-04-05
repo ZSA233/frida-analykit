@@ -97,17 +97,17 @@ Java.performNow(() => Java.use("android.app.ActivityThread").currentPackageName(
 Use `template="ssl_probe"` for libssl or BoringSSL-oriented validation.
 
 ```js
-SSLTools.attachLibsslKeylogFunc("sslkey.log")
+SSLTools.attachLibsslKeylogFunc("manual")
 BoringSSL.loadFromModule(Process.getModuleByName("libsscronet.so")).scanKeylogFunc()
 ```
 
-### ELF snapshot and symbol work
+### ELF dump and symbol work
 
 Use `template="elf_probe"` for module-level ELF inspection.
 
 ```js
 ElfTools.findModuleByName("libc.so")?.name
-ElfTools.snapshot("libc.so", { tag: "manual" })
+ElfTools.dumpModule("libc.so", { tag: "manual" })
 ```
 
 ### Native bindings

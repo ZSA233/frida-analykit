@@ -1,5 +1,6 @@
 import { setGlobalProperties } from "../../config/index.js"
-import { ElfFileFixer, ElfModuleX } from "../../elf/module.js"
+import { ElfModuleX } from "../../elf/module.js"
+import { ElfFileMetadataPatcher } from "../../elf/internal/file_metadata_patcher.js"
 import { nativeFunctionOptions } from "../../internal/frida/native-function.js"
 
 export class Libssl {
@@ -14,7 +15,7 @@ export class Libssl {
             }
             this.$modx = new ElfModuleX(
                 libsslModule,
-                [new ElfFileFixer(libsslModule.path)],
+                [new ElfFileMetadataPatcher(libsslModule.path)],
                 { symbolScanLimit: 50000 },
             )
         }

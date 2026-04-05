@@ -676,7 +676,7 @@ class PreparedWorkspaceManager:
             stderr=str(workspace_defaults["stderr"]),
             dextools_output_dir=str(workspace_defaults["dextools_output_dir"]),
             elftools_output_dir=str(workspace_defaults["elftools_output_dir"]),
-            ssl_log_secret=str(workspace_defaults["ssl_log_secret"]),
+            nettools_output_dir=str(workspace_defaults["nettools_output_dir"]),
             agent_package_spec=package_spec,
         )
         workspace_root = self._cache_root / signature
@@ -713,7 +713,7 @@ class PreparedWorkspaceManager:
                 stderr=workspace_defaults["stderr"],
                 dextools_output_dir=workspace_defaults["dextools_output_dir"],
                 elftools_output_dir=workspace_defaults["elftools_output_dir"],
-                ssl_log_secret=workspace_defaults["ssl_log_secret"],
+                nettools_output_dir=workspace_defaults["nettools_output_dir"],
             )
         except PreparedWorkspaceError:
             raise
@@ -1004,7 +1004,7 @@ def _signature_for_request(
     stderr: str,
     dextools_output_dir: str,
     elftools_output_dir: str,
-    ssl_log_secret: str,
+    nettools_output_dir: str,
     agent_package_spec: str,
 ) -> str:
     payload = {
@@ -1024,7 +1024,7 @@ def _signature_for_request(
         "stderr": stderr,
         "dextools_output_dir": dextools_output_dir,
         "elftools_output_dir": elftools_output_dir,
-        "ssl_log_secret": ssl_log_secret,
+        "nettools_output_dir": nettools_output_dir,
         "agent_package_spec": agent_package_spec,
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -1043,7 +1043,7 @@ def _artifact_config_from_app_config(config: AppConfig) -> PreparedArtifactConfi
         stderr=config.agent.stderr,
         dextools_output_dir=config.script.dextools.output_dir,
         elftools_output_dir=config.script.elftools.output_dir,
-        ssl_log_secret=config.script.nettools.ssl_log_secret,
+        nettools_output_dir=config.script.nettools.output_dir,
     )
 
 

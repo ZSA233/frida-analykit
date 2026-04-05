@@ -7,6 +7,7 @@ import { BatchSender } from "../internal/rpc/batch_sender.js"
 import { batchSendSource, RPCMsgType, saveFileSource } from "../internal/rpc/messages.js"
 import { JNIEnv } from "../jni/index.js"
 import { Libart } from "../native/libart/libart.js"
+import { libc } from "../native/libc/libc.js"
 import { DexFileStructOf } from "./struct.js"
 import type { ClassLoaderDexFiles, DexDumpFileInfo, DexDumpOptions, DexDumpSummary, DexRuntimeFileInfo } from "./types.js"
 
@@ -123,6 +124,29 @@ function normalizeDexName(javaName: string, dex: DexFileView, count: number): st
     return javaName
 }
 
+function sanitizePathSegment(value: string): string {
+    const normalized = value.replace(/[\\/]+/g, "_").replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "")
+    return normalized.length > 0 ? normalized : "default"
+}
+
+function relativeDumpDir(tag: string): string {
+    return tag.length > 0 ? sanitizePathSegment(tag) : ""
+}
+
+function localDumpDir(root: string, relativeDir: string): string {
+    return relativeDir.length > 0 ? help.fs.joinPath(root, relativeDir) : root
+}
+
+function ensureDirectory(path: string): void {
+    const isAbsolute = path.startsWith("/")
+    const segments = path.split("/").filter((item) => item.length > 0)
+    let current = isAbsolute ? "/" : ""
+    for (const segment of segments) {
+        current = current === "/" ? `/${segment}` : (current ? help.fs.joinPath(current, segment) : segment)
+        libc.mkdir(current, 0o755)
+    }
+}
+
 export class DexTools {
     static enumerateClassLoaderDexFiles(): ClassLoaderDexFiles[] {
         if (!Java.available) {
@@ -233,7 +257,10 @@ export class DexTools {
         const tag = options.tag
         const transferId = createTransferId()
         const mode: DexDumpSummary["mode"] = Config.OnRPC ? "rpc" : "file"
-        const localOutputDir = options.dumpDir || help.runtime.getOutputDir()
+        const localOutputRoot = options.dumpDir || help.runtime.getOutputDir()
+        const dumpRelativeDir = relativeDumpDir(tag)
+        const localOutputDir = localDumpDir(localOutputRoot, dumpRelativeDir)
+        const createdAtMs = Date.now()
 
         options.log(`[DexTools] dumping ${files.length} dex files (${totalBytes} bytes)`)
         if (Config.OnRPC) {
@@ -288,18 +315,52 @@ export class DexTools {
                 },
             })
         } else {
+            ensureDirectory(localOutputDir)
+            const writtenFiles: Array<Record<string, string | number>> = []
+            let receivedCount = 0
+            let receivedBytes = 0
             for (const dex of files) {
                 const payload = dex.base.readByteArray(dex.size)
                 if (payload === null) {
                     help.$warn(`[DexTools] failed to read dex bytes for ${dex.name}`)
                     continue
                 }
-                const relativeOutput = tag.length > 0
-                    ? help.fs.joinPath(tag, dex.output_name)
-                    : dex.output_name
-                const outputPath = help.fs.joinPath(localOutputDir, relativeOutput)
+                const outputPath = help.fs.joinPath(localOutputDir, dex.output_name)
                 help.fs.save(outputPath, payload, "wb", saveFileSource.dexFile)
+                writtenFiles.push({
+                    name: dex.name,
+                    base: String(dex.base),
+                    size: dex.size,
+                    loader: String(dex.loader_handle),
+                    loader_class: dex.loader_class,
+                    output_name: dex.output_name,
+                })
+                receivedCount++
+                receivedBytes += payload.byteLength
             }
+            help.fs.write(
+                help.fs.joinPath(localOutputDir, "manifest.json"),
+                JSON.stringify(
+                    {
+                        transfer_id: transferId,
+                        created_at_ms: createdAtMs,
+                        mode,
+                        tag,
+                        effective_tag: dumpRelativeDir,
+                        requested_dump_dir: options.dumpDir || null,
+                        configured_output_root: localOutputRoot,
+                        actual_relative_dir: dumpRelativeDir,
+                        expected_count: files.length,
+                        received_count: receivedCount,
+                        total_bytes: totalBytes,
+                        received_bytes: receivedBytes,
+                        max_batch_bytes: options.maxBatchBytes ?? Config.BatchMaxBytes,
+                        files: writtenFiles,
+                    },
+                    null,
+                    2,
+                ),
+            )
         }
 
         return {
@@ -308,7 +369,8 @@ export class DexTools {
             dexCount: files.length,
             totalBytes,
             mode,
-            dumpDir: Config.OnRPC ? (options.dumpDir || undefined) : localOutputDir,
+            dumpDir: Config.OnRPC ? undefined : localOutputDir,
+            relativeDumpDir: dumpRelativeDir,
         }
     }
 }

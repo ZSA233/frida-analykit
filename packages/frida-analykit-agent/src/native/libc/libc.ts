@@ -11,6 +11,8 @@ function mustType<T>(val: T | null | undefined): T {
 const PROP_VALUE_MAX = 92
 
 export class Libc {
+    private static $libcModule: Module | null = null
+
     constructor() {
         return new Proxy(this, {
             get(target: any, prop: string) {
@@ -25,7 +27,12 @@ export class Libc {
         })
     }
 
-    static readonly $libc = Process.findModuleByName("libc.so") || Module.load("libc.so")
+    static $getModule(): Module {
+        if (this.$libcModule === null) {
+            this.$libcModule = Process.findModuleByName("libc.so") || Module.load("libc.so")
+        }
+        return this.$libcModule
+    }
 
     $lazyLoadFunc<RetType extends NativeFunctionReturnType, ArgTypes extends NativeFunctionArgumentType[] | []>(
         symName: string,
@@ -58,7 +65,7 @@ export class Libc {
         retType: RetType,
         argTypes: ArgTypes,
     ): NativeFunction<GetNativeFunctionReturnValue<RetType>, ResolveVariadic<Extract<GetNativeFunctionArgumentValue<ArgTypes>, unknown[]>>> & { $handle: NativePointer | undefined } {
-        const handle = mustType(Libc.$libc.findExportByName(symName))
+        const handle = mustType(Libc.$getModule().findExportByName(symName))
         const fn: any = new NativeFunction(handle, retType, argTypes, nativeFunctionOptions)
         fn.$handle = handle
         return fn
@@ -80,6 +87,11 @@ export class Libc {
     readonly $fopen = this.$lazyLoadFunc("fopen", "pointer", ["pointer", "pointer"])
     fopen(pathname: string, mode: string): NativePointer {
         return this.$fopen(Memory.allocUtf8String(pathname), Memory.allocUtf8String(mode))
+    }
+
+    readonly $mkdir = this.$lazyLoadFunc("mkdir", "int", ["pointer", "int"])
+    mkdir(pathname: string, mode: number): number {
+        return this.$mkdir(Memory.allocUtf8String(pathname), mode)
     }
 
     readonly fclose = this.$lazyLoadFunc("fclose", "int", ["pointer"])

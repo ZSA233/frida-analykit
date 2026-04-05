@@ -705,7 +705,7 @@ def test_session_open_quick_reuses_cached_workspace_and_exposes_prepared_resourc
                     "stdout": str(tmp_path / "logs" / "outerr.log"),
                 },
                 "script": {
-                    "nettools": {"ssl_log_secret": str(tmp_path / "ssl")},
+                    "nettools": {"output_dir": str(tmp_path / "ssl")},
                 },
             }
         )
@@ -754,7 +754,7 @@ def test_session_open_quick_reuses_cached_workspace_and_exposes_prepared_resourc
         assert inspect.config.host == "local"
         assert inspect.config.path == "/data/local/tmp/frida-server"
         assert inspect.config.stdout == (tmp_path / "logs" / "outerr.log").resolve()
-        assert inspect.config.ssl_log_secret == (tmp_path / "ssl").resolve()
+        assert inspect.config.nettools_output_dir == (tmp_path / "ssl").resolve()
         assert pruned.deleted_signatures == []
         assert pruned.skipped_active_signatures == [first.prepared_signature]
         assert '"service_instance_id"' in service_config_resource

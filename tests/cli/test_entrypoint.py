@@ -42,9 +42,11 @@ def test_gen_dev_creates_v2_workspace(tmp_path: Path) -> None:
     assert package["devDependencies"]["typescript"] == "^5.8.3"
     assert not (tmp_path / ".npmrc").exists()
     assert (tmp_path / "README.md").exists()
-    assert "frida-analykit build --config config.toml" in (tmp_path / "README.md").read_text(encoding="utf-8")
+    assert (tmp_path / "README_EN.md").exists()
+    assert "`config.toml` 配置说明" in (tmp_path / "README.md").read_text(encoding="utf-8")
+    assert "`config.toml` Configuration Guide" in (tmp_path / "README_EN.md").read_text(encoding="utf-8")
     assert "/helper" in (tmp_path / "index.ts").read_text(encoding="utf-8")
-    assert "only bundles what your script uses" in (tmp_path / "README.md").read_text(encoding="utf-8")
+    assert "只会打包你实际用到的部分" in (tmp_path / "README.md").read_text(encoding="utf-8")
     generated_config = AppConfig.from_file(tmp_path / "config.toml")
     assert generated_config.script.repl.globals == list(DEFAULT_SCRIPT_REPL_GLOBALS)
     assert generated_config.server.path == "/data/local/tmp/frida-server"

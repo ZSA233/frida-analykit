@@ -3,9 +3,10 @@ export { ElfSymbolHooks } from "./symbol_hooks.js"
 export type {
     ElfModuleTarget,
     ElfResolvedSymbol,
-    ElfSnapshotArtifact,
-    ElfSnapshotOptions,
-    ElfSnapshotSummary,
+    ElfModuleDumpArtifact,
+    ElfModuleDumpArtifactKind,
+    ElfModuleDumpOptions,
+    ElfModuleDumpSummary,
     ElfSymbolHookOptions,
     ElfSymbolHookResult,
     ElfSymbolHooksOptions,

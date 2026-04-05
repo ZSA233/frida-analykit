@@ -14,7 +14,7 @@ DEFAULT_WORKSPACE_DATADIR = "./data/"
 DEFAULT_WORKSPACE_STDOUT = "./logs/outerr.log"
 DEFAULT_WORKSPACE_DEXTOOLS_OUTPUT_DIR = "./data/dextools/"
 DEFAULT_WORKSPACE_ELFTOOLS_OUTPUT_DIR = "./data/elftools/"
-DEFAULT_WORKSPACE_SSL_LOG_SECRET = "./data/nettools/sslkey/"
+DEFAULT_WORKSPACE_NETTOOLS_OUTPUT_DIR = "./data/nettools/"
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,7 +102,7 @@ def write_workspace_config(
     stderr: str | Path | None = None,
     dextools_output_dir: str | Path = DEFAULT_WORKSPACE_DEXTOOLS_OUTPUT_DIR,
     elftools_output_dir: str | Path = DEFAULT_WORKSPACE_ELFTOOLS_OUTPUT_DIR,
-    ssl_log_secret: str | Path = DEFAULT_WORKSPACE_SSL_LOG_SECRET,
+    nettools_output_dir: str | Path = DEFAULT_WORKSPACE_NETTOOLS_OUTPUT_DIR,
 ) -> AppConfig:
     def render_path(value: str | Path) -> str:
         if isinstance(value, Path):
@@ -129,7 +129,7 @@ def write_workspace_config(
             "script": {
                 "dextools": {"output_dir": render_path(dextools_output_dir)},
                 "elftools": {"output_dir": render_path(elftools_output_dir)},
-                "nettools": {"ssl_log_secret": render_path(ssl_log_secret)},
+                "nettools": {"output_dir": render_path(nettools_output_dir)},
             },
         }
     )

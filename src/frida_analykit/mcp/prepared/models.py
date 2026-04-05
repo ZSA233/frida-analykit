@@ -80,7 +80,7 @@ class PreparedArtifactConfig(BaseModel):
     stderr: Path | None = None
     dextools_output_dir: Path | None = None
     elftools_output_dir: Path | None = None
-    ssl_log_secret: Path | None = None
+    nettools_output_dir: Path | None = None
 
 
 class PreparedArtifactManifest(BaseModel):

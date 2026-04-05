@@ -35,7 +35,7 @@ npx frida-compile index.ts -o _agent.js -c
 | `bridges` | `@zsa233/frida-analykit-agent/bridges` | Access Java / ObjC / Swift bridge wrappers | No |
 | `jni` | `@zsa233/frida-analykit-agent/jni` | Use `JNIEnv`, JNI wrappers, and explicit-signature calls | No |
 | `ssl` | `@zsa233/frida-analykit-agent/ssl` | Use `SSLTools`, BoringSSL locating, and keylog helpers | No |
-| `elf` | `@zsa233/frida-analykit-agent/elf` | Parse ELF files, create `ElfSymbolHooks`, and stream snapshots | No |
+| `elf` | `@zsa233/frida-analykit-agent/elf` | Parse ELF files, create `ElfSymbolHooks`, and stream raw/fixed dumps plus `fixups.json` | No |
 | `elf/enhanced` | `@zsa233/frida-analykit-agent/elf/enhanced` | Manually import common symbol-hook presets without bloating the core bundle | No |
 | `dex` | `@zsa233/frida-analykit-agent/dex` | Enumerate class-loader dex files and dump them to Python in streaming mode | No |
 | `native/libart` | `@zsa233/frida-analykit-agent/native/libart` | Access low-level ART symbol bindings | No |
@@ -121,16 +121,20 @@ setImmediate(() => {
   const hooks = ElfTools.createSymbolHooks("libc.so", { logTag: "demo", observeDlsym: false })
   const enhanced = castElfSymbolHooks(hooks)
   enhanced.getpid()
-  const summary = ElfTools.snapshot("libc.so", { tag: "manual" })
-  console.log("snapshot =", summary.snapshotId, summary.moduleName)
+  const summary = ElfTools.dumpModule("libc.so", { tag: "manual" })
+  console.log("dump =", summary.dumpId, summary.moduleName, summary.relativeDumpDir)
 })
 ```
 
-- `/elf` now provides `ElfTools.createSymbolHooks(...)`, `ElfTools.snapshot(...)`, and the existing module-resolution APIs.
+- `/elf` now provides `ElfTools.createSymbolHooks(...)`, `ElfTools.dumpModule(...)`, and the existing module-resolution APIs.
 - `ElfSymbolHooks` is a module-level symbol-hook state object with lazy symbol registry support, `dlsym` coordination, and explicit-signature `attach(...)`.
 - `/elf/enhanced` only adds common presets when you import it manually; it does not auto-register into `globalThis` or the core bundle.
-- `snapshot()` sends `ELF_SNAPSHOT_BEGIN -> BATCH(ELF_SNAPSHOT_CHUNKS) -> ELF_SNAPSHOT_END`.
-- Python writes ELF outputs to `script.elftools.output_dir` first, then falls back to `agent.datadir/elftools`, using `snapshots/<tag-or-id>/` and `logs/<tag>.log`.
+- `dumpModule()` sends `ELF_MODULE_DUMP_BEGIN -> BATCH(ELF_MODULE_DUMP_CHUNKS) -> ELF_MODULE_DUMP_END`.
+- Python writes ELF outputs to `script.elftools.output_dir` first, then falls back to `agent.datadir/elftools`, using `<output-root>/<tag?>/`; symbol call logs go to `symbols.log` in the same leaf directory.
+- In RPC mode, `outputDir` and `relative_dump_dir` are still forwarded, but the host only records them in `manifest.json`; the actual directory is still chosen from `script.elftools.output_dir` plus a single-level `tag`.
+- Each dump now exports `*.raw.so`, `*.fixed.so`, `fixups.json`, `symbols.json`, `proc_maps.txt`, and `manifest.json` by default.
+- `fixups.json` records the stage-owned patches needed to replay `raw` into `fixed`; each stage is emitted by the real repair step, which makes replay possible and patch ownership easier to inspect.
+- For the `fixups.json` field legend, stage semantics, and replay rules, see [docs/elf-fixups.md](https://github.com/ZSA233/frida-analykit/blob/stable/docs/elf-fixups.md).
 
 ### DexTools
 
@@ -151,6 +155,8 @@ setImmediate(() => {
 - `dumpAllDex()` sends `DEX_DUMP_BEGIN -> BATCH(DEX_DUMP_FILES) -> DEX_DUMP_END`.
 - The default max batch size comes from Python config `script.rpc.batch_max_bytes`, and on the agent side this maps to `Config.BatchMaxBytes`.
 - A single oversized dex is still sent as its own batch without further slicing, and Python writes to `script.dextools.output_dir` first, then falls back to `agent.datadir/dextools`.
+- In RPC mode, `dumpDir` is still forwarded, but the host only records it in `manifest.json`; the actual directory is still chosen from `script.dextools.output_dir` plus a single-level `tag`.
+- Python writes one `manifest.json` for each dex dump and stores the exported dex file list in its `files` field; the old `classes.json` file is no longer kept.
 
 ### JNI / Native Bindings
 

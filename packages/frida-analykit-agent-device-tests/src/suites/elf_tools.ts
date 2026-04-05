@@ -46,16 +46,24 @@ export function runElfToolsSuite(): AgentUnitSuiteResult {
             },
         },
         {
-            name: "snapshot_streams_to_python_session_dir",
+            name: "dump_streams_to_python_session_dir",
             run: () => {
-                const tag = `elf-tools-snapshot-${Process.id}-${Date.now().toString(16)}`;
-                const summary = ElfTools.snapshot("libc.so", { tag });
-                assertCondition(summary.mode === "rpc", `expected rpc snapshot mode, got ${summary.mode}`);
-                assertCondition(summary.snapshotId.length > 0, "expected snapshot id");
+                const tag = `elf-tools-dump-${Process.id}-${Date.now().toString(16)}`;
+                const summary = ElfTools.dumpModule("libc.so", { tag });
+                const artifactKinds = summary.artifacts.map((item) => item.kind);
+                const artifactKindStrings = artifactKinds as string[];
+                assertCondition(summary.mode === "rpc", `expected rpc dump mode, got ${summary.mode}`);
+                assertCondition(summary.dumpId.length > 0, "expected dump id");
                 assertCondition(summary.totalBytes > 0, `expected positive total bytes, got ${summary.totalBytes}`);
+                assertCondition(summary.relativeDumpDir.length > 0, "expected relative dump dir");
+                assertCondition(summary.artifacts.length === 6, `expected 6 dump artifacts, got ${summary.artifacts.length}`);
+                assertCondition(artifactKinds.includes("fixups"), "expected fixups artifact");
+                assertCondition(!artifactKindStrings.includes("rebuilt"), "rebuilt artifact should not be exposed");
                 return JSON.stringify({
                     tag,
-                    snapshotId: summary.snapshotId,
+                    dumpId: summary.dumpId,
+                    relativeDumpDir: summary.relativeDumpDir,
+                    artifacts: summary.artifacts,
                     moduleName: summary.moduleName,
                     totalBytes: summary.totalBytes,
                 });
