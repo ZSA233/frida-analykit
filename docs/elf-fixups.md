@@ -94,8 +94,20 @@
 
 作用：
 
-- 修正 `.dynsym` 中的 `st_value`
-- 在需要时修正 `st_info`
+- 参考 `fix.cpp` 的覆盖面，对 `.dynsym` 做保守修正
+- 只对明确落在 dumped image 内的 `STT_NOTYPE` 条目推断 `st_info`
+- 只对明确带地址语义的条目回调 `st_value`
+
+这里的设计不是“把所有高 type 都改成 `FUNC/OBJECT`”，也不是“对所有正数 `st_value` 一律减 `load_bias`”。
+
+当前会刻意保留：
+
+- `TLS`
+- `IFUNC`
+- `COMMON`
+- `FILE`
+- OS / processor specific symbol type
+- `SHN_UNDEF` / `SHN_ABS` 或明显不在 dumped image 内的值
 
 ### `relocation-fixups`
 

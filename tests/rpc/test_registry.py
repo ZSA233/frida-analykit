@@ -2,6 +2,8 @@ import io
 import json
 from pathlib import Path
 
+import pytest
+
 from frida_analykit.config import AppConfig
 from frida_analykit.rpc.message import (
     RPCMessage,
@@ -182,6 +184,43 @@ def test_registry_writes_ssl_secrets_into_tagged_nettools_leaf(tmp_path: Path) -
     assert manifest["actual_relative_dir"] == "demo"
     assert manifest["configured_output_root"] == str((tmp_path / "ssl").resolve())
     assert manifest["output_name"] == "sslkey.log"
+
+
+@pytest.mark.parametrize(
+    ("tag", "effective_tag"),
+    [
+        ("..", "default"),
+        ("测试", "default"),
+        ("alpha/beta", "alpha_beta"),
+    ],
+)
+def test_registry_normalizes_ssl_secret_tags_into_single_leaf(
+    tmp_path: Path,
+    tag: str,
+    effective_tag: str,
+) -> None:
+    registry = HandlerRegistry(_config(tmp_path), io.StringIO(), io.StringIO())
+
+    registry.handle(
+        RPCPayload(
+            message=RPCMessage(
+                type=RPCMsgType.SSL_SECRET,
+                data=RPCMsgSSLSecret(
+                    tag=tag,
+                    label="CLIENT_RANDOM",
+                    client_random="abcd",
+                    secret="1234",
+                ),
+            )
+        )
+    )
+
+    target_dir = tmp_path / "ssl" / effective_tag
+    assert (target_dir / "sslkey.log").read_text(encoding="utf-8").strip() == "CLIENT_RANDOM abcd 1234"
+    manifest = json.loads((target_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["tag"] == tag
+    assert manifest["effective_tag"] == effective_tag
+    assert manifest["actual_relative_dir"] == effective_tag
 
 
 def test_resolver_dispatches_send_and_error_messages() -> None:

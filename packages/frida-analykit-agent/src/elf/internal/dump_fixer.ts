@@ -29,9 +29,20 @@ import {
     SHT_REL,
     SHT_RELA,
     SHT_STRTAB,
+    SHN_ABS,
+    SHN_UNDEF,
+    STT_COMMON,
     STT_FILE,
     STT_FUNC,
+    STT_GNU_IFUNC,
+    STT_HIOS,
+    STT_HIPROC,
+    STT_LOOS,
+    STT_LOPROC,
     STT_OBJECT,
+    STT_NOTYPE,
+    STT_SECTION,
+    STT_TLS,
     elfMachineForProcessArch,
     getElfAbiLayout,
     type ElfAbiLayout,
@@ -375,6 +386,18 @@ function detectDynSymCount(view: DataView, layout: ElfLayout, dynsymBase: number
     return symCount
 }
 
+function isWithinDumpedImage(value: number, loadBias: number, imageSize: number): boolean {
+    return value >= loadBias && value < loadBias + imageSize
+}
+
+function isOsOrProcessorSpecificSymbolType(type: number): boolean {
+    return (type >= STT_LOOS && type <= STT_HIOS) || (type >= STT_LOPROC && type <= STT_HIPROC)
+}
+
+function isAddressBearingSymbolType(type: number): boolean {
+    return type === STT_OBJECT || type === STT_FUNC || type === STT_SECTION
+}
+
 function fixSymbolTypes(
     recorder: ElfDumpFixRecorder,
     view: DataView,
@@ -383,26 +406,33 @@ function fixSymbolTypes(
     phdrs: ProgramHeader[],
     dynsymBase: number,
     dynsymCount: number,
+    loadBias: number,
+    imageSize: number,
 ): void {
     for (let index = 0; index < dynsymCount; index++) {
         const symOffset = dynsymBase + index * layout.symSize
         const infoOffset = symOffset + layout.sym.stInfo
         const info = view.getUint8(infoOffset)
         const type = info & 0x0f
-        if (type <= STT_FILE) {
+        if (type !== STT_NOTYPE) {
             continue
         }
 
         const symValue = layout.readAddr(view, symOffset + layout.sym.stValue)
+        const sectionIndex = view.getUint16(symOffset + layout.sym.stShndx, true)
+        if (
+            symValue === 0
+            || sectionIndex === SHN_UNDEF
+            || sectionIndex === SHN_ABS
+            || !isWithinDumpedImage(symValue, loadBias, imageSize)
+        ) {
+            continue
+        }
         const bindBits = info & 0xf0
         let newType = STT_OBJECT
-        if (symValue === 0) {
+        const flags = getMemFlags(phdrs, symValue)
+        if ((flags & PF_X) !== 0) {
             newType = STT_FUNC
-        } else {
-            const flags = getMemFlags(phdrs, symValue)
-            if ((flags & PF_X) !== 0) {
-                newType = STT_FUNC
-            }
         }
         const before = sliceBytes(fixed.buffer, infoOffset, 1)
         view.setUint8(infoOffset, bindBits | newType)
@@ -418,16 +448,33 @@ function fixDynSymBias(
     dynsymBase: number,
     dynsymCount: number,
     bias: number,
+    imageSize: number,
 ): void {
     for (let index = 0; index < dynsymCount; index++) {
         const symOffset = dynsymBase + index * layout.symSize
+        const info = view.getUint8(symOffset + layout.sym.stInfo)
+        const type = info & 0x0f
+        const sectionIndex = view.getUint16(symOffset + layout.sym.stShndx, true)
         const valueOffset = symOffset + layout.sym.stValue
         const currentValue = layout.readAddr(view, valueOffset)
-        if (currentValue > 0) {
-            const before = sliceBytes(fixed.buffer, valueOffset, layout.pointerSize)
-            layout.writeAddr(view, valueOffset, currentValue - bias)
-            recorder.recordSlotPatch("dynsym.st_value", layout.pointerSize, valueOffset, before, sliceBytes(fixed.buffer, valueOffset, layout.pointerSize))
+        if (
+            sectionIndex === SHN_UNDEF
+            || sectionIndex === SHN_ABS
+            || currentValue === 0
+            || !isWithinDumpedImage(currentValue, bias, imageSize)
+            || type === STT_TLS
+            || type === STT_GNU_IFUNC
+            || type === STT_COMMON
+            || type === STT_FILE
+            || type === STT_NOTYPE
+            || isOsOrProcessorSpecificSymbolType(type)
+            || !isAddressBearingSymbolType(type)
+        ) {
+            continue
         }
+        const before = sliceBytes(fixed.buffer, valueOffset, layout.pointerSize)
+        layout.writeAddr(view, valueOffset, currentValue - bias)
+        recorder.recordSlotPatch("dynsym.st_value", layout.pointerSize, valueOffset, before, sliceBytes(fixed.buffer, valueOffset, layout.pointerSize))
     }
 }
 
@@ -1186,11 +1233,33 @@ export function buildFixedElfForAnalysis(
 
     recorder.beginStage(
         "dynsym-fixups",
-        "normalized dynsym symbol types and rebased st_value entries into the rebuilt image",
+        "conservatively inferred in-image STT_NOTYPE symbols and rebased address-bearing dynsym st_value entries into the fixed image",
     )
-    fixSymbolTypes(recorder, fixedView, fixed, layout, originalPhdrs, sections[SECTION_SLOT.DYNSYM].shOffset, dynsymCount)
+    // fix.cpp is the coverage reference for dynsym handling, but we intentionally keep
+    // TLS/IFUNC/OS-specific and other non-address symbols intact instead of forcing them
+    // into FUNC/OBJECT or blindly subtracting the load bias from every positive st_value.
+    fixSymbolTypes(
+        recorder,
+        fixedView,
+        fixed,
+        layout,
+        originalPhdrs,
+        sections[SECTION_SLOT.DYNSYM].shOffset,
+        dynsymCount,
+        loadBias,
+        rawSize,
+    )
     sections[SECTION_SLOT.DYNSYM].shSize = dynsymCount * layout.symSize
-    fixDynSymBias(recorder, fixedView, fixed, layout, sections[SECTION_SLOT.DYNSYM].shOffset, dynsymCount, loadBias)
+    fixDynSymBias(
+        recorder,
+        fixedView,
+        fixed,
+        layout,
+        sections[SECTION_SLOT.DYNSYM].shOffset,
+        dynsymCount,
+        loadBias,
+        rawSize,
+    )
     recorder.finishStage()
 
     const pltAlign = layout.is32 ? 4 : 16

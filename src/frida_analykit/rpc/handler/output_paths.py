@@ -1,14 +1,26 @@
 from __future__ import annotations
 
+import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
 
+_SEPARATOR_RE = re.compile(r"[\\/]+")
+_UNSAFE_CHAR_RE = re.compile(r"[^A-Za-z0-9._-]+")
+_DOT_ONLY_RE = re.compile(r"^\.+$")
+
+
 def safe_name(value: str) -> str:
-    cleaned = "".join(char if char.isalnum() or char in "._-" else "_" for char in value.strip())
-    cleaned = cleaned.strip("._")
-    return cleaned or "default"
+    raw = value.strip()
+    if not raw:
+        return ""
+    cleaned = _SEPARATOR_RE.sub("_", raw)
+    cleaned = _UNSAFE_CHAR_RE.sub("_", cleaned)
+    cleaned = cleaned.strip("_")
+    if not cleaned or _DOT_ONLY_RE.fullmatch(cleaned):
+        return "default"
+    return cleaned
 
 
 @dataclass(frozen=True, slots=True)

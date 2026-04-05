@@ -1,4 +1,5 @@
 import { TextEncoder } from "../../internal/text/encoder.js"
+import { normalizeRelativeOutputPath } from "../../internal/path/output.js"
 import { saveFileSource, RPCMsgType } from "../../internal/rpc/messages.js"
 import { libc } from "../../native/libc/libc.js"
 import { NativePointerObject } from "../pointer.js"
@@ -72,12 +73,14 @@ export function readText(path: string): string {
 }
 
 export function write(path: string, data: string | ArrayBuffer | number[], mode: string = typeof data === "string" ? "w" : "wb"): void {
+    ensureParentDirectory(path)
     const savedFile = new File(path, mode)
     savedFile.write(data)
     savedFile.close()
 }
 
 export function open(pathname: string, mode: string): FileHelper {
+    ensureParentDirectory(pathname)
     return new FileHelper(pathname, mode)
 }
 
@@ -90,6 +93,42 @@ export function joinPath(dir: string, file: string): string {
         return dir
     }
     return dir.replace(/\/+$/, "") + "/" + file.replace(/^\/+/, "")
+}
+
+export function ensureDirectory(path: string): void {
+    const isAbsolute = path.startsWith("/")
+    const segments = path.split("/").filter((item) => item.length > 0)
+    let current = isAbsolute ? "/" : ""
+    for (const segment of segments) {
+        current = current === "/" ? `/${segment}` : (current ? joinPath(current, segment) : segment)
+        libc.mkdir(current, 0o755)
+    }
+}
+
+function dirname(path: string): string {
+    const normalized = path.replace(/\/+$/, "")
+    const index = normalized.lastIndexOf("/")
+    if (index < 0) {
+        return ""
+    }
+    if (index === 0) {
+        return "/"
+    }
+    return normalized.slice(0, index)
+}
+
+function ensureParentDirectory(path: string): void {
+    const parent = dirname(path)
+    if (parent.length > 0) {
+        ensureDirectory(parent)
+    }
+}
+
+function resolveManagedOutputPath(tag: string, outputDir: string): string {
+    if (isFilePath(tag)) {
+        return tag
+    }
+    return joinPath(outputDir, normalizeRelativeOutputPath(tag))
 }
 
 function normalizeSaveData(data: string | ArrayBuffer | number[]): ArrayBuffer | number[] {
@@ -116,7 +155,7 @@ export function createFsFacade(context: HelperFsContext) {
             if (data === null || data === undefined) {
                 return false
             }
-            const filepath = isFilePath(tag) ? tag : joinPath(context.getOutputDir(), tag)
+            const filepath = resolveManagedOutputPath(tag, context.getOutputDir())
 
             if (context.isRpcEnabled()) {
                 context.send({
@@ -134,7 +173,7 @@ export function createFsFacade(context: HelperFsContext) {
             return true
         },
         getLogFile(tag: string, mode: string): FileHelper {
-            const filepath = isFilePath(tag) ? tag : joinPath(context.getOutputDir(), tag)
+            const filepath = resolveManagedOutputPath(tag, context.getOutputDir())
             let fp = context.logFiles[filepath]
             if (!fp) {
                 fp = open(filepath, mode)
@@ -144,5 +183,6 @@ export function createFsFacade(context: HelperFsContext) {
         },
         joinPath,
         isFilePath,
+        ensureDirectory,
     } as const
 }

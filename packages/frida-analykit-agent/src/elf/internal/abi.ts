@@ -315,6 +315,13 @@ export const STT_OBJECT = 0x1
 export const STT_FUNC = 0x2
 export const STT_SECTION = 0x3
 export const STT_FILE = 0x4
+export const STT_COMMON = 0x5
+export const STT_TLS = 0x6
+export const STT_LOOS = 0x0a
+export const STT_GNU_IFUNC = 0x0a
+export const STT_HIOS = 0x0c
+export const STT_LOPROC = 0x0d
+export const STT_HIPROC = 0x0f
 
 export const SHN_UNDEF = 0
 export const SHN_ABS = 0xfff1

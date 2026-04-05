@@ -1,35 +1,23 @@
 from __future__ import annotations
 
 import json
-import time
-from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
 from typing import Callable, TextIO
 
 import colorama
 
 from ..config import AppConfig
 from ..utils import ensure_filepath
-from .handler.output_paths import resolve_configured_output_root, resolve_output_leaf
 from .handler.dex import DexDumpHandler
 from .handler.elf import ElfHandler
-from .message import RPCBatchSource, RPCMsgBatch, RPCMsgProgressing, RPCMsgSSLSecret, RPCMsgType, RPCPayload, unpack_batch_payload
+from .handler.net import NetHandler
+from .handler.runtime import RuntimeHandler
+from .message import RPCBatchSource, RPCMsgType, RPCPayload, unpack_batch_payload
 
 
 MessageHandler = Callable[[RPCPayload], None]
 ExceptionHandler = Callable[[dict, bytes | None], None]
 HostLogHandler = Callable[[str, str], None]
-
-
-@dataclass(slots=True)
-class SSLSecretOutputState:
-    directory: Path
-    logger: TextIO
-    tag: str
-    effective_tag: str
-    actual_relative_dir: str
-    configured_output_root: str
 
 
 class HandlerRegistry:
@@ -47,9 +35,10 @@ class HandlerRegistry:
         self._message_handlers: dict[str, MessageHandler] = {}
         self._batch_handlers: dict[str, MessageHandler] = {}
         self._exception_handler: ExceptionHandler = self._default_exception_handler
-        self._ssl_secret_outputs: dict[str, SSLSecretOutputState] = {}
         self._dex_handler = DexDumpHandler(config, emit_info=self._emit_info, emit_error=self._emit_error)
         self._elf_handler = ElfHandler(config, emit_info=self._emit_info, emit_error=self._emit_error)
+        self._net_handler = NetHandler(config, emit_info=self._emit_info, emit_error=self._emit_error)
+        self._runtime_handler = RuntimeHandler(emit_info=self._emit_info, emit_error=self._emit_error)
         self._register_defaults()
 
     def set_log_sink(self, log_sink: HostLogHandler | None) -> None:
@@ -95,8 +84,8 @@ class HandlerRegistry:
         self._exception_handler(message, data)
 
     def _register_defaults(self) -> None:
-        self.on_message(RPCMsgType.PROGRESSING, self._handle_progressing)
-        self.on_message(RPCMsgType.SSL_SECRET, self._handle_ssl_secret)
+        self.on_message(RPCMsgType.PROGRESSING, self._runtime_handler.handle_progressing)
+        self.on_message(RPCMsgType.SSL_SECRET, self._net_handler.handle_ssl_secret)
         self.on_message(RPCMsgType.DEX_DUMP_BEGIN, self._dex_handler.handle_begin)
         self.on_message(RPCMsgType.DUMP_DEX_FILE, self._dex_handler.handle_file)
         self.on_message(RPCMsgType.DEX_DUMP_END, self._dex_handler.handle_end)
@@ -154,66 +143,6 @@ class HandlerRegistry:
             self._emit_info(f"{colorama.Fore.GREEN}[{path}] {len(payload.data)}{colorama.Fore.RESET}")
             return
         self._emit_error(f"{colorama.Fore.MAGENTA}[{filename}] {len(payload.data)} <drop>{colorama.Fore.RESET}")
-
-    def _handle_progressing(self, payload: RPCPayload) -> None:
-        data = payload.message.data
-        assert isinstance(data, RPCMsgProgressing)
-        if data.error:
-            self._emit_error(f"[x] | {data.tag} | {data.step} => {data.error}")
-            return
-        intro = data.extra.get("intro", ",".join(data.extra.keys()))
-        self._emit_info(f"[~] | {data.tag} | {data.step} => {intro}")
-
-    def _ssl_secret_output(self, tag: str) -> SSLSecretOutputState:
-        root = resolve_configured_output_root(
-            configured_root=self._config.script.nettools.output_dir,
-            agent_datadir=self._config.agent.datadir,
-            fallback_child="nettools",
-            missing_message="script.nettools.output_dir or agent.datadir is required for SSL_SECRET handling",
-        )
-        output_leaf = resolve_output_leaf(root, tag)
-        key = output_leaf.relative_dir or "__root__"
-        if key not in self._ssl_secret_outputs:
-            output_leaf.directory.mkdir(parents=True, exist_ok=True)
-            log_path = output_leaf.directory / "sslkey.log"
-            logger = open(log_path, "a", buffering=1, encoding="utf-8")
-            state = SSLSecretOutputState(
-                directory=output_leaf.directory,
-                logger=logger,
-                tag=output_leaf.tag,
-                effective_tag=output_leaf.effective_tag,
-                actual_relative_dir=output_leaf.relative_dir,
-                configured_output_root=str(output_leaf.root),
-            )
-            self._write_ssl_secret_manifest(state)
-            self._ssl_secret_outputs[key] = state
-        return self._ssl_secret_outputs[key]
-
-    @staticmethod
-    def _write_ssl_secret_manifest(state: SSLSecretOutputState) -> None:
-        manifest_path = state.directory / "manifest.json"
-        manifest_path.write_text(
-            json.dumps(
-                {
-                    "created_at_ms": int(time.time() * 1000),
-                    "mode": "rpc",
-                    "tag": state.tag,
-                    "effective_tag": state.effective_tag,
-                    "configured_output_root": state.configured_output_root,
-                    "actual_relative_dir": state.actual_relative_dir,
-                    "output_name": "sslkey.log",
-                },
-                ensure_ascii=False,
-                indent=2,
-            ),
-            encoding="utf-8",
-        )
-
-    def _handle_ssl_secret(self, payload: RPCPayload) -> None:
-        data = payload.message.data
-        assert isinstance(data, RPCMsgSSLSecret)
-        output = self._ssl_secret_output(data.tag)
-        print(f"{data.label} {data.client_random} {data.secret}", file=output.logger)
 
     def _emit(self, level: str, text: str, stream: TextIO) -> None:
         print(text, file=stream)

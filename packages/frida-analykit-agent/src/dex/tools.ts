@@ -3,11 +3,11 @@ import { Config, setGlobalProperties } from "../config/index.js"
 import { help } from "../helper/index.js"
 import { PointerVector } from "../internal/cxx/index.js"
 import { NativePointerObject } from "../internal/frida/pointer_object.js"
+import { normalizeOutputTag } from "../internal/path/output.js"
 import { BatchSender } from "../internal/rpc/batch_sender.js"
 import { batchSendSource, RPCMsgType, saveFileSource } from "../internal/rpc/messages.js"
 import { JNIEnv } from "../jni/index.js"
 import { Libart } from "../native/libart/libart.js"
-import { libc } from "../native/libc/libc.js"
 import { DexFileStructOf } from "./struct.js"
 import type { ClassLoaderDexFiles, DexDumpFileInfo, DexDumpOptions, DexDumpSummary, DexRuntimeFileInfo } from "./types.js"
 
@@ -124,27 +124,12 @@ function normalizeDexName(javaName: string, dex: DexFileView, count: number): st
     return javaName
 }
 
-function sanitizePathSegment(value: string): string {
-    const normalized = value.replace(/[\\/]+/g, "_").replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "")
-    return normalized.length > 0 ? normalized : "default"
-}
-
 function relativeDumpDir(tag: string): string {
-    return tag.length > 0 ? sanitizePathSegment(tag) : ""
+    return tag.length > 0 ? normalizeOutputTag(tag) : ""
 }
 
 function localDumpDir(root: string, relativeDir: string): string {
     return relativeDir.length > 0 ? help.fs.joinPath(root, relativeDir) : root
-}
-
-function ensureDirectory(path: string): void {
-    const isAbsolute = path.startsWith("/")
-    const segments = path.split("/").filter((item) => item.length > 0)
-    let current = isAbsolute ? "/" : ""
-    for (const segment of segments) {
-        current = current === "/" ? `/${segment}` : (current ? help.fs.joinPath(current, segment) : segment)
-        libc.mkdir(current, 0o755)
-    }
 }
 
 export class DexTools {
@@ -315,7 +300,7 @@ export class DexTools {
                 },
             })
         } else {
-            ensureDirectory(localOutputDir)
+            help.fs.ensureDirectory(localOutputDir)
             const writtenFiles: Array<Record<string, string | number>> = []
             let receivedCount = 0
             let receivedBytes = 0

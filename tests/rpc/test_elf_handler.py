@@ -2,6 +2,8 @@ import io
 import json
 from pathlib import Path
 
+import pytest
+
 from frida_analykit.config import AppConfig
 from frida_analykit.rpc.message import (
     RPCBatchSource,
@@ -42,13 +44,21 @@ def _config(tmp_path: Path) -> AppConfig:
     ).resolve_paths(tmp_path)
 
 
-def _chunk_payload(dump_id: str, artifact: str, output_name: str, data: bytes, *, chunk_index: int = 0) -> RPCPayload:
+def _chunk_payload(
+    dump_id: str,
+    artifact: str,
+    output_name: str,
+    data: bytes,
+    *,
+    tag: str = "demo",
+    chunk_index: int = 0,
+) -> RPCPayload:
     return RPCPayload(
         message=RPCMessage(
             type=RPCMsgType.ELF_MODULE_DUMP_CHUNK,
             data=RPCMsgElfModuleDumpChunk(
                 dump_id=dump_id,
-                tag="demo",
+                tag=tag,
                 artifact=artifact,
                 output_name=output_name,
                 chunk_index=chunk_index,
@@ -387,5 +397,60 @@ def test_registry_ignores_runtime_elf_output_metadata_but_records_request(tmp_pa
     assert manifest["requested_relative_dump_dir"] == "../../ignored"
     assert manifest["configured_output_root"] == str((tmp_path / "elf").resolve())
     assert manifest["actual_relative_dir"] == "demo"
+    assert (target_dir / "libc.raw.so").read_bytes() == b"abcd"
+    assert "[elf] reject dump" not in stderr.getvalue()
+
+
+@pytest.mark.parametrize(
+    ("tag", "effective_tag"),
+    [
+        ("..", "default"),
+        ("测试", "default"),
+        ("alpha/beta", "alpha_beta"),
+    ],
+)
+def test_registry_normalizes_elf_tag_into_single_leaf(
+    tmp_path: Path,
+    tag: str,
+    effective_tag: str,
+) -> None:
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    registry = HandlerRegistry(_config(tmp_path), stdout, stderr)
+    dump_id = "elf-safe-tag"
+    target_dir = tmp_path / "elf" / effective_tag
+
+    registry.handle(
+        _begin_payload(
+            dump_id,
+            tag=tag,
+            relative_dump_dir=effective_tag,
+            expected_files=["libc.raw.so", "manifest.json"],
+            total_bytes=6,
+        )
+    )
+    registry.handle(_chunk_payload(dump_id, "raw", "libc.raw.so", b"abcd"))
+    registry.handle(_chunk_payload(dump_id, "manifest", "manifest.json", b"{}"))
+    registry.handle(
+        RPCPayload(
+            message=RPCMessage(
+                type=RPCMsgType.ELF_MODULE_DUMP_END,
+                data=RPCMsgElfModuleDumpEnd(
+                    dump_id=dump_id,
+                    tag=tag,
+                    module_name="libc.so",
+                    relative_dump_dir=effective_tag,
+                    expected_files=["libc.raw.so", "manifest.json"],
+                    total_bytes=6,
+                    received_bytes=6,
+                ),
+            )
+        )
+    )
+
+    manifest = json.loads((target_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["tag"] == tag
+    assert manifest["effective_tag"] == effective_tag
+    assert manifest["actual_relative_dir"] == effective_tag
     assert (target_dir / "libc.raw.so").read_bytes() == b"abcd"
     assert "[elf] reject dump" not in stderr.getvalue()

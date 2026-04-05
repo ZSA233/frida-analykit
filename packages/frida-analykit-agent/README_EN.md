@@ -131,6 +131,7 @@ setImmediate(() => {
 - `/elf/enhanced` only adds common presets when you import it manually; it does not auto-register into `globalThis` or the core bundle.
 - `dumpModule()` sends `ELF_MODULE_DUMP_BEGIN -> BATCH(ELF_MODULE_DUMP_CHUNKS) -> ELF_MODULE_DUMP_END`.
 - Python writes ELF outputs to `script.elftools.output_dir` first, then falls back to `agent.datadir/elftools`, using `<output-root>/<tag?>/`; symbol call logs go to `symbols.log` in the same leaf directory.
+- `tag` is normalized into an ASCII-safe single-level leaf; an empty tag still targets the root leaf, and dot-only or normalization-empty tags fall back to `default`.
 - In RPC mode, `outputDir` and `relative_dump_dir` are still forwarded, but the host only records them in `manifest.json`; the actual directory is still chosen from `script.elftools.output_dir` plus a single-level `tag`.
 - Each dump now exports `*.raw.so`, `*.fixed.so`, `fixups.json`, `symbols.json`, `proc_maps.txt`, and `manifest.json` by default.
 - `fixups.json` records the stage-owned patches needed to replay `raw` into `fixed`; each stage is emitted by the real repair step, which makes replay possible and patch ownership easier to inspect.
@@ -155,6 +156,7 @@ setImmediate(() => {
 - `dumpAllDex()` sends `DEX_DUMP_BEGIN -> BATCH(DEX_DUMP_FILES) -> DEX_DUMP_END`.
 - The default max batch size comes from Python config `script.rpc.batch_max_bytes`, and on the agent side this maps to `Config.BatchMaxBytes`.
 - A single oversized dex is still sent as its own batch without further slicing, and Python writes to `script.dextools.output_dir` first, then falls back to `agent.datadir/dextools`.
+- `tag` is normalized into an ASCII-safe single-level leaf; an empty tag still targets the root leaf, and dot-only or normalization-empty tags fall back to `default`.
 - In RPC mode, `dumpDir` is still forwarded, but the host only records it in `manifest.json`; the actual directory is still chosen from `script.dextools.output_dir` plus a single-level `tag`.
 - Python writes one `manifest.json` for each dex dump and stores the exported dex file list in its `files` field; the old `classes.json` file is no longer kept.
 

@@ -2,6 +2,8 @@ import io
 import json
 from pathlib import Path
 
+import pytest
+
 from frida_analykit.config import AppConfig
 from frida_analykit.rpc.message import (
     RPCBatchSource,
@@ -38,6 +40,7 @@ def _dex_file_payload(
     output_name: str,
     data: bytes,
     *,
+    tag: str = "demo",
     declared_size: int | None = None,
 ) -> RPCPayload:
     return RPCPayload(
@@ -45,7 +48,7 @@ def _dex_file_payload(
             type=RPCMsgType.DUMP_DEX_FILE,
             data=RPCMsgDumpDexFile(
                 transfer_id=transfer_id,
-                tag="demo",
+                tag=tag,
                 info=RPCMsgDexDumpFileInfo(
                     name=output_name,
                     base="0x1000",
@@ -292,5 +295,62 @@ def test_registry_ignores_runtime_dex_dump_dir_override_but_records_request(tmp_
     assert manifest["requested_dump_dir"] == "../sentinel"
     assert manifest["configured_output_root"] == str((tmp_path / "data" / "dextools").resolve())
     assert manifest["actual_relative_dir"] == "demo"
+    assert (target_dir / "classes00.dex").read_bytes() == b"a"
+    assert "[dex] reject transfer" not in stderr.getvalue()
+
+
+@pytest.mark.parametrize(
+    ("tag", "effective_tag"),
+    [
+        ("..", "default"),
+        ("测试", "default"),
+        ("alpha/beta", "alpha_beta"),
+    ],
+)
+def test_registry_normalizes_dex_tag_into_single_leaf(
+    tmp_path: Path,
+    tag: str,
+    effective_tag: str,
+) -> None:
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    transfer_id = "dex-safe-tag"
+    registry = HandlerRegistry(_config(tmp_path), stdout, stderr)
+    target_dir = tmp_path / "data" / "dextools" / effective_tag
+
+    registry.handle(
+        RPCPayload(
+            message=RPCMessage(
+                type=RPCMsgType.DEX_DUMP_BEGIN,
+                data=RPCMsgDexDumpBegin(
+                    transfer_id=transfer_id,
+                    tag=tag,
+                    expected_count=1,
+                    total_bytes=1,
+                    max_batch_bytes=1024,
+                ),
+            )
+        )
+    )
+    registry.handle(_dex_file_payload(transfer_id, "classes00.dex", b"a", tag=tag))
+    registry.handle(
+        RPCPayload(
+            message=RPCMessage(
+                type=RPCMsgType.DEX_DUMP_END,
+                data=RPCMsgDexDumpEnd(
+                    transfer_id=transfer_id,
+                    tag=tag,
+                    expected_count=1,
+                    received_count=1,
+                    total_bytes=1,
+                ),
+            )
+        )
+    )
+
+    manifest = json.loads((target_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["tag"] == tag
+    assert manifest["effective_tag"] == effective_tag
+    assert manifest["actual_relative_dir"] == effective_tag
     assert (target_dir / "classes00.dex").read_bytes() == b"a"
     assert "[dex] reject transfer" not in stderr.getvalue()

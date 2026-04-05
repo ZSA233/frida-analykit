@@ -1,9 +1,9 @@
 import { Config } from "../config/index.js"
 import { help } from "../helper/index.js"
+import { normalizeOutputTag } from "../internal/path/output.js"
 import { BatchSender } from "../internal/rpc/batch_sender.js"
 import { batchSendSource, RPCMsgType, saveFileSource } from "../internal/rpc/messages.js"
 import { TextEncoder } from "../internal/text/encoder.js"
-import { libc } from "../native/libc/libc.js"
 import { buildFixedElfForAnalysis, type ElfDumpFixupFile } from "./internal/dump_fixer.js"
 import type { ElfModuleX } from "./module.js"
 import type { ElfModuleDumpArtifact, ElfModuleDumpOptions, ElfModuleDumpSummary, ElfResolvedSymbol } from "./types.js"
@@ -68,18 +68,13 @@ function createDumpId(): string {
     return `elf-${Process.id}-${Date.now()}-${Math.floor(Math.random() * 0x100000).toString(16)}`
 }
 
-function sanitizePathSegment(value: string): string {
-    const normalized = value.replace(/[\\/]+/g, "_").replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "")
-    return normalized.length > 0 ? normalized : "module"
-}
-
 function basename(path: string): string {
     const items = path.split(/[\\/]+/).filter((item) => item.length > 0)
     return items.length > 0 ? items[items.length - 1] : path
 }
 
 function addFileVariant(name: string, variant: "raw" | "fixed"): string {
-    const safeName = sanitizePathSegment(name)
+    const safeName = normalizeOutputTag(name, "module")
     const dotIndex = safeName.lastIndexOf(".")
     if (dotIndex <= 0) {
         return `${safeName}.${variant}`
@@ -142,23 +137,12 @@ function localDumpBaseDir(outputDir?: string): string {
     return help.fs.joinPath(help.runtime.getOutputDir(), "elftools")
 }
 
-function relativeDumpDir(tag: string, dumpId: string): string {
-    void dumpId
-    return tag.length > 0 ? sanitizePathSegment(tag) : ""
+function relativeDumpDir(tag: string): string {
+    return tag.length > 0 ? normalizeOutputTag(tag) : ""
 }
 
 function localDumpDir(baseDir: string, dumpRelativeDir: string): string {
     return dumpRelativeDir.length > 0 ? help.fs.joinPath(baseDir, dumpRelativeDir) : baseDir
-}
-
-function ensureDirectory(path: string): void {
-    const isAbsolute = path.startsWith("/")
-    const segments = path.split("/").filter((item) => item.length > 0)
-    let current = isAbsolute ? "/" : ""
-    for (const segment of segments) {
-        current = current === "/" ? `/${segment}` : (current ? help.fs.joinPath(current, segment) : segment)
-        libc.mkdir(current, 0o755)
-    }
 }
 
 function buildManifest(
@@ -317,7 +301,7 @@ export function dumpElfModule(module: ElfModuleX, options: ElfModuleDumpOptions 
     const mode: ElfModuleDumpSummary["mode"] = Config.OnRPC ? "rpc" : "file"
     const batchBytes = normalizeBatchBytes()
     const outputRoot = Config.OnRPC ? undefined : localDumpBaseDir(options.outputDir)
-    const dumpRelativeDir = relativeDumpDir(tag, dumpId)
+    const dumpRelativeDir = relativeDumpDir(tag)
     const targetDir = outputRoot ? localDumpDir(outputRoot, dumpRelativeDir) : undefined
     const modulePath = String((module as unknown as { path?: string }).path || "")
     const moduleBasename = basename(modulePath || module.name)
@@ -443,7 +427,7 @@ export function dumpElfModule(module: ElfModuleX, options: ElfModuleDumpOptions 
         if (!targetDir) {
             throw new Error("[ElfTools] local dump target directory is unavailable")
         }
-        ensureDirectory(targetDir)
+        help.fs.ensureDirectory(targetDir)
         emitArtifact(rawArtifact, rawData!)
         rawData = null
         emitArtifact(fixedArtifact, fixedData!)

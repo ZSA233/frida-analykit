@@ -1,6 +1,7 @@
 import { Config, setGlobalProperties } from "../config/index.js"
 import { arrayBuffer2Hex } from "../internal/binary/readers.js"
 import { unwrapArgs } from "../internal/frida/native-function.js"
+import { normalizeOutputTag } from "../internal/path/output.js"
 import { RPCMsgType } from "../internal/rpc/messages.js"
 import { ssl_st_structOf, SSL3_RANDOM_SIZE } from "./struct.js"
 import { help, ProgressNotify } from "../helper/index.js"
@@ -98,7 +99,12 @@ function sendSSLSecret(tag: string, data: { label: string, client_random: string
             }
         })
     } else {
-        const file = help.fs.getLogFile(tag, "a")
+        const nettoolsRoot = help.fs.joinPath(help.runtime.getOutputDir(), "nettools")
+        const effectiveTag = tag.length > 0 ? normalizeOutputTag(tag) : ""
+        const outputDir = effectiveTag.length > 0 ? help.fs.joinPath(nettoolsRoot, effectiveTag) : nettoolsRoot
+        const logfile = help.fs.joinPath(outputDir, "sslkey.log")
+        help.fs.ensureDirectory(outputDir)
+        const file = help.fs.getLogFile(logfile, "a")
         file.writeLine(`${data.label} ${data.client_random} ${data.secret}`)
         file.flush()
     }

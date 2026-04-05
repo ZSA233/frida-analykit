@@ -370,11 +370,13 @@ output_dir = "./data/elftools/"
 - `ELF_SYMBOL_CALL_LOG` 会写到同一 leaf 目录下的 `symbols.log`
 - 如果未配置 `script.elftools.output_dir`，则回退到 `agent.datadir/elftools`
 - RPC 模式下 host 侧只会写入上述 workspace 输出根；`outputDir` 与 `relative_dump_dir` 只会记录进 `manifest.json`，不会覆盖 host 路径，区分多次 dump 请用 `tag`
+- `tag` 会被收束成 ASCII-safe 单层 leaf；空 tag 仍表示 capability root，dot-only 或归一后为空的 tag 会回退到 `default`
 
 当前默认行为：
 
 - `PROGRESSING` 会被格式化打印到 stdout/stderr。
 - `SSL_SECRET` 会落到 `script.nettools.output_dir/<tag?>/sslkey.log`，并在同目录写 `manifest.json`。
+- `SSL_SECRET` 的 `tag` 也会走同样的 ASCII-safe 单层 leaf 归一规则。
 - 未专门注册的消息会按默认处理器打印摘要。
 - 如果消息带有二进制 payload，且 `agent.datadir` 已配置，会把数据落到该目录下，文件名类似 `SAVE_FILE_<timestamp>`。
 - 如果未设置 `agent.datadir`，则会提示 payload 被丢弃。
@@ -787,6 +789,7 @@ output_dir = "./data/elftools/"
 - 默认最大批量上限为 `8 MiB`
 - 单个超大 dex 会单独成批发送，而不是继续切片
 - Python 侧默认写入 `script.dextools.output_dir`，未配置时回退到 `agent.datadir/dextools`
+- `tag` 会被收束成 ASCII-safe 单层 leaf；空 tag 仍表示根目录，dot-only 或归一后为空的 tag 会回退到 `default`
 - RPC 模式下 `dumpDir` 会继续透传，但 host 侧只会把它记录进 `manifest.json`；实际目录仍由 `script.dextools.output_dir` 或 `agent.datadir/dextools` 加上单层 `tag` 决定
 - Python 侧 dex dump 目录只保留一个 `manifest.json`，并在 `files` 字段中收纳原先 `classes.json` 的文件列表
 
@@ -848,6 +851,7 @@ output_dir = "./data/elftools/"
 
 - `script.elftools.output_dir/<tag?>/`
 - 同一目录下的 `symbols.log`
+- `tag` 会被收束成 ASCII-safe 单层 leaf；空 tag 仍表示 capability root，dot-only 或归一后为空的 tag 会回退到 `default`
 
 RPC 模式下 host 侧不会把单次 `outputDir` 或 `relative_dump_dir` 当成实际根目录覆盖；输出根始终由 `script.elftools.output_dir` 或 `agent.datadir/elftools` 决定，单次区分只使用 `tag`，被忽略的路径请求会记录进 `manifest.json`。
 
