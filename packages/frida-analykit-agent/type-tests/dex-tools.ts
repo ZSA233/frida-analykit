@@ -5,3 +5,4 @@ const loaders = DexTools.enumerateClassLoaderDexFiles();
 
 void summary;
 void loaders;
+void summary.relativeDumpDir;

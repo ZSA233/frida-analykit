@@ -11,7 +11,7 @@
 - 只要用户可见能力、配置、命令行、接入方式、限制条件发生变化，应先更新本文件。
 - release 前收束 `README.md` 时，应基于本文件整体整理，而不是仅把最近一次改动直接拼接进 README。
 
-本文件的初始化快照基于当前仓库状态整理，当前更新快照时间为 `2026-04-01`。
+本文件的初始化快照基于当前仓库状态整理，当前更新快照时间为 `2026-04-05`。
 
 ## README 收束风格基线
 
@@ -21,9 +21,15 @@ README 收束时，应同时遵循下面这些约束：
 - 对外 README 应比 `PRE_README.MD` 更短、更稳、更主线化，不要把本文件中的工作痕迹、排查细节和中间态说明原样搬进去。
 - 根 `README.md` 与 `README_EN.md` 必须是严格镜像的中英版本，只允许语言翻译上的差异，不允许一边多写、一边漏写。
 - `packages/frida-analykit-agent/README.md` 与 `packages/frida-analykit-agent/README_EN.md` 也必须遵循同样的严格镜像规则。
-- 根 README 的默认叙述顺序应为：项目定位与架构图、普通用户安装与使用 CLI、普通用户主线工作流、常用配置与命令、高级/开发能力、调试/测试/发布与仓库结构。
+- 根 README 的默认叙述顺序应为：项目定位、架构说明图、快速开始、最小 `config.toml` 示例、更多能力、真机测试与更多文档。
+- 根 README 应是 onboarding-first 文档，目标是一眼看懂主线，而不是把所有实现细节堆成半份手册。
+- 根 README 的快速开始应固定围绕一条最小路径：安装 CLI、进入 Frida 虚拟环境、确认设备连接、生成工作区、安装依赖、执行 `doctor`、必要时 `doctor fix` + `server boot`、最后 `attach --build --repl`。
+- 根 README 的每一步应尽量直接说明“做完这一步得到什么结果”，帮助用户判断是否可以继续。
+- 根 README 的配置说明应优先通过最小 `config.toml` 示例中的行内注释表达，而不是长篇字段枚举和“使用时需要特别记住”列表。
+- 根 README 需要更细配置说明时，应优先跳转到 scaffold README，而不是重新把字段细节写回根文档。
+- 根 README 对 MCP、agent runtime、真机测试只保留入口级说明和跳转链接；详细行为、能力表和实现细节放到对应专门文档。
 - agent 包 README 的默认叙述顺序应为：包定位、安装、能力总览表、普通使用方式、高级能力、调试与非公共内容。
-- 当能力项较多、导入路径较多或需要区分轻入口/显式 capability 时，应优先用表格呈现，而不是散列 bullet。
+- 当能力项较多、导入路径较多或需要区分轻入口/显式 capability 时，应优先在专门文档中用表格呈现，而不是继续塞回根 README。
 - 根 README 的架构图必须读取并嵌入 `docs/arch.mermaid` 的 Mermaid 源码；在架构未变时，这个 `.mermaid` 文件视为只读事实源。
 - README 收束完成后，必须执行一次二次校对，至少检查标题树、表格、代码块、提示项和限制说明是否在中英文两侧完全同构。
 
@@ -110,6 +116,7 @@ frida-analykit gen dev --work-dir ./my-agent
 当前脚手架会生成：
 
 - `README.md`
+- `README_EN.md`
 - `config.toml`
 - `index.ts`
 - `package.json`
@@ -118,6 +125,7 @@ frida-analykit gen dev --work-dir ./my-agent
 当前脚手架特征：
 
 - 生成的 runtime 依赖会固定到当前 Python release 对应的 `@zsa233/frida-analykit-agent` 版本。
+- 生成的工作区会同时携带中英文两份 README，用于解释 `config.toml`、常用命令和 capability 导入习惯。
 - 当前 npm package spec 支持 Python RC 版本映射到 npm RC 版本，例如 `2.0.0rc1 -> 2.0.0-rc.1`。
 - 生成的 npm 脚本默认为：
 
@@ -205,7 +213,7 @@ frida-analykit-mcp --config ./mcp.toml
   - `[agent]`：`datadir`、`stdout`、`stderr`
   - `[script.dextools]`：`output_dir`
   - `[script.elftools]`：`output_dir`
-  - `[script.nettools]`：`ssl_log_secret`
+  - `[script.nettools]`：`output_dir`
 - 这些服务级默认值在 MCP 进程启动后固定不变，`session_open_quick` 不再让大模型逐次指定 `host`、`device`、`path`、`server.version` 或 runtime 包版本。
 - `session_open` 首次需要 `config_path` 和 `mode`；如果当前 live session 与目标一致，则直接复用；如果目标不同，则需要 `force_replace=true`。
 - 推荐入口 `session_open_quick(app, mode, capabilities?, template?, bootstrap_path?, bootstrap_source?, ...)`：它会自动生成最小 `index.ts`、复用共享轻量 runtime cache、使用 MCP 进程 `PATH` 中预装的 `frida-compile` 编译 `_agent.js`、写出继承 startup config 的 `config.toml`，然后复用同一套 session manager 打开会话。
@@ -320,6 +328,7 @@ Python 侧目前已经有一套 RPC message / handler 体系。
 - `DexTools.dumpAllDex()` 会按最大批量字节数流式发送 dex 文件
 - 默认最大批量上限为 `8 MiB`
 - Python 侧默认输出目录优先取 `script.dextools.output_dir`，否则回退到 `agent.datadir/dextools`
+- RPC 模式下 host 侧只会写入上述 workspace 输出根；`dumpDir` 只会记录进 `manifest.json`，不会覆盖 host 路径，区分多次导出请用 `tag`
 - `DexTools.dumpAllDex()` 返回 summary 后，不等于 host 侧已经完成全部落盘；MCP client 应使用返回的 `transferId` 轮询 `tail_logs`，并等待 `source="host"` 且文本匹配 `[dex] complete <transferId>` 的日志再判定完成
 
 - ART 相关 native 符号绑定已抽到共享 `@zsa233/frida-analykit-agent/native/libart`
@@ -355,15 +364,19 @@ output_dir = "./data/elftools/"
 
 行为说明：
 
-- `output_dir` 为 Python 侧接收 ELF snapshot 与 symbol call log 的默认目录
-- `snapshot()` 的产物会写到 `snapshots/<tag-or-id>/`
-- `ELF_SYMBOL_CALL_LOG` 会写到 `logs/<tag>.log`
+- `output_dir` 为 Python 侧接收 ELF dump 与 symbol call log 的默认目录
+- `dumpModule()` 的产物会写到 `<output-root>/<tag?>/`
+- 默认 ELF dump 目录会包含 `*.raw.so`、`*.fixed.so`、`fixups.json`、`symbols.json`、`proc_maps.txt` 和 `manifest.json`
+- `ELF_SYMBOL_CALL_LOG` 会写到同一 leaf 目录下的 `symbols.log`
 - 如果未配置 `script.elftools.output_dir`，则回退到 `agent.datadir/elftools`
+- RPC 模式下 host 侧只会写入上述 workspace 输出根；`outputDir` 与 `relative_dump_dir` 只会记录进 `manifest.json`，不会覆盖 host 路径，区分多次 dump 请用 `tag`
+- `tag` 会被收束成 ASCII-safe 单层 leaf；空 tag 仍表示 capability root，dot-only 或归一后为空的 tag 会回退到 `default`
 
 当前默认行为：
 
 - `PROGRESSING` 会被格式化打印到 stdout/stderr。
-- `SSL_SECRET` 会落到 `script.nettools.ssl_log_secret` 指定目录。
+- `SSL_SECRET` 会落到 `script.nettools.output_dir/<tag?>/sslkey.log`，并在同目录写 `manifest.json`。
+- `SSL_SECRET` 的 `tag` 也会走同样的 ASCII-safe 单层 leaf 归一规则。
 - 未专门注册的消息会按默认处理器打印摘要。
 - 如果消息带有二进制 payload，且 `agent.datadir` 已配置，会把数据落到该目录下，文件名类似 `SAVE_FILE_<timestamp>`。
 - 如果未设置 `agent.datadir`，则会提示 payload 被丢弃。
@@ -776,6 +789,9 @@ output_dir = "./data/elftools/"
 - 默认最大批量上限为 `8 MiB`
 - 单个超大 dex 会单独成批发送，而不是继续切片
 - Python 侧默认写入 `script.dextools.output_dir`，未配置时回退到 `agent.datadir/dextools`
+- `tag` 会被收束成 ASCII-safe 单层 leaf；空 tag 仍表示根目录，dot-only 或归一后为空的 tag 会回退到 `default`
+- RPC 模式下 `dumpDir` 会继续透传，但 host 侧只会把它记录进 `manifest.json`；实际目录仍由 `script.dextools.output_dir` 或 `agent.datadir/dextools` 加上单层 `tag` 决定
+- Python 侧 dex dump 目录只保留一个 `manifest.json`，并在 `files` 字段中收纳原先 `classes.json` 的文件列表
 
 当前 agent 侧还有专门的 type-tests 与 device suite 覆盖 DexTools 的类型面和真实流式落盘行为。
 
@@ -783,11 +799,11 @@ output_dir = "./data/elftools/"
 
 `@zsa233/frida-analykit-agent/elf` 当前公开的正式入口是 `ElfTools`，当前已确认的主线能力包括：
 
-- `ElfTools.findModuleByName(name, tryFix?)`
-- `ElfTools.getModuleByName(name, tryFix?)`
-- `ElfTools.loadFromModule(mod, tryFix?)`
+- `ElfTools.findModuleByName(name, augmentMetadata?)`
+- `ElfTools.getModuleByName(name, augmentMetadata?)`
+- `ElfTools.loadFromModule(mod, augmentMetadata?)`
 - `ElfTools.createSymbolHooks(target, options?)`
-- `ElfTools.snapshot(target, options?)`
+- `ElfTools.dumpModule(target, options?)`
 
 其中核心 hook 对象已经统一命名为 `ElfSymbolHooks`，不再沿用旧版 `SymbolAttach` 命名。它当前的职责边界是：
 
@@ -813,25 +829,40 @@ output_dir = "./data/elftools/"
 - relocation / plt relocation 读取与链接
 - `off2addr()` 这类地址映射辅助
 
-当前还存在一个 fixer 扩展点：
+当前还存在一个 metadata patcher 扩展点：
 
-- `ElfModuleFixer`
-- `ElfFileFixer`
+- `ElfModuleMetadataPatcher`
+- `ElfFileMetadataPatcher`
+
+其语义边界也已经明确收束：
+
+- `augmentMetadata` 表示“尝试用磁盘 ELF 元数据补齐已加载模块的 section/symbol 视图”
+- 它是 best-effort 的 metadata patch，不承诺处理加壳、损坏或高度非标准 ELF
 
 当前 ELF workflow 还补齐了结构化 RPC 链路：
 
-- `ELF_SNAPSHOT_BEGIN`
-- `ELF_SNAPSHOT_CHUNK`
-- `ELF_SNAPSHOT_END`
+- `ELF_MODULE_DUMP_BEGIN`
+- `ELF_MODULE_DUMP_CHUNK`
+- `ELF_MODULE_DUMP_END`
 - `ELF_SYMBOL_CALL_LOG`
-- `BATCH(source=ELF_SNAPSHOT_CHUNKS)`
+- `BATCH(source=ELF_MODULE_DUMP_CHUNKS)`
 
-`snapshot()` 在 RPC 模式下会走上述消息链路；Python 侧默认产物布局是：
+`dumpModule()` 在 RPC 模式下会走上述消息链路；Python 侧默认产物布局是：
 
-- `script.elftools.output_dir/snapshots/<tag-or-id>/`
-- `script.elftools.output_dir/logs/<tag>.log`
+- `script.elftools.output_dir/<tag?>/`
+- 同一目录下的 `symbols.log`
+- `tag` 会被收束成 ASCII-safe 单层 leaf；空 tag 仍表示 capability root，dot-only 或归一后为空的 tag 会回退到 `default`
 
-这说明 README 后续收束时，应把 ELF 能力描述成“增强 ELF 模块分析、symbol hook 与流式 snapshot 辅助”，而不是只写成“能找模块名”的小工具。
+RPC 模式下 host 侧不会把单次 `outputDir` 或 `relative_dump_dir` 当成实际根目录覆盖；输出根始终由 `script.elftools.output_dir` 或 `agent.datadir/elftools` 决定，单次区分只使用 `tag`，被忽略的路径请求会记录进 `manifest.json`。
+
+当前 `/elf` 的 dump workflow 默认会输出 2 份二进制产物和 1 份 replay record：
+
+- `raw`: 直接从内存复制的原始 image
+- `fixed`: 参考 `elf-dump-fix` 思路重建 section/program/dynamic/relocation 元数据后，再规范最小 ELF 头得到的最终分析产物
+- `fixups.json`: 记录从 `raw` 重放到 `fixed` 所需的分阶段 patch，按 `phdr-rebase -> dynamic-rebase -> dynsym-fixups -> relocation-fixups -> section-rebuild -> header-finalize` 顺序输出，既可独立重放，也便于定位是哪一个修复阶段改写了哪些字段
+- 详细字段图例、缩写说明和重放规则见 [docs/elf-fixups.md](docs/elf-fixups.md)
+
+这说明 README 后续收束时，应把 ELF 能力描述成“增强 ELF 模块分析、symbol hook 与流式 dump/修复辅助”，而不是只写成“能找模块名”的小工具。
 
 #### 12.8 SSL 能力 / SSL / SSLTools / BoringSSL
 
@@ -991,7 +1022,7 @@ output_dir = "./data/elftools/"
 
 - agent stderr 输出目标
 
-`script.nettools.ssl_log_secret`
+`script.nettools.output_dir`
 
 - SSL key log 的输出目录
 
@@ -1019,7 +1050,7 @@ stdout = "./logs/outerr.log"
 stderr = "./logs/outerr.log"
 
 [script.nettools]
-ssl_log_secret = "./data/nettools/sslkey/"
+output_dir = "./data/nettools/"
 
 [script.repl]
 globals = ["Process", "Module", "Memory", "Java", "ObjC", "Swift"]
@@ -1104,40 +1135,37 @@ uv tool install "git+https://github.com/ZSA233/frida-analykit@stable"
 推荐顺序：
 
 ```sh
-# 1. 创建并进入匹配版本的 Frida 虚拟环境
+# 1. 通过 stable 入口安装 CLI
+uv tool install "git+https://github.com/ZSA233/frida-analykit@stable"
+
+# 2. 创建并进入匹配版本的 Frida 虚拟环境
 frida-analykit env create --frida-version 17.8.2 --name frida-17.8.2
 frida-analykit env shell frida-17.8.2
 
-# 2. 生成工作区并安装 TS 依赖
+# 3. 确认设备已连上宿主机
+adb devices
+
+# 4. 生成工作区并安装 TS 依赖
 frida-analykit gen dev --work-dir ./my-agent
 cd ./my-agent
 npm install
 
-# 3. 检查当前环境与设备状态
+# 5. 检查当前环境与设备状态
 frida-analykit doctor --config ./config.toml
 
-# 4. 如有需要，先修复远端 frida-server 的安装 / 版本红项
+# 6. 如有需要，先修复远端 frida-server 的安装 / 版本红项，并启动远端链路
 frida-analykit doctor fix --config ./config.toml
-
-# 5. 如仍需要，也可显式安装匹配的 frida-server 到 config.server.path
-frida-analykit server install --config ./config.toml
-
-# 6. 一个终端启动远端 frida-server
 frida-analykit server boot --config ./config.toml
 
-# 7. 另一个终端注入脚本
+# 7. 编译、注入并进入 REPL
 frida-analykit attach --config ./config.toml --build --repl
-# 或
-frida-analykit spawn --config ./config.toml --build
 ```
 
 补充说明：
 
-- 如果只想先编译，再手动决定什么时候注入，可以先单独执行 `frida-analykit build --config ./config.toml`。
-- 如果 `_agent.js` 已经是最新的，则 `attach` / `spawn` 不一定非要加 `--build`。
-- `server install` 默认会根据当前 Python 环境里的 `frida` 版本、`config.server.version` 和显式 `--version` 来决定安装版本。
-- `server install` 的远端落地路径由 `config.server.path` 控制。
-- `server boot` 不会自动安装或切换版本；如果 `doctor` 标红远端版本错配，应先执行 `doctor fix` 或 `server install`。
+- 完成这条路径后，用户应已经拿到可修改的 TS 工作区、成功构建出的 `_agent.js`、已建立的注入 session 和 REPL banner。
+- 如果目标 app 还没启动，可把最后一步换成 `frida-analykit spawn --config ./config.toml --build`。
+- 如果 `doctor fix` 之后仍有远端安装 / 版本红项，再按设备文档继续执行 `server install` 或其他修复动作。
 
 ### 方式 B：直接使用现成 JS bundle
 
@@ -1277,7 +1305,8 @@ docs/                              release 相关文档
 这些内容不一定都应该直接进入对外 `README.md`，但必须在收束时被重新检查：
 
 - `README.md` / `README_EN.md` 的稳定安装示例应固定使用 `git+https://github.com/ZSA233/frida-analykit@stable`。
-- `README.md` 已覆盖主线能力，但对 `watch` 独立命令、RPC/REPL 深层能力、repo-local env 与 global env 的区别仍可继续优化。
+- 根 README 应保持 onboarding-first，不再重新展开长篇字段枚举、“使用时需要特别记住”、MCP quick-path 细节或 agent capability 总表。
+- 根 README 的最小 `config.toml` 示例应继续使用行内注释说明常用字段，而不是恢复成大段配置说明。
 - `packages/frida-analykit-agent/README*.md` 与包 `homepage` 这类用户向 GitHub 文档链接应固定指向 `blob/stable/...`，不要跟随 `main` 漂移。
 - `README.md` 面向对外说明时，应保持主线清晰；但在收束时不要遗漏：
   - v2 的双产物定位

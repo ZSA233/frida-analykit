@@ -1,5 +1,8 @@
 import io
+import json
 from pathlib import Path
+
+import pytest
 
 from frida_analykit.config import AppConfig
 from frida_analykit.rpc.message import (
@@ -9,6 +12,7 @@ from frida_analykit.rpc.message import (
     RPCMsgDumpDexFile,
     RPCMsgDexDumpFileInfo,
     RPCMsgSaveFile,
+    RPCMsgSSLSecret,
     RPCMsgType,
     RPCPayload,
 )
@@ -23,7 +27,10 @@ def _config(tmp_path: Path) -> AppConfig:
             "jsfile": str(tmp_path / "_agent.js"),
             "server": {"host": "local"},
             "agent": {"datadir": str(tmp_path / "data")},
-            "script": {"nettools": {"ssl_log_secret": str(tmp_path / "ssl")}},
+            "script": {
+                "nettools": {"output_dir": str(tmp_path / "ssl")},
+                "dextools": {"output_dir": str(tmp_path / "dex")},
+            },
         }
     ).resolve_paths(tmp_path)
 
@@ -106,7 +113,6 @@ def test_registry_forwards_host_handler_logs_to_sink(tmp_path: Path) -> None:
                 data=RPCMsgDexDumpBegin(
                     transfer_id=transfer_id,
                     tag="demo",
-                    dump_dir=str(tmp_path / "dex"),
                     expected_count=1,
                     total_bytes=3,
                     max_batch_bytes=1024,
@@ -151,6 +157,70 @@ def test_registry_forwards_host_handler_logs_to_sink(tmp_path: Path) -> None:
 
     assert any(level == "info" and text.startswith("[dex] begin dex-1") for level, text in emitted)
     assert any(level == "info" and text.startswith("[dex] complete dex-1") for level, text in emitted)
+
+
+def test_registry_writes_ssl_secrets_into_tagged_nettools_leaf(tmp_path: Path) -> None:
+    registry = HandlerRegistry(_config(tmp_path), io.StringIO(), io.StringIO())
+
+    registry.handle(
+        RPCPayload(
+            message=RPCMessage(
+                type=RPCMsgType.SSL_SECRET,
+                data=RPCMsgSSLSecret(
+                    tag="demo",
+                    label="CLIENT_RANDOM",
+                    client_random="abcd",
+                    secret="1234",
+                ),
+            )
+        )
+    )
+
+    target_dir = tmp_path / "ssl" / "demo"
+    assert (target_dir / "sslkey.log").read_text(encoding="utf-8").strip() == "CLIENT_RANDOM abcd 1234"
+    manifest = json.loads((target_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["tag"] == "demo"
+    assert manifest["effective_tag"] == "demo"
+    assert manifest["actual_relative_dir"] == "demo"
+    assert manifest["configured_output_root"] == str((tmp_path / "ssl").resolve())
+    assert manifest["output_name"] == "sslkey.log"
+
+
+@pytest.mark.parametrize(
+    ("tag", "effective_tag"),
+    [
+        ("..", "default"),
+        ("测试", "default"),
+        ("alpha/beta", "alpha_beta"),
+    ],
+)
+def test_registry_normalizes_ssl_secret_tags_into_single_leaf(
+    tmp_path: Path,
+    tag: str,
+    effective_tag: str,
+) -> None:
+    registry = HandlerRegistry(_config(tmp_path), io.StringIO(), io.StringIO())
+
+    registry.handle(
+        RPCPayload(
+            message=RPCMessage(
+                type=RPCMsgType.SSL_SECRET,
+                data=RPCMsgSSLSecret(
+                    tag=tag,
+                    label="CLIENT_RANDOM",
+                    client_random="abcd",
+                    secret="1234",
+                ),
+            )
+        )
+    )
+
+    target_dir = tmp_path / "ssl" / effective_tag
+    assert (target_dir / "sslkey.log").read_text(encoding="utf-8").strip() == "CLIENT_RANDOM abcd 1234"
+    manifest = json.loads((target_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["tag"] == tag
+    assert manifest["effective_tag"] == effective_tag
+    assert manifest["actual_relative_dir"] == effective_tag
 
 
 def test_resolver_dispatches_send_and_error_messages() -> None:

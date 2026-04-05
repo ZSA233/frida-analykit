@@ -30,4 +30,5 @@ export type DexDumpSummary = {
     totalBytes: number
     mode: "rpc" | "file"
     dumpDir?: string
+    relativeDumpDir: string
 }

@@ -1,11 +1,18 @@
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
 from ...config import AppConfig
+from .output_paths import (
+    OutputLeaf,
+    resolve_configured_output_root,
+    resolve_output_leaf,
+    reset_output_leaf,
+)
 from ..message import (
     RPCMsgDexDumpBegin,
     RPCMsgDexDumpEnd,
@@ -22,7 +29,13 @@ class DexDumpTransferState:
     expected_count: int
     total_bytes: int
     tag: str
-    manifest: list[dict[str, object]] = field(default_factory=list)
+    effective_tag: str
+    requested_dump_dir: str | None
+    configured_output_root: str
+    actual_relative_dir: str
+    max_batch_bytes: int
+    created_at_ms: int
+    files: list[dict[str, object]] = field(default_factory=list)
     received_count: int = 0
     received_bytes: int = 0
     mismatched_files: list[str] = field(default_factory=list)
@@ -44,18 +57,32 @@ class DexDumpHandler:
     def handle_begin(self, payload: RPCPayload) -> None:
         data = payload.message.data
         assert isinstance(data, RPCMsgDexDumpBegin)
-        directory = self._resolve_directory(data)
-        self._cleanup_previous_outputs(directory)
+        try:
+            output_leaf = self._resolve_output_leaf(data)
+        except ValueError as exc:
+            self._emit_error(f"[dex] reject transfer {data.transfer_id}: {exc}")
+            raise
+        reset_output_leaf(
+            output_leaf,
+            cleanup_patterns=("classes*.dex", "classes*.dex.json", "classes.json", "*_classes.json", "manifest.json"),
+        )
         state = DexDumpTransferState(
             transfer_id=data.transfer_id,
-            directory=directory,
+            directory=output_leaf.directory,
             expected_count=data.expected_count,
             total_bytes=data.total_bytes,
             tag=data.tag,
+            effective_tag=output_leaf.effective_tag,
+            requested_dump_dir=data.dump_dir,
+            configured_output_root=str(output_leaf.root),
+            actual_relative_dir=output_leaf.relative_dir,
+            max_batch_bytes=data.max_batch_bytes,
+            created_at_ms=int(time.time() * 1000),
         )
         self._states[data.transfer_id] = state
+        self._write_manifest(state)
         self._emit_info(
-            f"[dex] begin {data.transfer_id} -> {directory} "
+            f"[dex] begin {data.transfer_id} -> {output_leaf.directory} "
             f"(expected={data.expected_count}, bytes={data.total_bytes}, max_batch={data.max_batch_bytes})"
         )
 
@@ -77,7 +104,7 @@ class DexDumpHandler:
                 f"[dex] size mismatch {state.transfer_id}: {output_name} "
                 f"payload={payload_size}, declared={data.info.size}"
             )
-        state.manifest.append({**data.info.model_dump(mode="json"), "output_name": output_name})
+        state.files.append({**data.info.model_dump(mode="json"), "output_name": output_name})
         self._write_manifest(state)
         self._emit_info(
             f"[dex] file {state.transfer_id}: {output_name} "
@@ -118,33 +145,41 @@ class DexDumpHandler:
         for item in unpack_batch_payload(payload):
             self.handle_file(item)
 
-    def _resolve_directory(self, data: RPCMsgDexDumpBegin) -> Path:
-        base_dir = self._config.script.dextools.output_dir
-        if data.dump_dir:
-            base_dir = Path(data.dump_dir).expanduser()
-        elif base_dir is None and self._config.agent.datadir is not None:
-            base_dir = self._config.agent.datadir / "dextools"
-        if base_dir is None:
-            raise RuntimeError("script.dextools.output_dir or agent.datadir is required for dex dumping")
-        target = base_dir
-        if data.tag:
-            target = target / Path(data.tag).name
-        target.mkdir(parents=True, exist_ok=True)
-        return target.resolve()
-
-    @staticmethod
-    def _cleanup_previous_outputs(directory: Path) -> None:
-        for pattern in ("classes*.dex", "classes*.dex.json", "classes.json", "*_classes.json"):
-            for path in directory.glob(pattern):
-                if path.is_file():
-                    path.unlink()
+    def _resolve_output_leaf(self, data: RPCMsgDexDumpBegin) -> OutputLeaf:
+        root = resolve_configured_output_root(
+            configured_root=self._config.script.dextools.output_dir,
+            agent_datadir=self._config.agent.datadir,
+            fallback_child="dextools",
+            missing_message="script.dextools.output_dir or agent.datadir is required for dex dumping",
+        )
+        return resolve_output_leaf(root, data.tag)
 
     @staticmethod
     def _write_manifest(state: DexDumpTransferState) -> None:
-        manifest_path = state.directory / "classes.json"
+        manifest_path = state.directory / "manifest.json"
         manifest_path.parent.mkdir(parents=True, exist_ok=True)
         manifest_path.write_text(
-            json.dumps(state.manifest, ensure_ascii=False, indent=2),
+            json.dumps(
+                {
+                    "transfer_id": state.transfer_id,
+                    "created_at_ms": state.created_at_ms,
+                    "mode": "rpc",
+                    "tag": state.tag,
+                    "effective_tag": state.effective_tag,
+                    "requested_dump_dir": state.requested_dump_dir,
+                    "configured_output_root": state.configured_output_root,
+                    "actual_relative_dir": state.actual_relative_dir,
+                    "expected_count": state.expected_count,
+                    "received_count": state.received_count,
+                    "total_bytes": state.total_bytes,
+                    "received_bytes": state.received_bytes,
+                    "max_batch_bytes": state.max_batch_bytes,
+                    "mismatched_files": list(state.mismatched_files),
+                    "files": state.files,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
             encoding="utf-8",
         )
 

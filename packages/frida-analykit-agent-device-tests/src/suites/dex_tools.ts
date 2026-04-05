@@ -33,11 +33,13 @@ export function runDexToolsSuite(): AgentUnitSuiteResult {
                 assertCondition(summary.transferId.length > 0, "expected transfer id");
                 assertCondition(summary.dexCount > 0, `expected positive dex count, got ${summary.dexCount}`);
                 assertCondition(summary.totalBytes > 0, `expected positive total bytes, got ${summary.totalBytes}`);
+                assertCondition(summary.relativeDumpDir === tag, `expected relative dump dir ${tag}, got ${summary.relativeDumpDir}`);
                 return JSON.stringify({
                     tag,
                     transferId: summary.transferId,
                     dexCount: summary.dexCount,
                     totalBytes: summary.totalBytes,
+                    relativeDumpDir: summary.relativeDumpDir,
                 });
             },
         },

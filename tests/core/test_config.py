@@ -29,7 +29,7 @@ output_dir = "./dextools"
 output_dir = "./elftools"
 
 [script.nettools]
-ssl_log_secret = "./ssl"
+output_dir = "./ssl"
 """.strip(),
         encoding="utf-8",
     )
@@ -45,7 +45,7 @@ ssl_log_secret = "./ssl"
     assert config.script.dextools.output_dir == (tmp_path / "dextools").resolve()
     assert config.script.elftools.output_dir == (tmp_path / "elftools").resolve()
     assert config.script.rpc.batch_max_bytes == 1234
-    assert config.script.nettools.ssl_log_secret == (tmp_path / "ssl").resolve()
+    assert config.script.nettools.output_dir == (tmp_path / "ssl").resolve()
     assert config.script.repl.globals == list(DEFAULT_SCRIPT_REPL_GLOBALS)
 
 

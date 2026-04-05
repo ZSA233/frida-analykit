@@ -25,6 +25,38 @@
 - 允许设备有波动，但只有在“设备能自恢复并继续跑”的前提下，才值得在测试链路里补恢复策略。
 - 恢复策略必须窄化到明确阶段和明确错误语义，不能把所有路径都变成长时间等待。
 
+## 常用环境变量与控制入口
+
+### 环境变量
+
+| 变量 | 主要影响 | 作用 |
+|:--|:--|:--|
+| `FRIDA_ANALYKIT_ENABLE_DEVICE=1` | `pytest tests/device -m device`、`make device-*` | 打开真机测试入口；未设置时，device tests 会直接 skip。 |
+| `ANDROID_SERIAL=<serial>` | `make device-test*`、`server` 相关命令、`doctor device-compat` 的默认设备选择 | 固定目标设备；多设备在线时建议显式设置。 |
+| `FRIDA_ANALYKIT_DEVICE_APP=<package>` | app-backed 真机测试 | 覆盖默认测试包 `com.frida_analykit.test`。当你要对特定业务 app 回归时，用它替换默认 app。 |
+| `FRIDA_ANALYKIT_DEVICE_SKIP_APP_TESTS=1` | `pytest tests/device -m device`，以及经 `make device-*` 包装后的同类命令 | 跳过依赖 app 的真机用例，只保留 server、attach probe、REPL handle 这类不依赖业务 app 的链路。 |
+| `FRIDA_ANALYKIT_DEVICE_LOCAL_SERVER=<path>` | `tests/device/test_server_install.py` | 给 `--local-server` 安装路径测试提供本地 `frida-server` 文件；没设置时该类测试会跳过。 |
+| `FRIDA_ANALYKIT_DEVICE_FRIDA_VERSION=<version>` | `DeviceTestContext`、多版本 Frida 真机回归 | 显式指定真机回归使用哪一套受管 Python/Frida 版本；不设置时走默认 device profile。 |
+
+### `make` 参数与命令参数
+
+- `make device-test DEVICE_TEST_SKIP_APP=1`
+  作用：把 `FRIDA_ANALYKIT_DEVICE_SKIP_APP_TESTS=1` 传给底层 pytest，适合快速回归不依赖 app 的链路。
+- `make device-test DEVICE_TEST_APP=<package>`
+  作用：把 `FRIDA_ANALYKIT_DEVICE_APP=<package>` 传给底层 pytest，适合直接对指定 app 跑 device suite。
+- `frida-analykit doctor device-compat --serial <serial>`
+  作用：把兼容性采样固定到一台设备，避免多设备在线时误选目标。
+- `frida-analykit doctor device-compat --all-devices`
+  作用：对当前所有在线设备逐台做最小注入式兼容性采样。
+- `frida-analykit doctor device-compat --app <package>`
+  作用：给 compat 采样显式指定 app；未提供时会优先看配置，再回退到默认测试包。
+
+推荐理解方式：
+
+- 直接跑 `pytest tests/device -m device` 时，优先使用环境变量。
+- 通过 `make device-*` 跑时，优先使用 `ANDROID_SERIAL`、`DEVICE_TEST_APP`、`DEVICE_TEST_SKIP_APP` 这类更短的入口参数。
+- 真机回归失败时，先把这些变量和参数记录下来，再做失败分类；否则后续很难判断到底是设备差异、配置差异还是代码回归。
+
 ## 推荐执行顺序
 
 ### 发版前或设备相关改动后的基线回归

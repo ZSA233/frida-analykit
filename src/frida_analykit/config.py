@@ -54,7 +54,7 @@ class AgentConfig(BaseModel):
 class ScriptNetToolsConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    ssl_log_secret: Path | None = None
+    output_dir: Path | None = None
 
 
 class ScriptDexToolsConfig(BaseModel):
@@ -166,7 +166,7 @@ class AppConfig(BaseModel):
                         ),
                         "nettools": self.script.nettools.model_copy(
                             update={
-                                "ssl_log_secret": resolve(self.script.nettools.ssl_log_secret),
+                                "output_dir": resolve(self.script.nettools.output_dir),
                             }
                         )
                     }

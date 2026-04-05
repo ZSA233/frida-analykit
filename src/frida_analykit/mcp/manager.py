@@ -1444,7 +1444,7 @@ class DebugSessionManager:
                 stderr=manifest.config.stderr,
                 dextools_output_dir=manifest.config.dextools_output_dir,
                 elftools_output_dir=manifest.config.elftools_output_dir,
-                ssl_log_secret=manifest.config.ssl_log_secret,
+                nettools_output_dir=manifest.config.nettools_output_dir,
             ),
             build_ready=manifest.build_ready,
             last_prepare_outcome=manifest.last_prepare_outcome,

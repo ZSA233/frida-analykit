@@ -35,7 +35,7 @@ npx frida-compile index.ts -o _agent.js -c
 | `bridges` | `@zsa233/frida-analykit-agent/bridges` | 访问 Java / ObjC / Swift bridge 封装 | 否 |
 | `jni` | `@zsa233/frida-analykit-agent/jni` | 使用 `JNIEnv`、JNI wrapper 和显式签名调用 | 否 |
 | `ssl` | `@zsa233/frida-analykit-agent/ssl` | 使用 `SSLTools`、BoringSSL 定位和 keylog 辅助 | 否 |
-| `elf` | `@zsa233/frida-analykit-agent/elf` | 解析 ELF、创建 `ElfSymbolHooks` 和流式 snapshot | 否 |
+| `elf` | `@zsa233/frida-analykit-agent/elf` | 解析 ELF、创建 `ElfSymbolHooks` 并流式导出 raw/fixed dump 与 `fixups.json` | 否 |
 | `elf/enhanced` | `@zsa233/frida-analykit-agent/elf/enhanced` | 手动导入常用 symbol hook preset，避免默认打进核心 bundle | 否 |
 | `dex` | `@zsa233/frida-analykit-agent/dex` | 枚举 class loader dex 并流式 dump 到 Python 侧 | 否 |
 | `native/libart` | `@zsa233/frida-analykit-agent/native/libart` | 访问 ART 低层符号绑定 | 否 |
@@ -121,16 +121,21 @@ setImmediate(() => {
   const hooks = ElfTools.createSymbolHooks("libc.so", { logTag: "demo", observeDlsym: false })
   const enhanced = castElfSymbolHooks(hooks)
   enhanced.getpid()
-  const summary = ElfTools.snapshot("libc.so", { tag: "manual" })
-  console.log("snapshot =", summary.snapshotId, summary.moduleName)
+  const summary = ElfTools.dumpModule("libc.so", { tag: "manual" })
+  console.log("dump =", summary.dumpId, summary.moduleName, summary.relativeDumpDir)
 })
 ```
 
-- `/elf` 当前提供 `ElfTools.createSymbolHooks(...)`、`ElfTools.snapshot(...)` 和现有模块解析入口。
+- `/elf` 当前提供 `ElfTools.createSymbolHooks(...)`、`ElfTools.dumpModule(...)` 和现有模块解析入口。
 - `ElfSymbolHooks` 是模块级 symbol hook 状态对象，支持 lazy symbol registry、`dlsym` 联动和显式签名 `attach(...)`。
 - `/elf/enhanced` 只在你手动 import 时提供常用 preset，不会自动进入 `globalThis` 或核心 bundle。
-- `snapshot()` 会发送 `ELF_SNAPSHOT_BEGIN -> BATCH(ELF_SNAPSHOT_CHUNKS) -> ELF_SNAPSHOT_END`。
-- Python 侧默认写到 `script.elftools.output_dir`，未配置时回退到 `agent.datadir/elftools`，输出布局是 `snapshots/<tag-or-id>/` 与 `logs/<tag>.log`。
+- `dumpModule()` 会发送 `ELF_MODULE_DUMP_BEGIN -> BATCH(ELF_MODULE_DUMP_CHUNKS) -> ELF_MODULE_DUMP_END`。
+- Python 侧默认写到 `script.elftools.output_dir`，未配置时回退到 `agent.datadir/elftools`，输出布局是 `<output-root>/<tag?>/`，symbol call log 会写到同目录下的 `symbols.log`。
+- `tag` 会被归一到 ASCII-safe 单层 leaf；空 tag 仍表示根目录，dot-only 或归一后为空的 tag 会回退到 `default`。
+- RPC 模式下 `outputDir` 与 `relative_dump_dir` 仍会透传，但 host 侧只会把它们记录进 `manifest.json`；实际目录仍由 `script.elftools.output_dir` 和单层 `tag` 决定。
+- 每次 dump 默认会导出 `*.raw.so`、`*.fixed.so`、`fixups.json`、`symbols.json`、`proc_maps.txt` 和 `manifest.json`。
+- `fixups.json` 记录从 `raw` 重放到 `fixed` 的分阶段 patch；每个 stage 都直接归属到真实修复步骤，既可独立重放，也更方便分析是哪一段修复逻辑改写了哪些字段。
+- `fixups.json` 的字段缩写、stage 语义和重放规则见 [docs/elf-fixups.md](https://github.com/ZSA233/frida-analykit/blob/stable/docs/elf-fixups.md)。
 
 ### DexTools
 
@@ -151,6 +156,9 @@ setImmediate(() => {
 - `dumpAllDex()` 会发送 `DEX_DUMP_BEGIN -> BATCH(DEX_DUMP_FILES) -> DEX_DUMP_END`。
 - 默认最大批量大小来自 Python 配置 `script.rpc.batch_max_bytes`，agent 侧对应 `Config.BatchMaxBytes`。
 - 单个超大 dex 会单独成批发送而不会继续切片，Python 侧默认写到 `script.dextools.output_dir`，未配置时回退到 `agent.datadir/dextools`。
+- `tag` 会被归一到 ASCII-safe 单层 leaf；空 tag 仍表示根目录，dot-only 或归一后为空的 tag 会回退到 `default`。
+- RPC 模式下 `dumpDir` 仍会透传，但 host 侧只会把它记录进 `manifest.json`；实际目录仍由 `script.dextools.output_dir` 和单层 `tag` 决定。
+- Python 侧 dex dump 目录会写出 `manifest.json`，并在 `files` 字段中列出本次导出的 dex 文件；旧的 `classes.json` 不再保留。
 
 ### JNI / native bindings
 

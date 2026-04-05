@@ -124,7 +124,7 @@ output_dir = "./dex"
 output_dir = "./elf"
 
 [script.nettools]
-ssl_log_secret = "./ssl"
+output_dir = "./ssl"
 """.strip(),
         encoding="utf-8",
     )
@@ -140,7 +140,7 @@ ssl_log_secret = "./ssl"
     assert config.agent.stderr == Path("logs/err.log")
     assert config.script.dextools.output_dir == Path("dex")
     assert config.script.elftools.output_dir == Path("elf")
-    assert config.script.nettools.ssl_log_secret == Path("ssl")
+    assert config.script.nettools.output_dir == Path("ssl")
 
 
 def test_load_mcp_startup_config_rejects_duplicate_session_root_keys(tmp_path: Path) -> None:

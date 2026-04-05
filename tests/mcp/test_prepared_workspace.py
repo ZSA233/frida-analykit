@@ -121,7 +121,7 @@ def _startup_config(tmp_path: Path) -> MCPStartupConfig:
             "script": {
                 "dextools": {"output_dir": "./data/dextools"},
                 "elftools": {"output_dir": "./data/elftools"},
-                "nettools": {"ssl_log_secret": "./data/nettools/sslkey"},
+                "nettools": {"output_dir": "./data/nettools"},
             },
         }
     )
@@ -504,14 +504,14 @@ def test_prepared_workspace_projects_startup_config_into_generated_config(
     assert 'datadir = "data"' in config_text
     assert 'stdout = "logs/outerr.log"' in config_text
     assert 'output_dir = "data/dextools"' in config_text
-    assert 'ssl_log_secret = "data/nettools/sslkey"' in config_text
+    assert 'output_dir = "data/nettools"' in config_text
     assert config.agent.datadir == (result.manifest.workspace_root / "data").resolve()
     assert config.agent.stdout == (result.manifest.workspace_root / "logs" / "outerr.log").resolve()
     assert config.agent.stderr == (result.manifest.workspace_root / "logs" / "outerr.log").resolve()
     assert config.script.dextools.output_dir == (result.manifest.workspace_root / "data" / "dextools").resolve()
     assert config.script.elftools.output_dir == (result.manifest.workspace_root / "data" / "elftools").resolve()
-    assert config.script.nettools.ssl_log_secret == (
-        result.manifest.workspace_root / "data" / "nettools" / "sslkey"
+    assert config.script.nettools.output_dir == (
+        result.manifest.workspace_root / "data" / "nettools"
     ).resolve()
     assert config.jsfile == result.manifest.bundle_path
     assert result.manifest.config_path.name == "config.toml"

@@ -65,8 +65,8 @@ Treat the items below as the stable quick-session contract for `eval_js` and sni
 | `process_probe` | `help`, `proc` | `help.proc.readCmdline()`, `proc.loadProcMap().items.length` | Good first stop for maps, cmdline, and runtime output helpers. |
 | `java_bridge` | `JNIEnv`, `jobject`, `jclass` | `JNIEnv.$handle`, `Java.performNow(() => Java.use("android.app.ActivityThread").currentPackageName())` | `Java` may already exist on Android even without this template. |
 | `dex_probe` | `DexTools` | `DexTools.enumerateClassLoaderDexFiles().length`, `DexTools.dumpAllDex("case-001").transferId` | Also brings the JNI/ART helpers needed by dex flows. |
-| `ssl_probe` | `SSLTools`, `BoringSSL` | `SSLTools.attachLibsslKeylogFunc("sslkey.log")`, `BoringSSL.loadFromModule(Process.getModuleByName("libsscronet.so")).scanKeylogFunc()` | Useful for libssl and BoringSSL keylog validation. |
-| `elf_probe` | `ElfTools` | `ElfTools.findModuleByName("libc.so")?.name`, `ElfTools.snapshot("libc.so", { tag: "manual" })` | Use `bootstrap_path` for `elf/enhanced` imports. |
+| `ssl_probe` | `SSLTools`, `BoringSSL` | `SSLTools.attachLibsslKeylogFunc("manual")`, `BoringSSL.loadFromModule(Process.getModuleByName("libsscronet.so")).scanKeylogFunc()` | Useful for libssl and BoringSSL keylog validation. |
+| `elf_probe` | `ElfTools` | `ElfTools.findModuleByName("libc.so")?.name`, `ElfTools.dumpModule("libc.so", { tag: "manual" })` | Use `bootstrap_path` for `elf/enhanced` imports. |
 
 ### Additive capabilities
 
@@ -78,8 +78,8 @@ Treat the items below as the stable quick-session contract for `eval_js` and sni
 | `bridges` | no extra analykit globals beyond normal Frida bridge globals | `Java.available` | Mostly ensures the bridge import is present for bootstrap code. |
 | `jni` | `JNIEnv`, `jobject`, `jclass` | `JNIEnv.$handle` | Use when explicit JNI wrappers are required. |
 | `dex` | `DexTools` | `DexTools.dumpAllDex("case-001").transferId` | Also makes the ART binding available transitively. |
-| `ssl` | `SSLTools`, `BoringSSL`, `Libssl` | `SSLTools.attachLibsslKeylogFunc("sslkey.log")` | Best fit for SSL secret logging and BoringSSL scans. |
-| `elf` | `ElfTools` | `ElfTools.snapshot("libc.so", { tag: "manual" })` | Module and symbol exploration. |
+| `ssl` | `SSLTools`, `BoringSSL`, `Libssl` | `SSLTools.attachLibsslKeylogFunc("manual")` | Best fit for SSL secret logging and BoringSSL scans. |
+| `elf` | `ElfTools` | `ElfTools.dumpModule("libc.so", { tag: "manual" })` | Module, symbol, and dump exploration. |
 | `native_libart` | `Libart` | `Libart.$getModule().name` | Low-level ART binding only. |
 | `native_libssl` | `Libssl` | `Libssl.$getModule().name` | Low-level libssl binding only. |
 | `native_libc` | `Libc` | `(new Libc()).getpid()` | The `libc` instance export is not placed in `eval_js` globals. |

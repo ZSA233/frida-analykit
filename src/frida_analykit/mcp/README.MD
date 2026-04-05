@@ -87,7 +87,7 @@ output_dir = "./data/dextools"
 output_dir = "./data/elftools"
 
 [script.nettools]
-ssl_log_secret = "./data/nettools/sslkey"
+output_dir = "./data/nettools"
 ```
 
 补充说明：
@@ -294,7 +294,7 @@ summary.transferId
 这里要注意完成态判断：
 
 - `DexTools.dumpAllDex(...)` 返回时，只能说明 agent 侧流式发送已经结束
-- Python host 侧可能还在继续写 dex 文件和 `classes.json`
+- Python host 侧可能还在继续写 dex 文件和 `manifest.json`
 - MCP 现在把 host 侧 `[dex] begin/file/complete` 事件也并入了 `tail_logs(...)` / `frida://session/logs`
 - 更稳妥的判定方式是：
   - 记录 `summary.transferId`
@@ -307,17 +307,17 @@ summary.transferId
 适合 libssl / BoringSSL 相关验证：
 
 ```js
-SSLTools.attachLibsslKeylogFunc("sslkey.log")
+SSLTools.attachLibsslKeylogFunc("manual")
 BoringSSL.loadFromModule(Process.getModuleByName("libsscronet.so")).scanKeylogFunc()
 ```
 
 ### `elf_probe`
 
-适合模块、符号和 snapshot 取证：
+适合模块、符号和 dump 取证：
 
 ```js
 ElfTools.findModuleByName("libc.so")?.name
-ElfTools.snapshot("libc.so", { tag: "manual" })
+ElfTools.dumpModule("libc.so", { tag: "manual" })
 ```
 
 如果你要用 `elf/enhanced` 的额外 helper，不要继续塞进 quick capability，而要放到 `bootstrap_path` 或自定义 workspace import 里。

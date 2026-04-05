@@ -133,7 +133,7 @@ def test_attach_smoke_with_local_device(tmp_path: Path) -> None:
               stderr: {log_path}
             script:
               nettools:
-                ssl_log_secret: {tmp_path / "ssl"}
+                output_dir: {tmp_path / "ssl"}
             """
         ).strip(),
         encoding="utf-8",
