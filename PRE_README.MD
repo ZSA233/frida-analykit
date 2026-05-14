@@ -11,7 +11,7 @@
 - 只要用户可见能力、配置、命令行、接入方式、限制条件发生变化，应先更新本文件。
 - release 前收束 `README.md` 时，应基于本文件整体整理，而不是仅把最近一次改动直接拼接进 README。
 
-本文件的初始化快照基于当前仓库状态整理，当前更新快照时间为 `2026-04-05`。
+本文件的初始化快照基于当前仓库状态整理，当前更新快照时间为 `2026-05-15`。
 
 ## README 收束风格基线
 
@@ -21,13 +21,12 @@ README 收束时，应同时遵循下面这些约束：
 - 对外 README 应比 `PRE_README.MD` 更短、更稳、更主线化，不要把本文件中的工作痕迹、排查细节和中间态说明原样搬进去。
 - 根 `README.md` 与 `README_EN.md` 必须是严格镜像的中英版本，只允许语言翻译上的差异，不允许一边多写、一边漏写。
 - `packages/frida-analykit-agent/README.md` 与 `packages/frida-analykit-agent/README_EN.md` 也必须遵循同样的严格镜像规则。
-- 根 README 的默认叙述顺序应为：项目定位、架构说明图、快速开始、最小 `config.toml` 示例、更多能力、真机测试与更多文档。
-- 根 README 应是 onboarding-first 文档，目标是一眼看懂主线，而不是把所有实现细节堆成半份手册。
+- 根 README 的默认叙述顺序应为：项目定位、快速开始、文档索引、架构说明图。
+- 根 README 应是 onboarding-first 入门说明，目标是一眼看懂主线、完成第一条可运行路径，并把细节稳定导向 `docs/` 或对应子系统文档。
 - 根 README 的快速开始应固定围绕一条最小路径：安装 CLI、进入 Frida 虚拟环境、确认设备连接、生成工作区、安装依赖、执行 `doctor`、必要时 `doctor fix` + `server boot`、最后 `attach --build --repl`。
 - 根 README 的每一步应尽量直接说明“做完这一步得到什么结果”，帮助用户判断是否可以继续。
-- 根 README 的配置说明应优先通过最小 `config.toml` 示例中的行内注释表达，而不是长篇字段枚举和“使用时需要特别记住”列表。
-- 根 README 需要更细配置说明时，应优先跳转到 scaffold README，而不是重新把字段细节写回根文档。
-- 根 README 对 MCP、agent runtime、真机测试只保留入口级说明和跳转链接；详细行为、能力表和实现细节放到对应专门文档。
+- 根 README 不再内联最小 `config.toml` 示例；配置说明优先跳转到 scaffold README 和生成工作区内的同名 README。
+- 根 README 对 MCP、agent runtime、真机测试、ELF fixups、发版流程只保留入口级说明和跳转链接；详细行为、能力表和实现细节放到对应专门文档。
 - agent 包 README 的默认叙述顺序应为：包定位、安装、能力总览表、普通使用方式、高级能力、调试与非公共内容。
 - 当能力项较多、导入路径较多或需要区分轻入口/显式 capability 时，应优先在专门文档中用表格呈现，而不是继续塞回根 README。
 - 根 README 的架构图必须读取并嵌入 `docs/arch.mermaid` 的 Mermaid 源码；在架构未变时，这个 `.mermaid` 文件视为只读事实源。
@@ -201,8 +200,8 @@ frida-analykit-mcp --config ./mcp.toml
 
 - 当前只支持 stdio transport，不支持 HTTP / SSE。
 - 默认只维护一个活动调试会话，不做多会话并存。
-- `--config` 是可选的 MCP 启动 TOML；未提供时，MCP 会回退到内建默认值。`--idle-timeout` 继续保留为 CLI override。
-- MCP 启动现在固定走三阶段：`startup preflight -> startup warmup -> stdio serve`。只要 quick-path 所需工具链缺失或 warmup 失败，进程就会 fail-fast 非零退出，不会继续进入 serve。
+- `--config` 是可选的 MCP 启动 TOML；未提供时，MCP 会回退到内建默认值。`--idle-timeout` 继续保留为 CLI override。`--require-quick-ready` 可用于严格部署模式，让 quick-path warmup 失败时仍按旧语义非零退出。
+- MCP 启动现在固定走三阶段：`startup preflight -> startup warmup -> stdio serve`。默认情况下，即使 quick-path 所需工具链缺失或 warmup 失败，stdio server 仍会启动；失败状态会进入 `frida://service/config.quick_path`，实际调用 `session_open_quick` 时再返回清晰错误。只有传入 `--require-quick-ready` 时，quick-path 失败才会阻断 serve。
 - 启动 banner 会打印一组 quick-path readiness 状态行；如果 `stderr.isatty()`，则用 ANSI 颜色渲染 `✓ / ✗ / ●`，否则保留同样的状态符号但不输出转义序列。
 - Python 侧实现已经切到 async-first manager 主线，并且不再保留独立的 sync MCP manager public surface。
 - MCP tools 当前统一走 `AsyncScriptWrapper` / `AsyncJsHandle` 这条 Promise-aware agent/RPC 语义，不提供 REPL 里那套以 sync handle 为主的对象浏览体验。
@@ -215,7 +214,7 @@ frida-analykit-mcp --config ./mcp.toml
   - `[script.elftools]`：`output_dir`
   - `[script.nettools]`：`output_dir`
 - 这些服务级默认值在 MCP 进程启动后固定不变，`session_open_quick` 不再让大模型逐次指定 `host`、`device`、`path`、`server.version` 或 runtime 包版本。
-- `session_open` 首次需要 `config_path` 和 `mode`；如果当前 live session 与目标一致，则直接复用；如果目标不同，则需要 `force_replace=true`。
+- `session_open` 首次需要 `config_path` 和 `mode`；如果当前 live session 与目标一致，则直接复用；如果目标不同，则需要 `force_replace=true`。`session_open` / `session_open_quick` 都只接受 `mode="attach"` 或 `mode="spawn"`，无效值会在创建 history、prepare、attach 或 load 之前立即失败。
 - 推荐入口 `session_open_quick(app, mode, capabilities?, template?, bootstrap_path?, bootstrap_source?, ...)`：它会自动生成最小 `index.ts`、复用共享轻量 runtime cache、使用 MCP 进程 `PATH` 中预装的 `frida-compile` 编译 `_agent.js`、写出继承 startup config 的 `config.toml`，然后复用同一套 session manager 打开会话。
 - `session_open` 继续保留为底层显式入口，适用于用户已经自定义维护好的工作区。
 - 当前 tool 集合固定为：
@@ -257,7 +256,7 @@ frida-analykit-mcp --config ./mcp.toml
 - 这个会话目录会保存 `workspace/`、`session.json`、`events.jsonl` 和 snippet 历史源码。
 - `session_open_quick` 同时支持 `bootstrap_path` 和 `bootstrap_source`：前者会复制本地 `.ts` / `.js` 文件到 prepared workspace 并导入，后者则生成一段内联 bootstrap 文件；它们都不进入 snippet registry。
 - quick path 只允许官方 `@zsa233/frida-analykit-agent` capability subpath / 模板名，不开放任意 npm 包和任意 import 文本。
-- quick path 不会在每个 prepared workspace 里安装 `frida-compile`、`frida` 或 `@types/node`；MCP 会在启动时先检查 `PATH` 里的 `frida-compile` 和 `npm`，并预热一份 shared runtime toolchain 与 compile probe。只要这一步失败，服务就不会启动。
+- quick path 不会在每个 prepared workspace 里安装 `frida-compile`、`frida` 或 `@types/node`；MCP 会在启动时先检查 `PATH` 里的 `frida-compile` 和 `npm`，并预热一份 shared runtime toolchain 与 compile probe。默认即使这一步失败，服务也会启动并暴露 failed summary；`session_open_quick` 不可用，但显式 `session_open(config_path, ...)` 不受 quick-path 缺依赖影响。需要严格失败即退出时使用 `--require-quick-ready`。
 - `prepared_cache_root` 继续只承担内部 quick build/cache 角色；给用户看的会话记录和持久化 snippet 不放在 signature cache 目录里，而是放到 `session_root` 这套会话目录树下。
 - `session_open(config_path, ...)` 仍然保留给显式 workspace，适用于用户已经自定义维护好的工作区。
 - 当前不会替 MCP 接管 watch / hot reload；`session_open_quick` 只负责一次性 prepare + build，`session_open` 仍要求 `config.jsfile` 已经是可注入的 bundle。

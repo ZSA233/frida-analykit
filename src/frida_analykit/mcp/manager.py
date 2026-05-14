@@ -3,12 +3,10 @@ from __future__ import annotations
 import asyncio
 import json
 from collections import deque
-from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from collections.abc import Callable
 from datetime import datetime, timezone
-from functools import partial
 from pathlib import Path
-from typing import Any, Protocol, TypeVar
+from typing import Any
 from uuid import uuid4
 
 from pydantic import ValidationError
@@ -18,8 +16,10 @@ from ..config import AppConfig
 from ..rpc import RPCValueUnavailableError
 from ..rpc.handler.js_handle import AsyncJsHandle
 from ..server import FridaServerManager, ServerManagerError
-from ..session import AsyncScriptWrapper, SessionWrapper
+from ..session import SessionWrapper
+from .async_utils import to_thread as _to_thread
 from .config import MCPStartupConfig
+from .errors import MCPManagerError
 from .history import SessionHistoryManager, SessionHistoryRecord
 from .history.service import SessionHistoryError
 from .models import (
@@ -28,21 +28,14 @@ from .models import (
     PreparedConfigSummary,
     PreparedSessionInspectResult,
     PreparedSessionPruneResult,
-    QuickPathCheckSummary,
-    QuickPathCompileProbeSummary,
     QuickPathReadinessSummary,
-    QuickPathToolchainSummary,
     ServiceConfigSummary,
-    SessionMode,
-    SessionState,
     SessionStatus,
-    SessionTargetStatus,
     SnippetCollectionResult,
     SnippetMutationResult,
-    SnippetState,
-    SnippetStatus,
     TailLogsEntry,
     TailLogsResult,
+    coerce_session_mode,
 )
 from .prepared import (
     PreparedArtifactManifest,
@@ -52,374 +45,22 @@ from .prepared import (
     PreparedWorkspaceManager,
 )
 from .prepared.models import QuickCapability, QuickTemplate
-
-_REMOTE_BOOT_WAIT_SECONDS = 15.0
-T = TypeVar("T")
-
-
-class MCPManagerError(RuntimeError):
-    pass
-
-
-class RuntimeApplication(Protocol):
-    identifier: str
-    pid: int | None
-
-
-class RuntimeDevice(Protocol):
-    def attach(self, pid: int) -> object: ...
-
-    def spawn(self, argv: list[str]) -> int: ...
-
-    def resume(self, pid: int) -> None: ...
-
-
-class CompatProtocol(Protocol):
-    def get_device(self, host: str, *, device_id: str | None = None) -> RuntimeDevice: ...
-
-    def enumerate_applications(self, device: RuntimeDevice, *, scope: str = "minimal") -> Iterable[RuntimeApplication]: ...
-
-
-class ServerManagerProtocol(Protocol):
-    def inspect_remote_server(
-        self,
-        config: AppConfig,
-        *,
-        probe_abi: bool = True,
-        probe_host: bool = False,
-    ) -> object: ...
-
-    def list_remote_server_pids(self, config: AppConfig) -> set[int]: ...
-
-    def boot_remote_server(self, config: AppConfig, *, force_restart: bool = False) -> None: ...
-
-    def stop_remote_server(self, config: AppConfig) -> set[int]: ...
-
-    def ensure_remote_forward(self, config: AppConfig, *, action: str = "remote port forward") -> str: ...
-
-
-class PreparedWorkspaceProtocol(Protocol):
-    @property
-    def cache_root(self) -> Path: ...
-
-    def prepare(self, request: PreparedSessionOpenRequest) -> PreparedWorkspaceBuildResult: ...
-
-    def inspect(self, signature: str) -> PreparedArtifactManifest | None: ...
-
-    def prune(
-        self,
-        *,
-        signature: str | None = None,
-        all_unused: bool = False,
-        older_than_seconds: int | None = None,
-        protected_signatures: set[str] | None = None,
-    ) -> tuple[list[str], list[str]]: ...
-
-
-class SessionHistoryProtocol(Protocol):
-    @property
-    def root(self) -> Path: ...
-
-    def begin_session(
-        self,
-        *,
-        open_kind: str,
-        requested_mode: str,
-        requested_pid: int | None,
-        app: str | None,
-        config_path: Path | None,
-        prepared_artifact: PreparedArtifactManifest | None,
-    ) -> SessionHistoryRecord: ...
-
-    def record_open_success(
-        self,
-        record: SessionHistoryRecord,
-        *,
-        config: AppConfig,
-        attached_pid: int,
-        prepared_artifact: PreparedArtifactManifest | None,
-    ) -> None: ...
-
-    def record_open_failure(
-        self,
-        record: SessionHistoryRecord,
-        *,
-        message: str,
-        config: AppConfig | None = None,
-        prepared_artifact: PreparedArtifactManifest | None = None,
-        attached_pid: int | None = None,
-    ) -> None: ...
-
-    def record_broken(
-        self,
-        record: SessionHistoryRecord,
-        *,
-        reason: str,
-        snippet_names: list[str],
-        crash_report: str | None,
-    ) -> None: ...
-
-    def record_recovered(self, record: SessionHistoryRecord, *, attached_pid: int) -> None: ...
-
-    def record_closed(self, record: SessionHistoryRecord, *, reason: str) -> None: ...
-
-    def persist_snippet(
-        self,
-        record: SessionHistoryRecord,
-        *,
-        name: str,
-        source: str,
-        replaced: bool,
-    ) -> Path: ...
-
-    def record_snippet_removed(self, record: SessionHistoryRecord, *, name: str) -> None: ...
-
-    def materialize_prepared_workspace(
-        self,
-        record: SessionHistoryRecord,
-        *,
-        prepared_artifact: PreparedArtifactManifest,
-    ) -> Path: ...
-
-
-SessionFactory = Callable[..., SessionWrapper]
-ConfigLoader = Callable[[str | Path], AppConfig]
-
-
-async def _to_thread(callable_obj: Callable[..., T], /, *args: object, **kwargs: object) -> T:
-    return await asyncio.to_thread(partial(callable_obj, *args, **kwargs))
+from .protocols import (
+    CompatProtocol,
+    ConfigLoader,
+    PreparedWorkspaceProtocol,
+    RuntimeDevice,
+    ServerManagerProtocol,
+    SessionFactory,
+    SessionHistoryProtocol,
+)
+from .quick_path import default_quick_path_summary
+from .remote import RemoteServerLease
+from .session_state import ActiveDebugSession, OpenSessionSpec, SnippetRecord
 
 
 def _default_session_factory(raw_session: object, *, config: AppConfig, interactive: bool) -> SessionWrapper:
     return SessionWrapper.from_session(raw_session, config=config, interactive=interactive)
-
-
-def _default_quick_path_summary(*, cache_root: Path, checked_at: datetime) -> QuickPathReadinessSummary:
-    return QuickPathReadinessSummary(
-        state="failed",
-        checked_at=checked_at,
-        message="startup quick-path warmup summary was not provided",
-        cache_root=QuickPathCheckSummary(
-            state="skipped",
-            path=cache_root,
-            detail="startup quick-path warmup summary was not provided",
-        ),
-        npm=QuickPathCheckSummary(
-            state="skipped",
-            path=None,
-            detail="startup quick-path warmup summary was not provided",
-        ),
-        frida_compile=QuickPathCheckSummary(
-            state="skipped",
-            path=None,
-            detail="startup quick-path warmup summary was not provided",
-        ),
-        shared_toolchain=QuickPathToolchainSummary(
-            state="skipped",
-            root=cache_root / "_toolchains",
-            agent_package_spec="unknown",
-            detail="startup quick-path warmup summary was not provided",
-        ),
-        compile_probe=QuickPathCompileProbeSummary(
-            state="skipped",
-            workspace_root=cache_root / "_startup_probe",
-            bundle_path=cache_root / "_startup_probe" / "_agent.js",
-            detail="startup quick-path warmup summary was not provided",
-            last_error=None,
-        ),
-    )
-
-
-@dataclass(slots=True, frozen=True)
-class OpenSessionSpec:
-    config_path: Path
-    mode: SessionMode
-    requested_pid: int | None
-
-    def matches(self, other: "OpenSessionSpec") -> bool:
-        return (
-            self.config_path == other.config_path
-            and self.mode == other.mode
-            and self.requested_pid == other.requested_pid
-        )
-
-
-@dataclass(slots=True)
-class LogEntryRecord:
-    timestamp: datetime
-    source: str
-    level: str
-    text: str
-
-
-@dataclass(slots=True)
-class SnippetRecord:
-    name: str
-    source: str
-    snapshot: HandleSnapshot
-    installed_at: datetime
-    last_called_at: datetime | None = None
-    has_dispose: bool = False
-    handle: AsyncJsHandle | None = None
-    state: SnippetState = "active"
-
-    def to_status(self) -> SnippetStatus:
-        return SnippetStatus(
-            name=self.name,
-            source=self.source,
-            state=self.state,
-            installed_at=self.installed_at,
-            last_called_at=self.last_called_at,
-            has_dispose=self.has_dispose,
-            root=self.snapshot,
-        )
-
-
-@dataclass(slots=True)
-class RemoteServerLease:
-    config: AppConfig
-    manager: ServerManagerProtocol
-    boot_owned: bool = False
-    _boot_task: asyncio.Task[None] | None = None
-    _boot_error: BaseException | None = None
-
-    async def ensure_ready(self, *, timeout_seconds: float = _REMOTE_BOOT_WAIT_SECONDS) -> None:
-        status = await _to_thread(self.manager.inspect_remote_server, self.config, probe_abi=False, probe_host=True)
-        host_reachable = getattr(status, "host_reachable", None)
-        if host_reachable:
-            return
-
-        running_pids = await _to_thread(self.manager.list_remote_server_pids, self.config)
-        if running_pids:
-            detail = getattr(status, "host_error", None) or "unknown transport error"
-            pid_list = ", ".join(str(pid) for pid in sorted(running_pids))
-            raise MCPManagerError(
-                "remote frida-server is already running but the forwarded host is not reachable "
-                f"({detail}; pids: {pid_list}). Repair the device session first, or run "
-                "`frida-analykit server stop --config ...` before retrying."
-            )
-
-        if self._boot_task is None or self._boot_task.done():
-            self._boot_error = None
-            self._boot_task = asyncio.create_task(self._boot_worker())
-            self.boot_owned = True
-
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + timeout_seconds
-        latest_status = status
-        while loop.time() < deadline:
-            if self._boot_error is not None:
-                raise MCPManagerError(f"failed to boot remote frida-server: {self._boot_error}") from self._boot_error
-            latest_status = await _to_thread(
-                self.manager.inspect_remote_server,
-                self.config,
-                probe_abi=False,
-                probe_host=True,
-            )
-            if getattr(latest_status, "host_reachable", None):
-                return
-            if self._boot_task is not None and self._boot_task.done() and self._boot_error is None:
-                break
-            await asyncio.sleep(0.25)
-
-        detail = getattr(latest_status, "host_error", None) or "timed out while waiting for the remote host"
-        raise MCPManagerError(f"failed to boot remote frida-server: {detail}")
-
-    async def stop(self) -> None:
-        if not self.boot_owned:
-            return
-        await _to_thread(self.manager.stop_remote_server, self.config)
-        if self._boot_task is not None:
-            try:
-                await asyncio.wait_for(asyncio.shield(self._boot_task), timeout=2.0)
-            except asyncio.TimeoutError:
-                pass
-        self._boot_task = None
-        self._boot_error = None
-        self.boot_owned = False
-
-    async def _boot_worker(self) -> None:
-        try:
-            await _to_thread(self.manager.boot_remote_server, self.config, force_restart=False)
-        except BaseException as exc:
-            self._boot_error = exc
-
-
-@dataclass(slots=True)
-class ActiveDebugSession:
-    spec: OpenSessionSpec
-    config: AppConfig
-    device: RuntimeDevice
-    session: SessionWrapper
-    script: AsyncScriptWrapper
-    attached_pid: int
-    remote_lease: RemoteServerLease | None
-    logs: deque[LogEntryRecord]
-    snippets: dict[str, SnippetRecord]
-    history: SessionHistoryRecord
-    prepared_artifact: PreparedArtifactManifest | None = None
-    state: SessionState = "live"
-    last_activity_at: datetime | None = None
-    broken_reason: str | None = None
-    crash_report: str | None = None
-    closed_reason: str | None = None
-    closing: bool = False
-
-    def append_log(self, *, source: str, level: str, text: str, timestamp: datetime) -> None:
-        self.logs.append(LogEntryRecord(timestamp=timestamp, source=source, level=level, text=text))
-
-    def mark_activity(self, *, timestamp: datetime) -> None:
-        self.last_activity_at = timestamp
-
-    def mark_broken(
-        self,
-        *,
-        reason: str,
-        crash_report: str | None,
-        timestamp: datetime,
-    ) -> None:
-        self.state = "broken"
-        self.broken_reason = reason
-        self.crash_report = crash_report
-        self.last_activity_at = timestamp
-        for record in self.snippets.values():
-            record.handle = None
-            record.state = "inactive"
-
-    def to_status(self, *, idle_timeout_seconds: int) -> SessionStatus:
-        target = SessionTargetStatus(
-            config_path=self.spec.config_path,
-            mode=self.spec.mode,
-            requested_pid=self.spec.requested_pid,
-            attached_pid=self.attached_pid,
-            app=self.config.app,
-            host=self.config.server.host,
-            device=self.config.server.device,
-            boot_owned=self.remote_lease.boot_owned if self.remote_lease is not None else False,
-        )
-        snippets = [record.to_status() for record in self.snippets.values()]
-        return SessionStatus(
-            state=self.state,
-            target=target,
-            session_id=self.history.session_id,
-            session_label=self.history.session_label,
-            session_root=self.history.root,
-            session_workspace=self.history.workspace_root,
-            idle_timeout_seconds=idle_timeout_seconds,
-            last_activity_at=self.last_activity_at,
-            broken_reason=self.broken_reason,
-            crash_report=self.crash_report,
-            closed_reason=self.closed_reason,
-            snippet_count=len(snippets),
-            snippets=snippets,
-            log_count=len(self.logs),
-            prepared=self.prepared_artifact is not None,
-            prepared_workspace=self.prepared_artifact.workspace_root if self.prepared_artifact is not None else None,
-            prepared_signature=self.prepared_artifact.signature if self.prepared_artifact is not None else None,
-            prepared_capabilities=(
-                list(self.prepared_artifact.capabilities) if self.prepared_artifact is not None else []
-            ),
-        )
 
 
 class DebugSessionManager:
@@ -455,7 +96,7 @@ class DebugSessionManager:
         )
         self._startup_instance_id = startup_instance_id or uuid4().hex[:12]
         self._startup_started_at = startup_started_at or self._now_fn()
-        self._startup_quick_path_summary = startup_quick_path_summary or _default_quick_path_summary(
+        self._startup_quick_path_summary = startup_quick_path_summary or default_quick_path_summary(
             cache_root=self._prepared_workspace.cache_root,
             checked_at=self._startup_started_at,
         )
@@ -479,14 +120,18 @@ class DebugSessionManager:
         self,
         *,
         config_path: str,
-        mode: SessionMode,
+        mode: str,
         pid: int | None = None,
         force_replace: bool = False,
     ) -> SessionStatus:
+        try:
+            resolved_mode = coerce_session_mode(mode)
+        except ValueError as exc:
+            raise MCPManagerError(str(exc)) from exc
         self._bind_home_loop()
         spec = OpenSessionSpec(
             config_path=Path(config_path).expanduser().resolve(),
-            mode=mode,
+            mode=resolved_mode,
             requested_pid=pid,
         )
         async with self._lock:
@@ -503,7 +148,7 @@ class DebugSessionManager:
             try:
                 history_record = self._session_history.begin_session(
                     open_kind="explicit",
-                    requested_mode=mode,
+                    requested_mode=resolved_mode,
                     requested_pid=pid,
                     app=None,
                     config_path=spec.config_path,
@@ -529,7 +174,7 @@ class DebugSessionManager:
         self,
         *,
         app: str,
-        mode: SessionMode,
+        mode: str,
         capabilities: list[QuickCapability] | None = None,
         template: QuickTemplate = "minimal",
         pid: int | None = None,
@@ -537,13 +182,17 @@ class DebugSessionManager:
         bootstrap_source: str | None = None,
         force_replace: bool = False,
     ) -> SessionStatus:
+        try:
+            resolved_mode = coerce_session_mode(mode)
+        except ValueError as exc:
+            raise MCPManagerError(str(exc)) from exc
         self._bind_home_loop()
         async with self._lock:
             self._ensure_not_closed()
             try:
                 request = PreparedSessionOpenRequest(
                     app=app,
-                    mode=mode,
+                    mode=resolved_mode,
                     capabilities=capabilities or [],
                     template=template,
                     pid=pid,
@@ -556,7 +205,7 @@ class DebugSessionManager:
                 try:
                     history_record = self._session_history.begin_session(
                         open_kind="quick",
-                        requested_mode=mode,
+                        requested_mode=resolved_mode,
                         requested_pid=pid,
                         app=app,
                         config_path=None,
@@ -571,7 +220,7 @@ class DebugSessionManager:
                 current is not None
                 and current.prepared_artifact is not None
                 and current.prepared_artifact.signature == prepared.manifest.signature
-                and current.spec.mode == mode
+                and current.spec.mode == resolved_mode
                 and current.spec.requested_pid == pid
                 and current.config.app == app
                 and not force_replace
@@ -587,7 +236,7 @@ class DebugSessionManager:
             try:
                 history_record = self._session_history.begin_session(
                     open_kind="quick",
-                    requested_mode=mode,
+                    requested_mode=resolved_mode,
                     requested_pid=pid,
                     app=app,
                     config_path=None,
@@ -602,7 +251,7 @@ class DebugSessionManager:
                 )
                 runtime_spec = OpenSessionSpec(
                     config_path=runtime_config_path.expanduser().resolve(),
-                    mode=mode,
+                    mode=resolved_mode,
                     requested_pid=pid,
                 )
                 return await self._open_or_reuse_locked(

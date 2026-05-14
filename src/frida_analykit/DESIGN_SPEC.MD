@@ -69,7 +69,10 @@
 - `mcp` 域负责 stdio MCP server、长会话 manager、tool/resource schema 和会话资源回收；它不应复用会向 stdout 打 banner 或普通日志的 CLI 入口路径。
 - `mcp` 域的主线实现应优先使用 async manager / async tool handlers；不要再为 MCP 保留独立的 sync manager public surface。
 - MCP 启动配置应保持独立 typed module，并在进程启动时一次性解析固定；`session_open_quick` 不应再接受会覆盖服务级 server/output 默认值的逐次参数。
+- MCP manager 应保持会话编排 owner，不再回收协议定义、会话状态结构或远端 server lease 细节；这类依赖分别收敛在 `mcp/protocols.py`、`mcp/session_state.py`、`mcp/remote.py`、`mcp/errors.py` 和 `mcp/async_utils.py`。
+- MCP quick-path 的默认 readiness 摘要放在 `mcp/quick_path.py`，避免 manager 为启动摘要模型承载额外构造细节。
 - MCP 面向大模型的 quick session / prepared workspace 能力应继续收敛在 `mcp/prepared/` 这类显式子系统里，负责模板、capability 校验、缓存签名和构建编排；不要把这部分逻辑塞回主 manager 单文件。
+- `mcp/prepared/service.py` 应保留 workspace 准备、构建、缓存、warmup 生命周期；常量与 capability 映射、quick entry 渲染、signature、路径/JSON 小工具应继续放在 `mcp/prepared/constants.py`、`rendering.py`、`signature.py`、`paths.py` 这类专门 owner 中。
 - MCP 的用户可见会话归档与 snippet 持久化应继续收敛在独立的 `mcp/history/` 子系统里；`prepared_cache_root` 只承担内部 quick cache 角色，不与用户向 session-history 目录混用。
 - MCP 面向大模型的使用文档应作为打包资源进入 wheel，并通过 MCP resources 暴露；不要依赖仓库根目录下的 README / docs 文件在安装后仍可直接读取。
 - 如果某个文件已经同时承载配置解析、生命周期、错误处理、协议序列化、日志落盘等多种责任，应主动拆分。

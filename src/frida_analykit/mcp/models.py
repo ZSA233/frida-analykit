@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Final, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
 SessionMode = Literal["attach", "spawn"]
+SESSION_MODES: Final[tuple[SessionMode, ...]] = ("attach", "spawn")
 SessionState = Literal["closed", "live", "broken"]
 SnippetState = Literal["active", "inactive"]
 PreparedOutcome = Literal["cache_hit", "rebuilt", "failed"]
@@ -15,6 +16,13 @@ QuickPathState = Literal["ready", "failed"]
 QuickPathCheckState = Literal["ready", "failed", "skipped"]
 QuickPathToolchainState = Literal["cache_hit", "installed", "failed", "skipped"]
 QuickPathCompileState = Literal["compiled", "failed", "skipped"]
+
+
+def coerce_session_mode(value: str) -> SessionMode:
+    if value in SESSION_MODES:
+        return cast(SessionMode, value)
+    expected = " or ".join(f"`{mode}`" for mode in SESSION_MODES)
+    raise ValueError(f"invalid session mode `{value}`; expected {expected}")
 
 
 class HandleSnapshot(BaseModel):

@@ -36,7 +36,7 @@
 - In quick session, `template` is the preset and `capabilities` are additive preload globals, not a general import injector.
 - Quick-session cache entries stay on disk until `prepared_session_prune` removes them.
 - MCP quick session does not become a general package manager; it only imports official `@zsa233/frida-analykit-agent` subpaths.
-- MCP startup now performs quick-path preflight + warmup before serving stdio; if readiness fails, the server exits instead of exposing a degraded quick path.
+- MCP startup performs quick-path preflight + warmup before serving stdio. By default, readiness failures are reported through `frida://service/config.quick_path` and only block `session_open_quick`; start with `--require-quick-ready` when the server must exit instead.
 - `tail_logs` and `frida://session/logs` include both `source="script"` and `source="host"` entries.
 - For dex dump flows, wait for the host log `[dex] complete <transferId>` before treating the output files under `session_workspace` as finished.
 - It does not watch or hot reload the TypeScript workspace.

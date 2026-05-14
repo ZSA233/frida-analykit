@@ -41,7 +41,7 @@
 - 如果需要，远端 `frida-server` 已经被你手动安装、启动或放到固定路径
 
 MCP 不负责在运行时替你切换 Frida 版本，也不负责自动安装或选择 `frida-server` 版本。
-从当前版本开始，MCP 也不会带着“不完整但先启动再说”的 degraded quick path 继续服务。quick toolchain 没准备好，服务就直接 fail-fast 退出。
+默认情况下，即使 quick toolchain 没准备好，MCP 也会继续启动 stdio 服务，并在 `frida://service/config.quick_path` 里暴露 failed 状态和失败原因。此时 `session_open_quick(...)` 不可用，但显式 `session_open(config_path, ...)` 仍可用于你已经准备好的工作区。如果部署环境要求 quick path 必须 ready 才允许服务启动，可以加 `--require-quick-ready` 保留严格 fail-fast 行为。
 
 ## 启动配置
 
@@ -95,10 +95,11 @@ output_dir = "./data/nettools"
 - `server.path` 是当前主字段
 - 旧的 `server.servername` 仍兼容读取，但新配置应优先写 `path`
 - `--idle-timeout` 可以覆盖 `mcp.toml` 里的空闲回收时间
+- `--require-quick-ready` 可以要求 quick-path warmup 失败时直接非零退出
 - 如果不传 `--config`，MCP 会使用内建默认值启动
 - 启动时固定先做 `startup preflight -> startup warmup -> stdio serve`
 - 预热会验证 `prepared_cache_root` 可写、`frida-compile` 与 `npm` 可用，以及一次最小 compile sanity probe
-- 如果以上任一环节失败，MCP 不会进入 serve，而是打印带状态符号的 banner 后直接非零退出
+- 如果 quick-path 预热失败，默认仍会进入 serve，并在启动 banner 和 `frida://service/config.quick_path` 中保留 failed 状态；只有传入 `--require-quick-ready` 时才会打印 banner 后直接非零退出
 - `frida://service/config` 会同时暴露 `config_path_raw`、resolved `config_path` 和实际生效的 `session_root`
 
 ## 如何接入 MCP Client

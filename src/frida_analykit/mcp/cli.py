@@ -172,6 +172,11 @@ def build_parser() -> argparse.ArgumentParser:
         default="frida-analykit-mcp",
         help="Override the MCP server name advertised during initialization.",
     )
+    parser.add_argument(
+        "--require-quick-ready",
+        action="store_true",
+        help="Exit during startup if the quick-session toolchain warmup fails.",
+    )
     return parser
 
 
@@ -215,7 +220,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if quick_path.state != "ready":
         if quick_path.message:
             print(f"{MCP_STARTUP_FAILURE_PREFIX} {quick_path.message}", file=sys.stderr, flush=True)
-        return 1
+        if args.require_quick_ready:
+            return 1
     manager = DebugSessionManager(
         idle_timeout_seconds=idle_timeout,
         prepared_workspace=prepared_workspace,

@@ -13,3 +13,4 @@ dist-release-test
 
 .env
 .tmp
+.codex/

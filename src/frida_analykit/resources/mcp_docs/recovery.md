@@ -37,8 +37,9 @@ If session open fails with an RPC runtime mismatch, the loaded `_agent.js` does 
 
 ## Missing quick toolchain
 
-If MCP startup fails before the stdio server is ready, the MCP environment may not expose `frida-compile` or `npm` in `PATH`, or the compile sanity probe may have failed.
+If `frida://service/config.quick_path.state == "failed"`, the MCP environment may not expose `frida-compile` or `npm` in `PATH`, or the compile sanity probe may have failed.
 
 - Quick path does not install `frida-compile` or `npm` for you.
-- Check the startup banner or `frida://service/config` from the next successful boot to inspect the structured `quick_path` summary.
+- Check the startup banner or `frida://service/config` to inspect the structured `quick_path` summary.
 - Fix the MCP process environment first, then restart MCP and retry `session_open_quick`.
+- If you need the process to exit instead of serving with failed quick readiness, start it with `--require-quick-ready`.

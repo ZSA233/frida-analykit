@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
-from typing import Protocol
+from typing import Any, Protocol
 
 from mcp.server.fastmcp import FastMCP
 
@@ -20,6 +20,8 @@ from .models import (
 from .prepared import QuickCapability, QuickTemplate
 
 class MCPServiceProtocol(Protocol):
+    async def aclose(self) -> None: ...
+
     async def session_open(
         self,
         *,
@@ -63,7 +65,7 @@ class MCPServiceProtocol(Protocol):
         *,
         name: str,
         method: str | None = None,
-        args: list | None = None,
+        args: list[Any] | None = None,
     ) -> EvalResult: ...
 
     async def inspect_snippet(self, *, name: str) -> SnippetMutationResult: ...
@@ -205,7 +207,7 @@ def build_mcp_server(
         description="Call a named snippet root or one of its dotted methods after it has been installed.",
         structured_output=True,
     )
-    async def call_snippet(name: str, method: str | None = None, args: list | None = None) -> EvalResult:
+    async def call_snippet(name: str, method: str | None = None, args: list[Any] | None = None) -> EvalResult:
         return await manager.call_snippet(name=name, method=method, args=args)
 
     @mcp.tool(

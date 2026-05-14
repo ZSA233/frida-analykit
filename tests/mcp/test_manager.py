@@ -21,7 +21,13 @@ from frida_analykit.mcp.models import (
     QuickPathToolchainSummary,
 )
 from frida_analykit.mcp.prepared import PreparedWorkspaceManager
+from frida_analykit.mcp.prepared.models import (
+    PreparedArtifactManifest,
+    PreparedSessionOpenRequest,
+    PreparedWorkspaceBuildResult,
+)
 from frida_analykit.mcp.prepared import service as prepared_service
+from frida_analykit.mcp import remote as remote_module
 from frida_analykit.rpc import RPCCompatibilityError
 from frida_analykit.workspace import workspace_build_resources
 
@@ -208,12 +214,13 @@ class FakeCompat:
 
 
 class FakeRemoteServerManager:
-    def __init__(self) -> None:
+    def __init__(self, *, boot_failures: list[Exception] | None = None) -> None:
         self.host_reachable = False
         self.host_error = "connection refused"
         self.running_pids: set[int] = set()
         self.boot_calls = 0
         self.stop_calls = 0
+        self.boot_failures = list(boot_failures or [])
         self._stop_event = threading.Event()
 
     def inspect_remote_server(self, config: AppConfig, *, probe_abi: bool = True, probe_host: bool = False):
@@ -230,6 +237,8 @@ class FakeRemoteServerManager:
     def boot_remote_server(self, config: AppConfig, *, force_restart: bool = False) -> None:
         del config, force_restart
         self.boot_calls += 1
+        if self.boot_failures:
+            raise self.boot_failures.pop(0)
         self.running_pids = {4321}
         self.host_reachable = True
         self.host_error = None
@@ -347,6 +356,78 @@ def _snippet_handle() -> FakeHandle:
         value={"installed": True},
         props={"dispose": dispose, "ping": ping},
     )
+
+
+def test_session_open_rejects_invalid_mode_before_side_effects(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        script = FakeScriptWrapper({})
+        device = FakeDevice(lambda: FakeSessionWrapper(script))
+        compat = FakeCompat(device, app_pid=111)
+        config = _config(tmp_path)
+        manager = DebugSessionManager(
+            startup_config=_mcp_startup_config(tmp_path),
+            config_loader=lambda path: config if Path(path).resolve() == config.source_path else None,  # type: ignore[return-value]
+            compat_factory=lambda: compat,
+            session_factory=lambda raw_session, *, config, interactive: raw_session,
+        )
+
+        with pytest.raises(MCPManagerError, match="invalid session mode"):
+            await manager.session_open(config_path=str(config.source_path), mode="bad", pid=111)
+
+        assert compat.get_device_calls == []
+        assert device.attach_calls == []
+        assert device.spawn_calls == []
+        assert script.loaded is False
+        assert not (tmp_path / "session-root").exists()
+        await manager.aclose()
+
+    _run_async(scenario())
+
+
+def test_session_open_quick_rejects_invalid_mode_before_prepare_or_history(tmp_path: Path) -> None:
+    class FakePreparedWorkspace:
+        def __init__(self, cache_root: Path) -> None:
+            self._cache_root = cache_root
+            self.prepare_calls: list[PreparedSessionOpenRequest] = []
+
+        @property
+        def cache_root(self) -> Path:
+            return self._cache_root
+
+        def prepare(self, request: PreparedSessionOpenRequest) -> PreparedWorkspaceBuildResult:
+            self.prepare_calls.append(request)
+            raise AssertionError("prepare should not run for an invalid mode")
+
+        def inspect(self, signature: str) -> PreparedArtifactManifest | None:
+            del signature
+            return None
+
+        def prune(
+            self,
+            *,
+            signature: str | None = None,
+            all_unused: bool = False,
+            older_than_seconds: int | None = None,
+            protected_signatures: set[str] | None = None,
+        ) -> tuple[list[str], list[str]]:
+            del signature, all_unused, older_than_seconds, protected_signatures
+            return [], []
+
+    async def scenario() -> None:
+        prepared = FakePreparedWorkspace(tmp_path / "prepared-cache")
+        manager = DebugSessionManager(
+            startup_config=_mcp_startup_config(tmp_path),
+            prepared_workspace=prepared,
+        )
+
+        with pytest.raises(MCPManagerError, match="invalid session mode"):
+            await manager.session_open_quick(app="com.example.demo", mode="bad")
+
+        assert prepared.prepare_calls == []
+        assert not (tmp_path / "session-root").exists()
+        await manager.aclose()
+
+    _run_async(scenario())
 
 
 def test_session_open_reuses_same_target_and_force_replace_reopens(tmp_path: Path) -> None:
@@ -593,6 +674,106 @@ def test_remote_open_boots_owned_server_and_stops_it_on_close(tmp_path: Path) ->
         assert remote.stop_calls == 1
         assert closed.state == "closed"
         await manager.aclose()
+
+    _run_async(scenario())
+
+
+def test_remote_open_recovers_once_after_transient_boot_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(remote_module, "_REMOTE_BOOT_RECOVERY_DELAY_SECONDS", 0.0)
+
+    async def scenario() -> None:
+        script = FakeScriptWrapper({})
+        device = FakeDevice(lambda: FakeSessionWrapper(script))
+        config = _config(tmp_path, host="127.0.0.1:27042")
+        remote = FakeRemoteServerManager(
+            boot_failures=[
+                RuntimeError("cannot read properties of null (reading 'queryIntentActivities')"),
+            ]
+        )
+        manager = DebugSessionManager(
+            startup_config=_mcp_startup_config(tmp_path),
+            config_loader=lambda path: config if Path(path).resolve() == config.source_path else None,  # type: ignore[return-value]
+            compat_factory=lambda: FakeCompat(device, app_pid=333),
+            server_manager_factory=lambda: remote,
+            session_factory=lambda raw_session, *, config, interactive: raw_session,
+        )
+
+        opened = await manager.session_open(config_path=str(config.source_path), mode="attach", pid=333)
+
+        assert opened.state == "live"
+        assert remote.boot_calls == 2
+        assert remote.stop_calls == 1
+
+        await manager.session_close()
+
+        assert remote.stop_calls == 2
+        await manager.aclose()
+
+    _run_async(scenario())
+
+
+def test_remote_open_does_not_retry_unclassified_boot_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(remote_module, "_REMOTE_BOOT_RECOVERY_DELAY_SECONDS", 0.0)
+
+    async def scenario() -> None:
+        script = FakeScriptWrapper({})
+        device = FakeDevice(lambda: FakeSessionWrapper(script))
+        config = _config(tmp_path, host="127.0.0.1:27042")
+        remote = FakeRemoteServerManager(boot_failures=[RuntimeError("permission denied")])
+        manager = DebugSessionManager(
+            startup_config=_mcp_startup_config(tmp_path),
+            config_loader=lambda path: config if Path(path).resolve() == config.source_path else None,  # type: ignore[return-value]
+            compat_factory=lambda: FakeCompat(device, app_pid=333),
+            server_manager_factory=lambda: remote,
+            session_factory=lambda raw_session, *, config, interactive: raw_session,
+        )
+
+        with pytest.raises(MCPManagerError, match="permission denied"):
+            await manager.session_open(config_path=str(config.source_path), mode="attach", pid=333)
+
+        assert remote.boot_calls == 1
+        assert remote.stop_calls == 1
+        await manager.aclose()
+
+    _run_async(scenario())
+
+
+def test_remote_lease_recovers_after_reachable_probe_timeout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(remote_module, "_REMOTE_BOOT_RECOVERY_DELAY_SECONDS", 0.0)
+
+    class TimeoutThenReadyRemote(FakeRemoteServerManager):
+        def boot_remote_server(self, config: AppConfig, *, force_restart: bool = False) -> None:
+            del config, force_restart
+            self.boot_calls += 1
+            self.running_pids = {4321}
+            if self.boot_calls >= 2:
+                self.host_reachable = True
+                self.host_error = None
+
+    async def scenario() -> None:
+        config = _config(tmp_path, host="127.0.0.1:27042")
+        remote = TimeoutThenReadyRemote()
+        remote.host_error = "timeout was reached"
+        lease = remote_module.RemoteServerLease(config=config, manager=remote)
+
+        await lease.ensure_ready(timeout_seconds=1.0)
+
+        assert lease.boot_owned is True
+        assert remote.boot_calls == 2
+        assert remote.stop_calls == 1
+
+        await lease.stop()
+
+        assert remote.stop_calls == 2
 
     _run_async(scenario())
 

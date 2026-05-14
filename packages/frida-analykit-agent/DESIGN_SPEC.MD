@@ -47,6 +47,7 @@
 - 每个能力域自己的 `index.ts` 应尽量薄，只负责导出该域的正式入口。
 - 领域内部复杂实现继续留在领域目录内部；跨能力共享的低层工具放进 `internal/*`，而不是反向泄漏到公共入口。
 - 像 ELF 这类既有 live parser 又有 dump/fix workflow 的能力域，共享的低层 ABI 描述应收敛为单一内部事实源；不要在 pointer-reader 与 buffer-fixer 两侧各自维护一套 offset/size/constants。
+- ELF dump/fix workflow 的 patch file、stage、build result 类型应保留在独立 `elf/internal/dump_fixup_types.ts` 中；`dump_fixer.ts` 只负责修复流程实现，并继续从类型模块 re-export 既有类型入口。
 - 高层 capability 与低层 binding 继续保持分层：
   - `ssl` 提供高层 hook / workflow
   - `native/libssl` 提供低层符号绑定

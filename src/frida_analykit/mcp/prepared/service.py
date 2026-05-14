@@ -3,12 +3,9 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import re
 import shutil
 import subprocess
-import sys
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Literal
@@ -28,110 +25,45 @@ from ..models import (
     QuickPathToolchainSummary,
 )
 from .models import (
-    BootstrapKind,
     PreparedArtifactConfig,
     PreparedArtifactManifest,
     PreparedSessionOpenRequest,
     PreparedWorkspaceBuildResult,
-    QuickCapability,
-    QuickTemplate,
 )
 from ..config import MCPStartupConfig
-
-_MANIFEST_FILENAME = "prepared.json"
-_SCHEMA_VERSION = 5
-_BOOTSTRAP_FILE_STEM = "bootstrap.user"
-_TOOLCHAIN_DIRNAME = "_toolchains"
-_STARTUP_PROBE_DIRNAME = "_startup_probe"
-_QUICK_TYPESCRIPT_VERSION = "^5.8.3"
-_QUICK_FRIDA_GUM_TYPES_VERSION = "^18.7.2"
-_OUTPUT_TAIL_LINES = 40
-_MISSING_FRIDA_COMPILE_MESSAGE = (
-    "quick path requires `frida-compile` in the MCP environment PATH; "
-    "fix the MCP environment and restart the server"
+from .constants import (
+    BOOTSTRAP_FILE_STEM as _BOOTSTRAP_FILE_STEM,
+    BOOTSTRAP_RELATIVE_IMPORT_PATTERNS as _BOOTSTRAP_RELATIVE_IMPORT_PATTERNS,
+    CAPABILITY_IMPORTS as _CAPABILITY_IMPORTS,
+    CAPABILITY_RETAIN_EXPORTS as _CAPABILITY_RETAIN_EXPORTS,
+    ENV_TYPES_FILENAME as _ENV_TYPES_FILENAME,
+    MANIFEST_FILENAME as _MANIFEST_FILENAME,
+    MISSING_FRIDA_COMPILE_MESSAGE as _MISSING_FRIDA_COMPILE_MESSAGE,
+    MISSING_NPM_MESSAGE as _MISSING_NPM_MESSAGE,
+    QUICK_FRIDA_GUM_TYPES_VERSION as _QUICK_FRIDA_GUM_TYPES_VERSION,
+    QUICK_TYPESCRIPT_VERSION as _QUICK_TYPESCRIPT_VERSION,
+    SCHEMA_VERSION as _SCHEMA_VERSION,
+    STARTUP_PROBE_DIRNAME as _STARTUP_PROBE_DIRNAME,
+    TOOLCHAIN_DIRNAME as _TOOLCHAIN_DIRNAME,
 )
-_MISSING_NPM_MESSAGE = (
-    "quick path requires `npm` in the MCP environment PATH to install or repair runtime dependencies"
+from .paths import (
+    default_prepared_cache_root as _default_prepared_cache_root,
+    package_install_path as _package_install_path,
+    remove_path as _remove_path,
+    tail_text as _tail_text,
+    write_json as _write_json,
 )
-_BOOTSTRAP_RELATIVE_IMPORT_PATTERNS: tuple[re.Pattern[str], ...] = (
-    re.compile(
-        r"^\s*import(?:\s+type)?\s*(?:[\s\w{},*$]+\s+from\s+)?[\"'](?P<path>\.{1,2}/[^\"']+)[\"']",
-        re.MULTILINE,
-    ),
-    re.compile(
-        r"^\s*export(?:\s+type)?\s+(?:\*\s+from|{[\s\S]*?}\s+from)\s+[\"'](?P<path>\.{1,2}/[^\"']+)[\"']",
-        re.MULTILINE,
-    ),
-    re.compile(r"\brequire\(\s*[\"'](?P<path>\.{1,2}/[^\"']+)[\"']\s*\)"),
-    re.compile(r"\bimport\(\s*[\"'](?P<path>\.{1,2}/[^\"']+)[\"']\s*\)"),
+from .rendering import (
+    PreparedBootstrap as _PreparedBootstrap,
+    render_index_source as _render_index_source,
+    resolve_capabilities as _resolve_capabilities,
 )
-
-_CAPABILITY_IMPORTS: dict[QuickCapability, str] = {
-    "rpc": f"{AGENT_PACKAGE_NAME}/rpc",
-    "config": f"{AGENT_PACKAGE_NAME}/config",
-    "bridges": f"{AGENT_PACKAGE_NAME}/bridges",
-    "helper": f"{AGENT_PACKAGE_NAME}/helper",
-    "process": f"{AGENT_PACKAGE_NAME}/process",
-    "jni": f"{AGENT_PACKAGE_NAME}/jni",
-    "ssl": f"{AGENT_PACKAGE_NAME}/ssl",
-    "elf": f"{AGENT_PACKAGE_NAME}/elf",
-    "dex": f"{AGENT_PACKAGE_NAME}/dex",
-    "native_libssl": f"{AGENT_PACKAGE_NAME}/native/libssl",
-    "native_libart": f"{AGENT_PACKAGE_NAME}/native/libart",
-    "native_libc": f"{AGENT_PACKAGE_NAME}/native/libc",
-}
-
-_CAPABILITY_RETAIN_EXPORTS: dict[QuickCapability, str] = {
-    "config": "Config",
-    "bridges": "Java",
-    "helper": "help",
-    "process": "proc",
-    "jni": "JNIEnv",
-    "ssl": "SSLTools",
-    "elf": "ElfTools",
-    "dex": "DexTools",
-    "native_libssl": "Libssl",
-    "native_libart": "Libart",
-    "native_libc": "Libc",
-}
-
-_TEMPLATE_CAPABILITIES: dict[QuickTemplate, tuple[QuickCapability, ...]] = {
-    "minimal": (),
-    "process_probe": ("helper", "process"),
-    "java_bridge": ("bridges", "jni"),
-    "dex_probe": ("dex",),
-    "ssl_probe": ("ssl",),
-    "elf_probe": ("elf",),
-}
-
-_TEMPLATE_HINTS: dict[QuickTemplate, str] = {
-    "minimal": "Keep target-specific probes in MCP eval_js or install_snippet calls.",
-    "process_probe": "Process helpers are preloaded for fast memory-map and process-state checks.",
-    "java_bridge": "Java and JNI bridge helpers are preloaded for Android runtime inspection.",
-    "dex_probe": "Dex helpers are preloaded for loader enumeration and dex validation flows.",
-    "ssl_probe": "SSL helpers are preloaded for keylog or libssl-oriented validation.",
-    "elf_probe": "ELF helpers are preloaded for module, symbol, and hook validation.",
-}
+from .signature import hash_text as _hash_text
+from .signature import signature_for_request as _signature_for_request
 
 
 class PreparedWorkspaceError(RuntimeError):
     pass
-
-
-@dataclass(frozen=True, slots=True)
-class _PreparedBootstrap:
-    kind: BootstrapKind
-    source_text: str | None = None
-    original_path: Path | None = None
-    workspace_filename: str | None = None
-    signature_path: str | None = None
-    signature_hash: str | None = None
-
-    @property
-    def import_path(self) -> str | None:
-        if self.workspace_filename is None:
-            return None
-        return f"./{self.workspace_filename}"
 
 
 class PreparedWorkspaceManager:
@@ -224,6 +156,21 @@ class PreparedWorkspaceManager:
                     "skipLibCheck": True,
                 }
             },
+        )
+
+    def _write_workspace_env_types(self, workspace_root: Path) -> None:
+        (workspace_root / _ENV_TYPES_FILENAME).write_text(
+            "\n".join(
+                [
+                    "declare const console: {",
+                    "  log(...args: unknown[]): void",
+                    "  warn(...args: unknown[]): void",
+                    "  error(...args: unknown[]): void",
+                    "}",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
         )
 
     def _resolve_frida_compile(self) -> str:
@@ -400,6 +347,7 @@ class PreparedWorkspaceManager:
             self._ensure_managed_directory(probe_root, label="startup compile probe workspace")
             self._write_workspace_package_json(probe_root, agent_package_spec=agent_package_spec)
             self._write_workspace_tsconfig(probe_root)
+            self._write_workspace_env_types(probe_root)
             (probe_root / "index.ts").write_text(
                 _render_index_source(
                     template="minimal",
@@ -688,6 +636,7 @@ class PreparedWorkspaceManager:
             self._ensure_managed_directory(workspace_root, label="prepared quick-session workspace")
             self._write_workspace_package_json(workspace_root, agent_package_spec=package_spec)
             self._write_workspace_tsconfig(workspace_root)
+            self._write_workspace_env_types(workspace_root)
             _remove_path(workspace_root / "bootstrap.inline.ts")
             _remove_path(workspace_root / f"{_BOOTSTRAP_FILE_STEM}.ts")
             _remove_path(workspace_root / f"{_BOOTSTRAP_FILE_STEM}.js")
@@ -926,111 +875,6 @@ class PreparedWorkspaceManager:
             pass
 
 
-def _render_index_source(
-    *,
-    template: QuickTemplate,
-    capabilities: tuple[QuickCapability, ...],
-    bootstrap: _PreparedBootstrap,
-) -> str:
-    lines = [
-        "// Generated quick entry for frida-analykit MCP.",
-        f"// Template preset: {template}",
-        f'import "{_CAPABILITY_IMPORTS["rpc"]}"',
-    ]
-    retain_bindings: list[str] = []
-    for capability in capabilities:
-        if capability == "rpc":
-            continue
-        retain_binding = _CAPABILITY_RETAIN_EXPORTS[capability]
-        lines.append(f'import {{ {retain_binding} }} from "{_CAPABILITY_IMPORTS[capability]}"')
-        retain_bindings.append(retain_binding)
-    if bootstrap.kind == "path" and bootstrap.import_path is not None:
-        lines.extend(
-            [
-                "",
-                "// Separate bootstrap file copied from bootstrap_path.",
-                f'import "{bootstrap.import_path}"',
-            ]
-        )
-    bootstrap_source_lines = _render_inlined_bootstrap_source(bootstrap)
-    if bootstrap_source_lines:
-        lines.append("")
-        lines.extend(bootstrap_source_lines)
-    if retain_bindings:
-        lines.append("")
-        lines.extend(f"void {retain_binding}" for retain_binding in retain_bindings)
-    lines.extend(["", f"// {_TEMPLATE_HINTS[template]}", ""])
-    return "\n".join(lines) + "\n"
-
-
-def _resolve_capabilities(
-    template: QuickTemplate,
-    requested: list[QuickCapability],
-) -> tuple[QuickCapability, ...]:
-    ordered: list[QuickCapability] = []
-    for capability in ("rpc", *_TEMPLATE_CAPABILITIES[template], *requested):
-        if capability not in ordered:
-            ordered.append(capability)
-    return tuple(ordered)
-
-
-def _render_inlined_bootstrap_source(bootstrap: _PreparedBootstrap) -> list[str]:
-    if bootstrap.kind != "source" or bootstrap.source_text is None:
-        return []
-    source_lines = bootstrap.source_text.rstrip("\n").splitlines()
-    if not source_lines:
-        return []
-    return [
-        "// Begin inlined bootstrap_source.",
-        *source_lines,
-        "// End inlined bootstrap_source.",
-    ]
-
-
-def _signature_for_request(
-    *,
-    app: str,
-    capabilities: tuple[QuickCapability, ...],
-    template: QuickTemplate,
-    bootstrap_kind: BootstrapKind,
-    bootstrap_path: str | None,
-    bootstrap_hash: str | None,
-    bootstrap_source: str | None,
-    host: str,
-    device: str | None,
-    path: str,
-    datadir: str,
-    stdout: str,
-    stderr: str,
-    dextools_output_dir: str,
-    elftools_output_dir: str,
-    nettools_output_dir: str,
-    agent_package_spec: str,
-) -> str:
-    payload = {
-        "schema_version": _SCHEMA_VERSION,
-        "app": app,
-        "capabilities": list(capabilities),
-        "template": template,
-        "bootstrap_kind": bootstrap_kind,
-        "bootstrap_path": bootstrap_path,
-        "bootstrap_hash": bootstrap_hash,
-        "bootstrap_source": bootstrap_source,
-        "host": host,
-        "device": device,
-        "path": path,
-        "datadir": datadir,
-        "stdout": stdout,
-        "stderr": stderr,
-        "dextools_output_dir": dextools_output_dir,
-        "elftools_output_dir": elftools_output_dir,
-        "nettools_output_dir": nettools_output_dir,
-        "agent_package_spec": agent_package_spec,
-    }
-    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
-
-
 def _artifact_config_from_app_config(config: AppConfig) -> PreparedArtifactConfig:
     return PreparedArtifactConfig(
         app=config.app or "",
@@ -1051,16 +895,6 @@ def _optional_string(value: str | Path | None) -> str | None:
     if value is None:
         return None
     return str(value)
-
-
-def _default_prepared_cache_root() -> Path:
-    if sys.platform == "darwin":
-        base = Path.home() / "Library" / "Caches"
-    elif os.name == "nt":
-        base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
-    else:
-        base = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
-    return (base / "frida-analykit" / "mcp-prepared").expanduser().resolve()
 
 
 def _resolve_bootstrap(request: PreparedSessionOpenRequest) -> _PreparedBootstrap:
@@ -1102,10 +936,6 @@ def _resolve_bootstrap(request: PreparedSessionOpenRequest) -> _PreparedBootstra
     )
 
 
-def _hash_text(value: str) -> str:
-    return hashlib.sha256(value.encode("utf-8")).hexdigest()
-
-
 def _find_relative_bootstrap_import(source_text: str) -> str | None:
     # Quick bootstrap_path copies exactly one file into the prepared workspace.
     # Reject obvious relative imports up front so the failure is explicit instead
@@ -1115,26 +945,3 @@ def _find_relative_bootstrap_import(source_text: str) -> str | None:
         if match is not None:
             return match.group("path")
     return None
-
-
-def _package_install_path(node_modules: Path, package_name: str) -> Path:
-    if package_name.startswith("@"):
-        scope, name = package_name.split("/", 1)
-        return node_modules / scope / name
-    return node_modules / package_name
-
-
-def _write_json(path: Path, payload: object) -> None:
-    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-
-
-def _remove_path(path: Path) -> None:
-    if path.is_symlink() or path.is_file():
-        path.unlink(missing_ok=True)
-        return
-    if path.is_dir():
-        shutil.rmtree(path, ignore_errors=True)
-
-
-def _tail_text(output: str) -> str:
-    return "\n".join(output.splitlines()[-_OUTPUT_TAIL_LINES:])

@@ -380,6 +380,7 @@ def test_prepared_workspace_uses_minimal_toolchain_shape(
 
     package = json.loads((result.manifest.workspace_root / "package.json").read_text(encoding="utf-8"))
     tsconfig = json.loads((result.manifest.workspace_root / "tsconfig.json").read_text(encoding="utf-8"))
+    env_types = (result.manifest.workspace_root / "frida-analykit-env.d.ts").read_text(encoding="utf-8")
     toolchain_package = json.loads(
         (manager._toolchain_root_for_spec(result.manifest.agent_package_spec) / "package.json").read_text(
             encoding="utf-8"
@@ -392,6 +393,10 @@ def test_prepared_workspace_uses_minimal_toolchain_shape(
     assert "@types/node" not in json.dumps(package)
     assert tsconfig["compilerOptions"]["types"] == ["frida-gum"]
     assert "node" not in tsconfig["compilerOptions"]["types"]
+    assert "declare const console" in env_types
+    assert '/// <reference path="./frida-analykit-env.d.ts" />' in (
+        result.manifest.workspace_root / "index.ts"
+    ).read_text(encoding="utf-8")
     assert "frida-compile" not in json.dumps(toolchain_package)
     assert "@types/node" not in json.dumps(toolchain_package)
 

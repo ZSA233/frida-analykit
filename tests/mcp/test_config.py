@@ -297,16 +297,68 @@ def test_mcp_cli_handles_ctrl_c_without_keyboard_interrupt(
     assert "KeyboardInterrupt" not in streams.err
 
 
-def test_mcp_cli_fails_fast_after_banner_when_quick_warmup_fails(
+def test_mcp_cli_keeps_serving_when_quick_warmup_fails_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeManager:
+        def __init__(self, **kwargs) -> None:
+            captured["manager_kwargs"] = kwargs
+
+        async def aclose(self) -> None:
+            captured["closed"] = True
+
+    def fake_build_mcp_server(manager, *, name: str):
+        captured["manager"] = manager
+        captured["name"] = name
+        return object()
+
+    def fake_serve_stdio(server, *, shutdown_message: str, stderr) -> int:
+        captured["server"] = server
+        captured["shutdown_message"] = shutdown_message
+        captured["stderr"] = stderr
+        return 0
+
+    monkeypatch.setattr(
+        cli.PreparedWorkspaceManager,
+        "startup_warmup",
+        lambda self: _quick_failed_summary(
+            self.cache_root,
+            message="quick path requires `frida-compile` in the MCP environment PATH",
+        ),
+    )
+    monkeypatch.setattr(cli, "DebugSessionManager", FakeManager)
+    monkeypatch.setattr(cli, "build_mcp_server", fake_build_mcp_server)
+    monkeypatch.setattr(cli, "serve_stdio", fake_serve_stdio)
+
+    exit_code = cli.main(["--name", "demo-mcp"])
+
+    manager_kwargs = captured["manager_kwargs"]
+    streams = capsys.readouterr()
+    assert exit_code == 0
+    assert manager_kwargs["startup_quick_path_summary"].state == "failed"
+    assert captured["name"] == "demo-mcp"
+    assert captured["shutdown_message"] == cli.MCP_SHUTDOWN_MESSAGE
+    assert captured.get("closed") is None
+    assert streams.out == ""
+    assert "Quick Path:" in streams.err
+    assert "✗ failed" in streams.err
+    assert "quick-path warmup failed" in streams.err
+    assert "frida-compile" in streams.err
+
+
+def test_mcp_cli_requires_quick_ready_when_flag_is_set(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     captured: dict[str, object] = {}
 
     def fake_build_mcp_server(manager, *, name: str):
-        captured["manager"] = manager
-        captured["name"] = name
-        raise AssertionError("server should not be built when startup warmup fails")
+        del manager, name
+        captured["server_built"] = True
+        raise AssertionError("server should not be built when quick readiness is required")
 
     monkeypatch.setattr(
         cli.PreparedWorkspaceManager,
@@ -318,7 +370,7 @@ def test_mcp_cli_fails_fast_after_banner_when_quick_warmup_fails(
     )
     monkeypatch.setattr(cli, "build_mcp_server", fake_build_mcp_server)
 
-    exit_code = cli.main(["--name", "demo-mcp"])
+    exit_code = cli.main(["--name", "demo-mcp", "--require-quick-ready"])
 
     streams = capsys.readouterr()
     assert exit_code == 1

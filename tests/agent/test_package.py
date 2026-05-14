@@ -21,6 +21,7 @@ _EXPECTED_PUBLIC_EXPORTS = {
     "./rpc": "./dist/rpc/index.js",
 }
 
+
 def test_agent_package_manifest_and_public_exports() -> None:
     package_json = json.loads((REPO_ROOT / "packages/frida-analykit-agent/package.json").read_text(encoding="utf-8"))
     package_readme = (REPO_ROOT / "packages/frida-analykit-agent/README.md").read_text(encoding="utf-8")
@@ -42,6 +43,16 @@ def test_agent_package_manifest_and_public_exports() -> None:
 
     for export_name, export_path in _EXPECTED_PUBLIC_EXPORTS.items():
         assert package_json["exports"][export_name]["default"] == export_path
+
+
+def test_agent_internal_text_encoder_does_not_register_globals() -> None:
+    encoder_source = (
+        REPO_ROOT / "packages/frida-analykit-agent/src/internal/text/encoder.ts"
+    ).read_text(encoding="utf-8")
+
+    assert "setGlobalProperties" not in encoder_source
+    assert "export class TextEncoder" in encoder_source
+    assert "export class TextDecoder" in encoder_source
 
 
 def test_agent_package_root_entry_remains_lightweight() -> None:

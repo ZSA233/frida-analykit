@@ -1,6 +1,3 @@
-import { setGlobalProperties } from "../../config/index.js"
-
-
 export class TextEncoder {
     readonly encoding = 'utf-8'
 
@@ -62,9 +59,3 @@ export class TextDecoder {
         return tmp.readUtf8String() || ''
     }
 }
-
-
-setGlobalProperties({
-    TextDecoder,
-    TextEncoder,
-})

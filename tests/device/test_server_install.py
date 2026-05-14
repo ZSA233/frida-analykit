@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import pytest
 
@@ -46,5 +47,6 @@ def test_server_install_with_local_server(device_helpers, tmp_path) -> None:
     )
 
     assert result.returncode == 0, result.stderr
-    assert "installed frida-server" in result.stdout
-    assert f"local source: {local_server}" in result.stdout
+    assert f"installed frida-server {device_helpers.frida_version}" in result.stdout
+    expected_source = Path(local_server).expanduser().resolve()
+    assert f"local source: {expected_source}" in result.stdout

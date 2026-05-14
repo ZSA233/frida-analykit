@@ -24,7 +24,7 @@ Before the server even reaches this point, MCP startup already performs one host
 - verifies `frida-compile` and `npm` are available in the MCP process `PATH`
 - runs one quick build sanity check
 
-If startup warmup fails, MCP exits before serving stdio instead of exposing a degraded quick path.
+If startup warmup fails, MCP still serves stdio by default and exposes the failed readiness summary through `frida://service/config.quick_path`. Do not call `session_open_quick` until the quick toolchain is fixed and the server is restarted. Use `--require-quick-ready` when startup should exit instead.
 
 ## Important inputs
 
@@ -133,6 +133,6 @@ Libssl.$getModule().name
 ## When to use the low-level path
 
 - Use `session_open` only when you already maintain your own workspace and want MCP to consume that explicit `config.toml` or legacy YAML config.
-- `session_open` is a low-level session tool after MCP has started successfully; it is not a bypass for quick-path startup warmup failures.
-- If `frida-compile` is missing, or if `npm` is missing when MCP must install or repair the shared quick runtime toolchain cache, MCP startup itself fails fast. Fix the MCP environment and restart the server before using any MCP tool.
+- `session_open` is independent of the quick build path and can still open a ready explicit workspace even when `frida://service/config.quick_path.state == "failed"`.
+- If `frida-compile` is missing, or if `npm` is missing when MCP must install or repair the shared quick runtime toolchain cache, fix the MCP environment and restart the server before using `session_open_quick`. Add `--require-quick-ready` when this condition should make startup fail fast.
 - After a quick session is open, continue normal MCP work with `eval_js`, `install_snippet`, `call_snippet`, and `session_recover`.

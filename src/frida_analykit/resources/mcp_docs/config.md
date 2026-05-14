@@ -13,7 +13,7 @@
 
 1. The user prepares the Frida Python environment and matching remote `frida-server`.
 2. The user starts `frida-analykit-mcp --config ./mcp.toml`.
-3. MCP startup runs quick-path preflight + warmup and fails fast if the host-side toolchain is not ready.
+3. MCP startup runs quick-path preflight + warmup and records the readiness result. By default the stdio server still starts when quick path is not ready; add `--require-quick-ready` for strict fail-fast startup.
 4. The MCP client reads `frida://service/config`.
 5. The MCP client uses `session_open_quick(...)` without trying to override server or output paths.
 
@@ -39,7 +39,7 @@ output_dir = "./data/nettools"
 ## Important limits
 
 - Startup config is fixed for the lifetime of one MCP server process.
-- `frida://service/config` includes a structured `quick_path` readiness summary for normal MCP use.
+- `frida://service/config` includes a structured `quick_path` readiness summary for normal MCP use, including failed quick-path warmup details when the server starts in degraded mode.
 - `frida://service/config` also exposes both `config_path_raw` and the resolved absolute `config_path`.
 - `frida://service/config.session_root` is the configured parent root where per-session `{yyyyMMdd-HHMMSS-shortid}` directories will be created.
 - `session_open_quick` inherits these defaults; it does not accept `host`, `device`, `path`, or version-selection fields.
@@ -50,5 +50,5 @@ output_dir = "./data/nettools"
 - Quick-session `template` and `capabilities` only control preload globals from official runtime entrypoints; they are not an arbitrary import injection channel.
 - Quick path requires `frida-compile` and `npm` in the MCP environment `PATH`.
 - Prepared cache stays internal. Use `session_workspace` to inspect the files for the current quick session.
-- `session_open(config_path, ...)` is a low-level session tool after MCP has started successfully; it is not a startup-bypass path when quick warmup fails.
+- `session_open(config_path, ...)` is a low-level session tool for explicit workspaces and can still be used when quick warmup failed, as long as your config points at a ready `_agent.js` bundle.
 - That explicit low-level path still expects your own `config.toml` or legacy YAML config plus a ready `_agent.js` bundle.
