@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from frida_analykit.config import AppConfig
+from frida_analykit.scripts.elf_fixups import FIXUP_STAGE_ORDER, replay_elf_fixups
 from frida_analykit.rpc.message import (
     RPCBatchSource,
     RPCMessage,
@@ -17,16 +18,6 @@ from frida_analykit.rpc.message import (
     RPCPayload,
 )
 from frida_analykit.rpc.registry import HandlerRegistry
-
-
-FIXUP_STAGE_ORDER = [
-    "phdr-rebase",
-    "dynamic-rebase",
-    "dynsym-fixups",
-    "relocation-fixups",
-    "section-rebuild",
-    "header-finalize",
-]
 
 
 def _config(tmp_path: Path) -> AppConfig:
@@ -143,60 +134,6 @@ def _fixups_payload(raw: bytes, fixed: bytes) -> bytes:
         }
     ).encode("utf-8")
 
-
-def _scalar_hex_to_bytes(value: str, width: int) -> bytes:
-    assert value.startswith("0x")
-    hex_text = value[2:].rjust(width * 2, "0")
-    return bytes.fromhex(hex_text)[::-1]
-
-
-def _apply_raw_to_fixed_fixups(raw: bytes, fixups: dict[str, object]) -> bytes:
-    raw_size = int(fixups["raw_size"])
-    fixed_size = int(fixups["fixed_size"])
-    stages = fixups["stages"]
-    assert isinstance(stages, list)
-    assert raw_size == len(raw)
-
-    output = bytearray(raw)
-    assert [stage["name"] for stage in stages] == FIXUP_STAGE_ORDER
-
-    for stage in stages:
-        assert isinstance(stage, dict)
-        patches = stage["patches"]
-        assert isinstance(patches, list)
-        for patch in patches:
-            assert isinstance(patch, dict)
-            patch_type = str(patch["t"])
-            if patch_type == "f":
-                width = int(patch["w"])
-                offset = int(patch["o"])
-                output[offset:offset + width] = _scalar_hex_to_bytes(str(patch["a"]), width)
-                continue
-            if patch_type == "s":
-                width = int(patch["w"])
-                values = patch["v"]
-                assert isinstance(values, list)
-                for slot in values:
-                    assert isinstance(slot, list)
-                    assert len(slot) == 3
-                    offset = int(slot[0])
-                    output[offset:offset + width] = _scalar_hex_to_bytes(str(slot[2]), width)
-                continue
-            if patch_type == "x":
-                offset = int(patch["o"])
-                replace_size = int(patch["r"])
-                data = bytes.fromhex(str(patch["x"]))
-                if replace_size == 0 and offset == len(output):
-                    output.extend(data)
-                else:
-                    output[offset:offset + replace_size] = data
-                continue
-            raise AssertionError(f"unsupported fixup patch type: {patch_type}")
-
-    assert len(output) == fixed_size
-    return bytes(output)
-
-
 def test_registry_handles_streaming_elf_dump_and_symbol_logs(tmp_path: Path) -> None:
     stdout = io.StringIO()
     stderr = io.StringIO()
@@ -293,8 +230,8 @@ def test_registry_handles_streaming_elf_dump_and_symbol_logs(tmp_path: Path) -> 
     fixed_bytes = (dump_root / "libc.fixed.so").read_bytes()
     fixups = json.loads((dump_root / "fixups.json").read_text(encoding="utf-8"))
     assert fixed_bytes == fixed_header
-    assert [stage["name"] for stage in fixups["stages"]] == FIXUP_STAGE_ORDER
-    assert _apply_raw_to_fixed_fixups(raw_bytes, fixups) == fixed_header
+    assert [stage["name"] for stage in fixups["stages"]] == list(FIXUP_STAGE_ORDER)
+    assert replay_elf_fixups(raw_bytes, fixups) == fixed_header
     assert fixed_bytes[7] == 0
     assert int.from_bytes(fixed_bytes[16:18], "little") == 3
     assert int.from_bytes(fixed_bytes[18:20], "little") == 183

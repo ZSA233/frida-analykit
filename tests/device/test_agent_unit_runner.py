@@ -7,6 +7,8 @@ from collections.abc import Iterator
 
 import pytest
 
+from frida_analykit.scripts.elf_fixups import FIXUP_STAGE_ORDER, replay_elf_fixups
+
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -35,14 +37,6 @@ import { installAgentUnitRpcExports } from "@zsa233/frida-analykit-agent-device-
 installAgentUnitRpcExports()
 """
 
-FIXUP_STAGE_ORDER = [
-    "phdr-rebase",
-    "dynamic-rebase",
-    "dynsym-fixups",
-    "relocation-fixups",
-    "section-rebuild",
-    "header-finalize",
-]
 SHT_RELA = 4
 SHT_REL = 9
 EM_386 = 3
@@ -280,58 +274,6 @@ def _find_rebased_non_relative_relocation(
                 "expected_r_offset": expected_offset,
             }
     return None
-
-
-def _apply_raw_to_fixed_fixups(raw: bytes, fixups: dict[str, object]) -> bytes:
-    raw_size = int(fixups["raw_size"])
-    fixed_size = int(fixups["fixed_size"])
-    stages = fixups["stages"]
-    assert isinstance(stages, list)
-    assert raw_size == len(raw)
-
-    output = bytearray(raw)
-    assert [stage["name"] for stage in stages] == FIXUP_STAGE_ORDER
-
-    for stage in stages:
-        assert isinstance(stage, dict)
-        patches = stage["patches"]
-        assert isinstance(patches, list)
-        for patch in patches:
-            assert isinstance(patch, dict)
-            patch_type = str(patch["t"])
-            if patch_type == "f":
-                width = int(patch["w"])
-                offset = int(patch["o"])
-                value = str(patch["a"])
-                assert value.startswith("0x")
-                output[offset:offset + width] = bytes.fromhex(value[2:].rjust(width * 2, "0"))[::-1]
-                continue
-            if patch_type == "s":
-                width = int(patch["w"])
-                values = patch["v"]
-                assert isinstance(values, list)
-                for slot in values:
-                    assert isinstance(slot, list)
-                    assert len(slot) == 3
-                    offset = int(slot[0])
-                    value = str(slot[2])
-                    assert value.startswith("0x")
-                    output[offset:offset + width] = bytes.fromhex(value[2:].rjust(width * 2, "0"))[::-1]
-                continue
-            if patch_type == "x":
-                offset = int(patch["o"])
-                replace_size = int(patch["r"])
-                data = bytes.fromhex(str(patch["x"]))
-                if replace_size == 0 and offset == len(output):
-                    output.extend(data)
-                else:
-                    output[offset:offset + replace_size] = data
-                continue
-            raise AssertionError(f"unsupported fixup patch type: {patch_type}")
-
-    assert len(output) == fixed_size
-    return bytes(output)
-
 
 @pytest.fixture(scope="session")
 def device_agent_unit_workspace(
@@ -643,8 +585,8 @@ def test_agent_unit_runner_reports_elf_tools_suite_on_device(
     assert len(fixed_bytes) > 0
     assert "fixups" in artifact_kinds
     assert "rebuilt" not in artifact_kinds
-    assert _apply_raw_to_fixed_fixups(raw_bytes, fixups) == fixed_bytes
-    assert [stage["name"] for stage in fixups["stages"]] == FIXUP_STAGE_ORDER
+    assert replay_elf_fixups(raw_bytes, fixups) == fixed_bytes
+    assert [stage["name"] for stage in fixups["stages"]] == list(FIXUP_STAGE_ORDER)
     assert fixed_bytes[7] == 0
     assert int.from_bytes(fixed_bytes[16:18], "little") == 3
     assert int.from_bytes(fixed_bytes[18:20], "little") == 183

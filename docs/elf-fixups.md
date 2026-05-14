@@ -7,6 +7,29 @@
 - 让人类在查看 dump 结果时，能快速判断“哪一个修复阶段改了什么”
 - 让 LLM 或脚本能够稳定地把 `raw` 重放成 `fixed`
 
+如果你只是想把一份 dump 目录里的 `raw + fixups.json` 直接重放成可对比的 ELF，可以直接用仓库里的脚本：
+
+```sh
+python scripts/replay_elf_fixups.py /path/to/dump-dir --json
+```
+
+也可以显式指定文件：
+
+```sh
+python scripts/replay_elf_fixups.py /path/to/libfoo.raw.so \
+  --fixups /path/to/fixups.json \
+  --out /path/to/libfoo.replayed.so \
+  --compare /path/to/libfoo.fixed.so \
+  --check-before
+```
+
+脚本行为约定：
+
+- 传 dump 目录时，会自动寻找唯一的 `*.raw.so` 和同目录下的 `fixups.json`
+- 如果同目录存在同 basename 的 `*.fixed.so`，脚本会自动做 compare
+- 默认输出文件名是 `*.replayed.so`
+- `--check-before` 会校验 `f/s` patch 里的 `b` 字段，能更早发现 fixups 与输入文件不匹配
+
 ## 1. 它解决的是什么问题
 
 `dumpModule()` 默认会导出：
