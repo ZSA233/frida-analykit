@@ -69,11 +69,10 @@ If the target app is not running yet, use `frida-analykit spawn --config ./confi
 | Topic | Documentation |
 |:---|:---|
 | Workspace config, `config.toml`, and common CLI use | [src/frida_analykit/resources/scaffold/README_EN.md](src/frida_analykit/resources/scaffold/README_EN.md) |
-| MCP server, quick sessions, tools, and resources | [src/frida_analykit/mcp/README.MD](src/frida_analykit/mcp/README.MD) |
+| MCP server, quick sessions, tools, and resources | [docs/en/mcp.md](docs/en/mcp.md) |
 | Agent runtime import paths and capability table | [packages/frida-analykit-agent/README_EN.md](packages/frida-analykit-agent/README_EN.md) |
-| ELF dump fixups fields and replay rules | [docs/elf-fixups.md](docs/elf-fixups.md) |
-| Device regression, failure classification, and rerun rules | [docs/device-regression.md](docs/device-regression.md) |
-| Release process and pre-publish checks | [docs/release-process.md](docs/release-process.md) |
+| ELF dump fixups fields and replay rules | [docs/en/elf-fixups.md](docs/en/elf-fixups.md) |
+| Device regression, failure classification, and rerun rules | [docs/en/device-regression.md](docs/en/device-regression.md) |
 | Example projects | [android-reverse-examples](https://github.com/ZSA233/android-reverse-examples) |
 
 The minimal MCP startup entry is below. See the MCP documentation above for the full session flow and error recovery rules.

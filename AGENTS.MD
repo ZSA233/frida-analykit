@@ -60,7 +60,7 @@
   - 主机侧测试/工具链问题
   - 真实代码回归
 - 在没有完成分类前，不要因为一次红项就无脑增加 timeout、重试次数或恢复分支。
-- 真机回归的长期操作规则以 [docs/device-regression.md](docs/device-regression.md) 为准；AI agent 在处理真机失败时必须先按该文档执行多轮复跑、失败分类和证据收集。
+- 真机回归的长期操作规则以 [docs/zh/device-regression.md](docs/zh/device-regression.md) 为准；AI agent 在处理真机失败时必须先按该文档执行多轮复跑、失败分类和证据收集。
 - 只有当失败表现出明确的瞬时语义，并且设备/远端恢复后能够继续时，才允许补“窄化恢复”逻辑；否则应先把问题收敛到 host-side 或真实代码问题。
 
 ## 代码耦合与拆分规则
@@ -184,9 +184,14 @@
 - 根 `README_EN.md`：是根 `README.md` 的严格英文翻译版本，不是独立事实来源。
 - `packages/frida-analykit-agent/README.md`：面向 npmjs 上的 `@zsa233/frida-analykit-agent` 用户，只描述这个包自身的定位、安装、导出能力、使用方式和与 agent 工作区直接相关的细节。
 - `packages/frida-analykit-agent/README_EN.md`：是包文档 `packages/frida-analykit-agent/README.md` 的严格英文翻译版本，不是独立事实来源。
-- `PRE_README.MD` 是上述 README 的共同中间来源文档，也是 README 收束时的事实与风格基线。
+- `src/frida_analykit/resources/scaffold/README.md` / `README_EN.md`：是 `gen dev` 生成工作区内的中英镜像说明，只覆盖工作区配置、常用命令和 capability 导入习惯。
+- `docs/zh/*.md` / `docs/en/*.md`：是公开详细文档的中英镜像目录。当前公开详细文档集合为 `mcp.md`、`elf-fixups.md`、`device-regression.md`。
+- `docs/release-process.md`、`AGENTS.MD`、`DESIGN_SPEC.MD` 和 MCP 内置 `frida://docs/mcp/*` resource 属于 AI / 维护者 / 运行时内部文档，不要求建立 `zh/` / `en/` 镜像。
+- `PRE_README.MD` 是上述 README 与公开 docs 的共同中间来源文档，也是 README / docs 收束时的事实与风格基线。
 - 只要本次改动影响了用户可见能力、CLI 行为、配置方式、接入流程、runtime 导出、限制条件、使用示例或对外接口，AI agent 就应先更新 `PRE_README.MD`，而不是直接零散修改 README。
 - README 应比 `PRE_README.MD` 更短、更稳、更主线化；不能脱离 `PRE_README.MD` 自行增删事实，也不能为了英文版“更自然”而改变信息密度、删段或补充另一套口径。
+- 根 README 是 onboarding-first 入门入口，只保留项目定位、最小可跑路径、文档索引和架构图；不要把单次需求、排查过程、实现细节、临时限制说明或专题字段枚举塞进根 README。
+- 新增或修改用户可见能力时，详细行为应先进入 `PRE_README.MD` 和对应专题文档；根 README 只保留稳定主线入口和跳转，agent 包 README 只保留 npm 用户需要的包级信息。
 - 根 `README.md` 与根 `README_EN.md` 必须严格镜像：
 - 章节顺序一致
 - 标题数量与层级一致
@@ -194,18 +199,21 @@
 - 代码块数量、顺序和参数一致
 - 提示项、限制说明、示例数量一致
 - `packages/frida-analykit-agent/README.md` 与 `packages/frida-analykit-agent/README_EN.md` 也必须遵循同样的严格镜像规则。
-- 根 README 的默认结构应优先服务普通用户，再进入高级/开发用户，最后再放调试、测试、发布和仓库结构；不要把主线 CLI 用法和高级 runtime 细节混写。
+- 根 README 的默认结构应优先服务普通用户，只保留“项目定位 -> 快速开始 -> 文档索引 -> 架构说明图”；不要把主线 CLI 用法和高级 runtime、测试、发布、排错细节混写。
 - agent 包 README 的默认结构应优先按“包定位 -> 安装 -> 能力总览表 -> 普通使用方式 -> 高级能力 -> 调试与非公共内容”组织。
 - 当能力面较多、导入路径较多或存在轻入口/重 capability 区分时，应优先使用表格提升可读性；尤其是 agent 包 README 的 capability 概览，默认使用表格而不是散列 bullet。
+- 公开详细文档必须按 `docs/zh/<name>.md` 与 `docs/en/<name>.md` 成对维护；中英两侧应保持标题层级、表格、代码块和说明密度镜像。
+- `docs/*.md` 根层级只允许放兼容跳转页或内部 runbook；不要把新的公开详细正文继续堆在 docs 根目录。
 - 根 README 的架构说明必须读取并嵌入 `docs/arch.mermaid` 的 Mermaid 源码；在架构未变时，该文件视为只读事实源，不允许为了更新 README 顺手改图。
 - 不要把根 README 和 agent 包 README 当作同一份文档的不同副本机械同步；它们面向的读者不同，只能共享事实基线，不能共享发布面。
-- 当用户要求进行整体项目的 README 收束或 release 文档收束时，应基于 `PRE_README.MD` 先更新根 `README.md`，再翻译根 `README_EN.md`，再更新包 README，最后翻译包 README_EN。
+- 当用户要求进行整体项目的 README 收束或 release 文档收束时，应从整体项目结构重新整理，而不是把最近一次改动直接拼接进去；顺序是先基于 `PRE_README.MD` 收束根 `README.md`，再翻译根 `README_EN.md`，再更新包 README，最后翻译包 README_EN，并同步检查公开 docs 是否需要进入 `docs/zh` / `docs/en`。
 - 中英文 README 更新完成后，必须做一次二次校对，至少逐项检查：
 - 标题树是否完全一致
 - 表格行列和字段是否完全一致
 - 代码块数量、顺序和参数是否完全一致
 - 提示项、限制说明和示例数量是否完全一致
 - Mermaid 架构图是否与 `docs/arch.mermaid` 完全一致
+- 公开 docs 是否保持 `docs/zh` / `docs/en` 成对存在且没有突兀插入单次改动说明
 - 如果某项能力已经实现，但尚未写入 `PRE_README.MD`，则视为文档维护未完成；如果已经写入 `PRE_README.MD`，但尚未收束到对应 README，则说明还处于中间态，而不是最终对外态。
 - 如果中英 README 任一侧存在漏段、漏表、漏示例、漏限制说明，视为 README 收束未完成。
 
@@ -213,15 +221,16 @@
 
 - AI agent 不应在用户只说“发版一下”时自行猜测目标版本号；只有当用户明确给出要发布的版本号后，才进入正式发版准备。
 - 如果用户给出的目标版本号与当前线上已发布版本不构成合理递增关系，或与当前仓库版本状态明显不一致，AI agent 必须先向用户确认版本号是否说错，再继续。
-- 用户明确提出发版请求后，正式版本切换、打 tag、dry-run、发布前检查之前，必须先基于 `PRE_README.MD` 收束文档。
+- 用户明确提出发版请求后，正式版本切换、打 tag、dry-run、发布前检查之前，必须先基于 `PRE_README.MD` 收束文档，并对根 README、包 README、scaffold README 和公开 docs 做一次整体清洗。
 - 该文档收束顺序应为：
 - 先更新根 `README.md`
 - 再同步更新 `README_EN.md` 作为根文档的严格英文翻译
 - 再更新 `packages/frida-analykit-agent/README.md`
 - 再同步更新 `packages/frida-analykit-agent/README_EN.md` 作为包文档的严格英文翻译
-- 两组 README 都完成后，必须先做一次双语镜像二次校对
+- 同步检查 `docs/zh/*.md` / `docs/en/*.md` 公开详细文档是否需要更新，移除突兀插入的单次需求说明
+- 两组 README 和公开 docs 完成后，必须先做一次双语镜像二次校对
 - 文档收束完成后，才进入 `docs/release-process.md` 中定义的 release-version、preflight、RC、stable、publish 流程。
-- 如果四份 README 中任意一份仍缺段、缺表、缺示例、缺限制说明，或者中英结构不一致，则不允许进入正式发版流程。
+- 如果四份 README 或公开 docs 中任意一份仍缺段、缺表、缺示例、缺限制说明，或者中英结构不一致，则不允许进入正式发版流程。
 - 用户向稳定安装入口默认固定为 `git+https://github.com/ZSA233/frida-analykit@stable`；除非用户明确要求历史 tag 级安装说明，否则不要在 README 中把安装示例写成某个具体 `vX.Y.Z`。
 - `packages/frida-analykit-agent/README*.md` 与包 `homepage` 这类用户向 GitHub 文档链接默认固定指向 `blob/stable/...`，不要继续指向 `blob/main`。
 - 在触发 release dry-run、push release tag 或继续 RC/stable 后续步骤之前，必须确认当前 release ref 的 GitHub Actions `CI` 工作流已经通过；
@@ -232,7 +241,7 @@
 - 如果本次明确走 RC 流程，则 RC 发布完成后必须停下来，向用户汇报 RC tag、workflow 状态和待验证事项；在用户明确表示继续 stable 之前，不允许继续执行 stable 版本切换、stable dry-run、stable tag 或正式发布。
 - 只有在显式 RC 提升路线中，stable 的远程 dry-run / 正式发布才依赖远端已存在可追溯的 RC tag；默认 direct stable 不要求先有 RC tag。
 - 默认不要为了 dry-run 随意推远端临时分支。stable dry-run 直接使用当前 `release/vX.Y.Z`；RC dry-run 如确有必要，只允许使用当前目标版本对应的 `tmp/release-vX.Y.Z-rc.N`。任何与当前目标版本无关的临时远端分支，都必须先征得用户明确同意。
-- 如果本次改动触达 `device` / `server` / `development.device_*` / `tests/device` 或其他真机主链路，发版前必须执行真机回归门槛，并按 [docs/device-regression.md](docs/device-regression.md) 做失败分类；不允许看到一次真机红项就直接进入“代码已坏、立刻修补”的结论。
+- 如果本次改动触达 `device` / `server` / `development.device_*` / `tests/device` 或其他真机主链路，发版前必须执行真机回归门槛，并按 [docs/zh/device-regression.md](docs/zh/device-regression.md) 做失败分类；不允许看到一次真机红项就直接进入“代码已坏、立刻修补”的结论。
 - 真机回归中如果失败更像设备波动，必须先等待设备恢复并做定向复跑，再决定是否需要改代码；如果失败更像 host-side 并发、依赖、下载、打包问题，应先修测试链路，不要把它伪装成设备问题。
 - stable 正式发布完成后，远端 `stable` 分支必须同步到该 stable tag 对应提交；这是发布完成条件的一部分，不是人工可选收尾项。
 - 发版过程中如果发现严重 bug，不要立刻边发版边修；应立即停止当前发版流程，明确告诉用户问题出在哪里、影响范围是什么、发布风险是否高。
@@ -270,4 +279,4 @@
 - 如果需要收束 README，这次目标到底是根 `README.md` 还是 `packages/frida-analykit-agent/README.md`？
 - 如果这是一次发版操作，用户是否已经明确给出目标版本号？
 - 如果这是一次发版操作，目标版本号是否与当前已发布版本形成合理递增？
-- 如果这是一次发版操作，四份 README 是否都已经先基于 `PRE_README.MD` 完成收束并做过双语镜像二次校对？
+- 如果这是一次发版操作，四份 README 和公开 docs 是否都已经先基于 `PRE_README.MD` 完成收束并做过双语镜像二次校对？

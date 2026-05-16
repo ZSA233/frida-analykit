@@ -106,7 +106,7 @@ After `/rpc` is installed, the agent exposes structured RPC exports for Python C
 - The RPC eval context reads `globalThis` dynamically on every execution.
 - Whether a capability is visible depends on whether you explicitly imported the corresponding module in `index.ts`.
 - `/rpc` no longer pulls the full runtime by default and only keeps the minimal foundation.
-- `Libart`, `Libssl`, and `Libc` follow the same on-demand visibility rules.
+- Native bindings such as `Libart`, `Libssl`, and `Libc` follow the same on-demand visibility rules.
 
 ### ElfTools / SymbolHooks
 
@@ -126,16 +126,9 @@ setImmediate(() => {
 })
 ```
 
-- `/elf` now provides `ElfTools.createSymbolHooks(...)`, `ElfTools.dumpModule(...)`, and the existing module-resolution APIs.
-- `ElfSymbolHooks` is a module-level symbol-hook state object with lazy symbol registry support, `dlsym` coordination, and explicit-signature `attach(...)`.
-- `/elf/enhanced` only adds common presets when you import it manually; it does not auto-register into `globalThis` or the core bundle.
-- `dumpModule()` sends `ELF_MODULE_DUMP_BEGIN -> BATCH(ELF_MODULE_DUMP_CHUNKS) -> ELF_MODULE_DUMP_END`.
-- Python writes ELF outputs to `script.elftools.output_dir` first, then falls back to `agent.datadir/elftools`, using `<output-root>/<tag?>/`; symbol call logs go to `symbols.log` in the same leaf directory.
-- `tag` is normalized into an ASCII-safe single-level leaf; an empty tag still targets the root leaf, and dot-only or normalization-empty tags fall back to `default`.
-- In RPC mode, `outputDir` and `relative_dump_dir` are still forwarded, but the host only records them in `manifest.json`; the actual directory is still chosen from `script.elftools.output_dir` plus a single-level `tag`.
-- Each dump now exports `*.raw.so`, `*.fixed.so`, `fixups.json`, `symbols.json`, `proc_maps.txt`, and `manifest.json` by default.
-- `fixups.json` records the stage-owned patches needed to replay `raw` into `fixed`; each stage is emitted by the real repair step, which makes replay possible and patch ownership easier to inspect.
-- For the `fixups.json` field legend, stage semantics, and replay rules, see [docs/elf-fixups.md](https://github.com/ZSA233/frida-analykit/blob/stable/docs/elf-fixups.md).
+- `/elf` provides module resolution, symbol hooks, and the main `dumpModule(...)` entrypoint.
+- `/elf/enhanced` only adds common presets when imported manually; it does not auto-register into `globalThis` or the core bundle.
+- `dumpModule()` exports raw/fixed ELF files, `fixups.json`, symbols, and a manifest. For the `fixups.json` field legend, stage semantics, and replay rules, see [docs/en/elf-fixups.md](https://github.com/ZSA233/frida-analykit/blob/stable/docs/en/elf-fixups.md).
 
 ### DexTools
 
@@ -153,12 +146,8 @@ setImmediate(() => {
 ```
 
 - `DexTools` currently provides `enumerateClassLoaderDexFiles()` and `dumpAllDex(...)`.
-- `dumpAllDex()` sends `DEX_DUMP_BEGIN -> BATCH(DEX_DUMP_FILES) -> DEX_DUMP_END`.
-- The default max batch size comes from Python config `script.rpc.batch_max_bytes`, and on the agent side this maps to `Config.BatchMaxBytes`.
-- A single oversized dex is still sent as its own batch without further slicing, and Python writes to `script.dextools.output_dir` first, then falls back to `agent.datadir/dextools`.
-- `tag` is normalized into an ASCII-safe single-level leaf; an empty tag still targets the root leaf, and dot-only or normalization-empty tags fall back to `default`.
-- In RPC mode, `dumpDir` is still forwarded, but the host only records it in `manifest.json`; the actual directory is still chosen from `script.dextools.output_dir` plus a single-level `tag`.
-- Python writes one `manifest.json` for each dex dump and stores the exported dex file list in its `files` field; the old `classes.json` file is no longer kept.
+- `dumpAllDex(...)` sends dex files through RPC batches; the Python side writes them according to workspace config and emits a manifest.
+- Output directories, batch limits, and host-side completion semantics belong to the CLI / workspace config layer; start with the generated workspace README and the MCP docs.
 
 ### JNI / Native Bindings
 
@@ -181,7 +170,7 @@ setImmediate(() => {
 - Member facades such as `jobject.$method(name, sig)`, `.$call(name, sig, ...args)`, and `jclass.$staticMethod(name, sig)` all require an explicit `sig`.
 - JNI returns wrappers by default and does not automatically convert to JS primitives or strings.
 - Accessors provide `withLocal(...)` to scope local-reference lifetimes.
-- Importing `native/libart`, `native/libssl`, or `native/libc` registers the corresponding global object on demand.
+- Importing `native/libart`, `native/libssl`, or `native/libc` registers the corresponding global object on demand; unpublished internal paths are not stable APIs.
 
 ## Debugging And Non-Public Content
 

@@ -2,35 +2,39 @@
 
 ## 文档定位
 
-本文件是 `README.md` 的实时维护中间文档，也是后续 release 前统一收束 README 的事实基线。
+本文件是 `README.md` 和公开详细文档的实时维护中间文档，也是后续 release 前统一收束 README / docs 的事实基线。
 
 与 `README.md` 的区别：
 
 - `PRE_README.MD` 偏工作文档，要求更完整、更细、更贴近当前仓库真实状态。
 - `README.md` 偏对外文档，要求更稳定、更精炼、更强调主线叙述。
 - 只要用户可见能力、配置、命令行、接入方式、限制条件发生变化，应先更新本文件。
-- release 前收束 `README.md` 时，应基于本文件整体整理，而不是仅把最近一次改动直接拼接进 README。
+- release 前收束 `README.md` 和公开 docs 时，应基于本文件整体整理，而不是仅把最近一次改动直接拼接进 README 或流程正文。
 
-本文件的初始化快照基于当前仓库状态整理，当前更新快照时间为 `2026-05-15`。
+本文件的初始化快照基于当前仓库状态整理，当前更新快照时间为 `2026-05-17`。
 
 ## README 收束风格基线
 
 README 收束时，应同时遵循下面这些约束：
 
-- `PRE_README.MD` 是事实基线，也是 README 风格基线。
+- `PRE_README.MD` 是事实基线，也是 README / docs 风格基线。
 - 对外 README 应比 `PRE_README.MD` 更短、更稳、更主线化，不要把本文件中的工作痕迹、排查细节和中间态说明原样搬进去。
 - 根 `README.md` 与 `README_EN.md` 必须是严格镜像的中英版本，只允许语言翻译上的差异，不允许一边多写、一边漏写。
 - `packages/frida-analykit-agent/README.md` 与 `packages/frida-analykit-agent/README_EN.md` 也必须遵循同样的严格镜像规则。
+- `src/frida_analykit/resources/scaffold/README.md` 与 `README_EN.md` 是生成工作区说明，也必须保持标题、代码块和核心信息镜像。
+- 公开详细文档固定放在 `docs/zh/*.md` 与 `docs/en/*.md`；当前 canonical set 是 `mcp.md`、`elf-fixups.md`、`device-regression.md`。
+- `docs/release-process.md` 是给 AI agent 和维护者使用的发版 runbook，不要求英文镜像，也不应作为根 README 的用户入口。
 - 根 README 的默认叙述顺序应为：项目定位、快速开始、文档索引、架构说明图。
 - 根 README 应是 onboarding-first 入门说明，目标是一眼看懂主线、完成第一条可运行路径，并把细节稳定导向 `docs/` 或对应子系统文档。
 - 根 README 的快速开始应固定围绕一条最小路径：安装 CLI、进入 Frida 虚拟环境、确认设备连接、生成工作区、安装依赖、执行 `doctor`、必要时 `doctor fix` + `server boot`、最后 `attach --build --repl`。
 - 根 README 的每一步应尽量直接说明“做完这一步得到什么结果”，帮助用户判断是否可以继续。
 - 根 README 不再内联最小 `config.toml` 示例；配置说明优先跳转到 scaffold README 和生成工作区内的同名 README。
-- 根 README 对 MCP、agent runtime、真机测试、ELF fixups、发版流程只保留入口级说明和跳转链接；详细行为、能力表和实现细节放到对应专门文档。
+- 根 README 对 MCP、agent runtime、真机测试和 ELF fixups 只保留入口级说明和跳转链接；详细行为、能力表和实现细节放到对应公开专题文档。
+- 根 README 不链接发版 runbook、临时排查记录、单次需求说明或内部维护规范。
 - agent 包 README 的默认叙述顺序应为：包定位、安装、能力总览表、普通使用方式、高级能力、调试与非公共内容。
-- 当能力项较多、导入路径较多或需要区分轻入口/显式 capability 时，应优先在专门文档中用表格呈现，而不是继续塞回根 README。
+- 当能力项较多、导入路径较多或需要区分轻入口/显式 capability 时，应优先在包 README 或公开专题文档中用表格呈现，而不是继续塞回根 README。
 - 根 README 的架构图必须读取并嵌入 `docs/arch.mermaid` 的 Mermaid 源码；在架构未变时，这个 `.mermaid` 文件视为只读事实源。
-- README 收束完成后，必须执行一次二次校对，至少检查标题树、表格、代码块、提示项和限制说明是否在中英文两侧完全同构。
+- README / docs 收束完成后，必须执行一次二次校对，至少检查标题树、表格、代码块、提示项和限制说明是否在中英文两侧完全同构，并确认没有把单次改动说明突兀插入整体流程正文。
 
 ## 当前仓库快照
 
@@ -859,7 +863,7 @@ RPC 模式下 host 侧不会把单次 `outputDir` 或 `relative_dump_dir` 当成
 - `raw`: 直接从内存复制的原始 image
 - `fixed`: 参考 `elf-dump-fix` 思路重建 section/program/dynamic/relocation 元数据后，再规范最小 ELF 头得到的最终分析产物
 - `fixups.json`: 记录从 `raw` 重放到 `fixed` 所需的分阶段 patch，按 `phdr-rebase -> dynamic-rebase -> dynsym-fixups -> relocation-fixups -> section-rebuild -> header-finalize` 顺序输出，既可独立重放，也便于定位是哪一个修复阶段改写了哪些字段
-- 详细字段图例、缩写说明和重放规则见 [docs/elf-fixups.md](docs/elf-fixups.md)
+- 详细字段图例、缩写说明和重放规则见 [docs/zh/elf-fixups.md](docs/zh/elf-fixups.md)
 
 这说明 README 后续收束时，应把 ELF 能力描述成“增强 ELF 模块分析、symbol hook 与流式 dump/修复辅助”，而不是只写成“能找模块名”的小工具。
 
@@ -1305,7 +1309,9 @@ docs/                              release 相关文档
 
 - `README.md` / `README_EN.md` 的稳定安装示例应固定使用 `git+https://github.com/ZSA233/frida-analykit@stable`。
 - 根 README 应保持 onboarding-first，不再重新展开长篇字段枚举、“使用时需要特别记住”、MCP quick-path 细节或 agent capability 总表。
-- 根 README 的最小 `config.toml` 示例应继续使用行内注释说明常用字段，而不是恢复成大段配置说明。
+- 根 README 不应恢复最小 `config.toml` 示例；配置字段说明继续放在 scaffold README 和生成工作区内的同名 README。
+- 公开详细文档应继续保持 `docs/zh/mcp.md`、`docs/en/mcp.md`、`docs/zh/elf-fixups.md`、`docs/en/elf-fixups.md`、`docs/zh/device-regression.md`、`docs/en/device-regression.md` 成对维护。
+- `docs/elf-fixups.md` 与 `docs/device-regression.md` 只保留兼容跳转页；不要重新把详细正文写回 docs 根目录。
 - `packages/frida-analykit-agent/README*.md` 与包 `homepage` 这类用户向 GitHub 文档链接应固定指向 `blob/stable/...`，不要跟随 `main` 漂移。
 - `README.md` 面向对外说明时，应保持主线清晰；但在收束时不要遗漏：
   - v2 的双产物定位

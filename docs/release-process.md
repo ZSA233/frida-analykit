@@ -35,7 +35,7 @@
 
 ## 发版前文档收束
 
-正式进入 release-version、preflight、RC 或 stable 步骤之前，必须先基于 `PRE_README.MD` 收束对外文档。
+正式进入 release-version、preflight、RC 或 stable 步骤之前，必须先基于 `PRE_README.MD` 收束对外文档。这里的收束不是把最近一次改动追加进 README，而是从整体项目结构重新整理入口文档和公开专题文档。
 
 需要处理的文档分为四类：
 
@@ -47,6 +47,10 @@
    面向 npmjs 上的 `@zsa233/frida-analykit-agent` 包用户，应只保留与该包直接相关的信息，允许比根 README 展开更多包级细节。
 4. `packages/frida-analykit-agent/README_EN.md`
    是 `packages/frida-analykit-agent/README.md` 的严格英文翻译版本，应在包 README 收束后同步更新。
+5. `docs/zh/*.md` / `docs/en/*.md`
+   是公开详细文档的中英镜像目录。当前需要成对维护的公开文档是 `mcp.md`、`elf-fixups.md` 和 `device-regression.md`。
+
+`docs/release-process.md` 是 AI agent / 维护者发版 runbook，不要求英文镜像，也不应被根 README 当作普通用户入口。
 
 推荐顺序：
 
@@ -54,8 +58,9 @@
 2. 再同步更新 `README_EN.md`
 3. 再基于同一份 `PRE_README.MD` 收束 `packages/frida-analykit-agent/README.md`
 4. 再同步更新 `packages/frida-analykit-agent/README_EN.md`
-5. 对根 README 中英对、包 README 中英对分别做一次双语镜像二次校对
-6. 文档完成后，再继续下面的 release-version / preflight / RC / stable 流程
+5. 同步检查 `docs/zh/*.md` / `docs/en/*.md`，把单次需求说明收束进整体专题结构
+6. 对根 README 中英对、包 README 中英对、公开 docs 中英对分别做一次双语镜像二次校对
+7. 文档完成后，再继续下面的 release-version / preflight / RC / stable 流程
 
 双语镜像二次校对至少要检查：
 
@@ -65,8 +70,10 @@
 - 代码块数量、顺序和参数是否一致
 - 提示项、限制说明、示例数量是否一致
 - 根 README 的 Mermaid 架构图是否与 `docs/arch.mermaid` 完全一致
+- 根 README 是否仍只保留入门主线和文档入口，没有混入单次改动细节或发版 runbook
+- 公开 docs 是否在 `docs/zh` / `docs/en` 下成对存在，且没有把突兀的局部说明插入流程正文
 
-如果中英 README 任一边存在漏段、漏表、漏示例、漏限制说明，视为文档收束未完成，不允许进入 release-version / preflight / RC / stable。
+如果中英 README 或公开 docs 任一边存在漏段、漏表、漏示例、漏限制说明，视为文档收束未完成，不允许进入 release-version / preflight / RC / stable。
 
 根 README 的架构说明图必须读取并嵌入 `docs/arch.mermaid`；在架构未变时，应把该文件视为只读事实源，而不是顺手在收束 README 时改图。
 
@@ -173,7 +180,7 @@ make device-test-all
 ```
 
 2. 如果这轮通过，再补一轮稳定性确认。
-3. 如果任一轮失败，不要立刻改代码，先按 [docs/device-regression.md](device-regression.md) 分类：
+3. 如果任一轮失败，不要立刻改代码，先按 [docs/zh/device-regression.md](zh/device-regression.md) 分类：
    - 设备波动
    - 主机侧测试/工具链问题
    - 真实代码回归
@@ -310,6 +317,7 @@ make release-install-check RELEASE_TAG=vX.Y.Z-rc.N
 git add README.md README_EN.md \
   packages/frida-analykit-agent/README.md \
   packages/frida-analykit-agent/README_EN.md \
+  docs/zh docs/en docs/elf-fixups.md docs/device-regression.md \
   release-version.toml src/frida_analykit/_version.py \
   package.json packages/frida-analykit-agent/package.json package-lock.json
 git commit -m "release: cut vX.Y.Z-rc.N"
@@ -521,7 +529,7 @@ RC 不发布 npm。
 
 现象：
 
-- `validate-promotion` 报 stable 只允许版本元数据差异，但 diff 中出现 `README.md`、`README_EN.md`、`packages/frida-analykit-agent/README.md`、`packages/frida-analykit-agent/README_EN.md`
+- `validate-promotion` 报 stable 只允许版本元数据差异，但 diff 中出现 `README.md`、`README_EN.md`、`packages/frida-analykit-agent/README.md`、`packages/frida-analykit-agent/README_EN.md`、`docs/zh/*` 或 `docs/en/*`
 
 根因：
 

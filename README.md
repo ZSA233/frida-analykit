@@ -69,11 +69,10 @@ frida-analykit attach --config ./config.toml --build --repl
 | 主题 | 文档 |
 |:---|:---|
 | 工作区配置、`config.toml` 和常用 CLI | [src/frida_analykit/resources/scaffold/README.md](src/frida_analykit/resources/scaffold/README.md) |
-| MCP server、quick session、tools 和 resources | [src/frida_analykit/mcp/README.MD](src/frida_analykit/mcp/README.MD) |
+| MCP server、quick session、tools 和 resources | [docs/zh/mcp.md](docs/zh/mcp.md) |
 | Agent runtime 导入路径和能力表 | [packages/frida-analykit-agent/README.md](packages/frida-analykit-agent/README.md) |
-| ELF dump fixups 字段和重放规则 | [docs/elf-fixups.md](docs/elf-fixups.md) |
-| 真机回归、失败分类和复跑规则 | [docs/device-regression.md](docs/device-regression.md) |
-| 发版流程和发布前检查 | [docs/release-process.md](docs/release-process.md) |
+| ELF dump fixups 字段和重放规则 | [docs/zh/elf-fixups.md](docs/zh/elf-fixups.md) |
+| 真机回归、失败分类和复跑规则 | [docs/zh/device-regression.md](docs/zh/device-regression.md) |
 | 示例工程 | [android-reverse-examples](https://github.com/ZSA233/android-reverse-examples) |
 
 MCP 的最小启动入口如下，具体会话流程和错误恢复规则请看上面的 MCP 文档。

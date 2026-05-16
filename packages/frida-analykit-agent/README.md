@@ -106,11 +106,11 @@ import { help, proc } from "@zsa233/frida-analykit-agent"
 - RPC eval context 每次执行时都会动态读取 `globalThis`。
 - capability 是否可见，取决于你是否已经在 `index.ts` 里显式 import 了对应模块。
 - `/rpc` 不再默认拖入整套 runtime，只保留最小基础。
-- `Libart`、`Libssl`、`Libc` 也遵循同样的按需可见规则。
+- `Libart`、`Libssl`、`Libc` 等 native binding 也遵循同样的按需可见规则。
 
 ### ElfTools / SymbolHooks
 
-显式导入后可以把 `/elf` 作为核心能力、把 `/elf/enhanced` 作为可选 preset 增强层：
+显式导入后可以把 `/elf` 作为核心能力，把 `/elf/enhanced` 作为可选 preset 增强层：
 
 ```ts
 import "@zsa233/frida-analykit-agent/rpc"
@@ -126,16 +126,9 @@ setImmediate(() => {
 })
 ```
 
-- `/elf` 当前提供 `ElfTools.createSymbolHooks(...)`、`ElfTools.dumpModule(...)` 和现有模块解析入口。
-- `ElfSymbolHooks` 是模块级 symbol hook 状态对象，支持 lazy symbol registry、`dlsym` 联动和显式签名 `attach(...)`。
-- `/elf/enhanced` 只在你手动 import 时提供常用 preset，不会自动进入 `globalThis` 或核心 bundle。
-- `dumpModule()` 会发送 `ELF_MODULE_DUMP_BEGIN -> BATCH(ELF_MODULE_DUMP_CHUNKS) -> ELF_MODULE_DUMP_END`。
-- Python 侧默认写到 `script.elftools.output_dir`，未配置时回退到 `agent.datadir/elftools`，输出布局是 `<output-root>/<tag?>/`，symbol call log 会写到同目录下的 `symbols.log`。
-- `tag` 会被归一到 ASCII-safe 单层 leaf；空 tag 仍表示根目录，dot-only 或归一后为空的 tag 会回退到 `default`。
-- RPC 模式下 `outputDir` 与 `relative_dump_dir` 仍会透传，但 host 侧只会把它们记录进 `manifest.json`；实际目录仍由 `script.elftools.output_dir` 和单层 `tag` 决定。
-- 每次 dump 默认会导出 `*.raw.so`、`*.fixed.so`、`fixups.json`、`symbols.json`、`proc_maps.txt` 和 `manifest.json`。
-- `fixups.json` 记录从 `raw` 重放到 `fixed` 的分阶段 patch；每个 stage 都直接归属到真实修复步骤，既可独立重放，也更方便分析是哪一段修复逻辑改写了哪些字段。
-- `fixups.json` 的字段缩写、stage 语义和重放规则见 [docs/elf-fixups.md](https://github.com/ZSA233/frida-analykit/blob/stable/docs/elf-fixups.md)。
+- `/elf` 提供模块解析、symbol hook 和 `dumpModule(...)` 主入口。
+- `/elf/enhanced` 只在手动 import 时提供常用 preset，不会自动进入 `globalThis` 或核心 bundle。
+- `dumpModule()` 会导出 raw/fixed ELF、`fixups.json`、符号和 manifest。`fixups.json` 的字段缩写、stage 语义和重放规则见 [docs/zh/elf-fixups.md](https://github.com/ZSA233/frida-analykit/blob/stable/docs/zh/elf-fixups.md)。
 
 ### DexTools
 
@@ -153,12 +146,8 @@ setImmediate(() => {
 ```
 
 - `DexTools` 当前提供 `enumerateClassLoaderDexFiles()` 和 `dumpAllDex(...)`。
-- `dumpAllDex()` 会发送 `DEX_DUMP_BEGIN -> BATCH(DEX_DUMP_FILES) -> DEX_DUMP_END`。
-- 默认最大批量大小来自 Python 配置 `script.rpc.batch_max_bytes`，agent 侧对应 `Config.BatchMaxBytes`。
-- 单个超大 dex 会单独成批发送而不会继续切片，Python 侧默认写到 `script.dextools.output_dir`，未配置时回退到 `agent.datadir/dextools`。
-- `tag` 会被归一到 ASCII-safe 单层 leaf；空 tag 仍表示根目录，dot-only 或归一后为空的 tag 会回退到 `default`。
-- RPC 模式下 `dumpDir` 仍会透传，但 host 侧只会把它记录进 `manifest.json`；实际目录仍由 `script.dextools.output_dir` 和单层 `tag` 决定。
-- Python 侧 dex dump 目录会写出 `manifest.json`，并在 `files` 字段中列出本次导出的 dex 文件；旧的 `classes.json` 不再保留。
+- `dumpAllDex(...)` 通过 RPC 批量发送 dex 文件，Python 侧按工作区配置落盘并写出 manifest。
+- 输出目录、batch 上限和 host 侧完成态属于 CLI / 工作区配置语义，优先看生成工作区 README 和 MCP 文档。
 
 ### JNI / native bindings
 
@@ -181,7 +170,7 @@ setImmediate(() => {
 - `jobject.$method(name, sig)`、`.$call(name, sig, ...args)`、`jclass.$staticMethod(name, sig)` 等 member facade 都要求显式 `sig`。
 - JNI 默认返回 wrapper，不自动转成 JS primitive 或 string。
 - accessor 提供 `withLocal(...)` 用于局部引用生命周期收口。
-- 导入 `native/libart`、`native/libssl`、`native/libc` 后，会按需注册对应全局对象。
+- 导入 `native/libart`、`native/libssl`、`native/libc` 后，会按需注册对应全局对象；未公开的内部路径不属于稳定 API。
 
 ## 调试与非公共内容
 
